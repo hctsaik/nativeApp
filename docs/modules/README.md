@@ -18,6 +18,10 @@
 | module_006 | 動物影像標記 | cv_framework | 啟用 | [module_006.md](module_006.md) |
 | module_008 | 影片追蹤標注 | cv_framework | 啟用 | [module_008.md](module_008.md) |
 | module_009 | 統一標注平台 | annotation_runner | 啟用 | [module_009.md](module_009.md) |
+| module_010 | Data Feeder | cv_framework | 啟用 | — |
+| module_012 | Annotation Session | cv_framework | 啟用 | [module_012.md](module_012.md) |
+| module_013 | Update | cv_framework | 啟用 | [module_013.md](module_013.md) |
+| sheet-annotation_workflow | 標注作業流程（套件）| sheet_runner | 啟用 | — |
 | sheet-edge-analysis | 邊緣品質分析（套件）| sheet_runner | 啟用 | [sheet_edge_analysis.md](sheet_edge_analysis.md) |
 | management-center | 管理中心 | management_runner | 啟用 | [management_center.md](management_center.md) |
 

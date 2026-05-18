@@ -333,7 +333,8 @@ def execute_logic(params: dict) -> dict:
     if not dry_run:
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_json_path = str(workspace_dir / f"update_result_{ts}.json")
+            out_dir = Path(source_folder) if source_folder else workspace_dir
+            output_json_path = str(out_dir / f"update_result_{ts}.json")
             output_data = {
                 "manifest_id": manifest_id,
                 "manifest_name": manifest_name,
@@ -343,7 +344,7 @@ def execute_logic(params: dict) -> dict:
                 "summary": summary,
                 "items": items,
             }
-            workspace_dir.mkdir(parents=True, exist_ok=True)
+            out_dir.mkdir(parents=True, exist_ok=True)
             Path(output_json_path).write_text(
                 json.dumps(output_data, ensure_ascii=False, indent=2),
                 encoding="utf-8",

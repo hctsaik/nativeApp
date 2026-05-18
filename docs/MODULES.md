@@ -1,7 +1,7 @@
 # 模組參考文件索引
 
 > 本文件已重組為模組化結構。各模組完整文件請見下方連結。
-> 最後更新：2026-05-16
+> 最後更新：2026-05-19
 
 ---
 
@@ -47,6 +47,10 @@ scripts/module_XXX/
 | Module 005 - 邊緣記錄查詢 | [module_005.md](modules/module_005.md) | — | — |
 | Module 006 - 動物影像標記 | [module_006.md](modules/module_006.md) | [scripts/module_006/README.md](../sidecar/python-engine/scripts/module_006/README.md) | guide.html（嵌入 App）|
 | Module 008 - 影片追蹤標注 | [module_008.md](modules/module_008.md) | [scripts/module_008/README.md](../sidecar/python-engine/scripts/module_008/README.md) | guide.html（嵌入 App）|
+| Module 010 - Data Feeder | — | — | — |
+| Module 012 - Annotation Session | [module_012.md](modules/module_012.md) | — | — |
+| Module 013 - Update | [module_013.md](modules/module_013.md) | — | — |
+| Sheet - 標注作業流程 | — | — | — |
 | Sheet - 邊緣品質分析 | [sheet_edge_analysis.md](modules/sheet_edge_analysis.md) | — | — |
 | 管理中心 | [management_center.md](modules/management_center.md) | — | — |
 

@@ -1,6 +1,6 @@
 # Annotation Common Component and X-AnyLabeling Integration
 
-Last updated: 2026-05-16 (module_006 UX redesign — Stepper + thumbnail grid + 3-agent review)
+Last updated: 2026-05-19 (module_012/013 annotation workflow — classification persistence fix)
 
 This document summarizes the current implementation state for the platform annotation common component and the X-AnyLabeling integration.
 
@@ -378,6 +378,47 @@ Browse 模式讀取 `labels_dir` 並直接顯示標注框，**不需執行步驟
 | X-AnyLabeling 4-point rectangle → height=0 validation fail | 改用 min/max 計算 bbox |
 | CJK label 亂碼 | 依序嘗試 msyh.ttc / msjh.ttc / mingliu.ttc / simsun.ttc |
 | 強化對比誤套用到原圖 | enhance 只傳入 `_draw_annotations()`，原圖 `st.image` 不套用 |
+
+## module_012 — 輕量 Annotation Session（無 annotation-core）
+
+`module_012` 是一個不依賴 `annotation-core` 的輕量標注工作流程，適用於需要快速標注 + 簡單分類的場景。
+
+### 與 annotation-core 方案的差異
+
+| 面向 | annotation-core（module_006/008/009） | 輕量方案（module_012/013） |
+|------|--------------------------------------|---------------------------|
+| 資料模型 | 完整 Dataset/Task/Annotation 模型 | 只有 manifest item list |
+| 標注儲存 | SQLite（catalog.sqlite）| 影像同目錄 `.json`（X-AnyLabeling 原生輸出） |
+| 分類儲存 | annotation-core classification 欄位 | workspace `classifications.json` |
+| 匯出格式 | COCO、YOLO、LabelMe | 原始 X-AnyLabeling JSON（不轉換） |
+| 適用場景 | 需要完整版本管控、多格式匯出 | 快速標注、直接用 X-AnyLabeling JSON 的下游任務 |
+
+### shared.json — 模組間 manifest 傳遞
+
+```
+{CIM_LOG_DIR}/config/shared.json
+  last_manifest_id: "..."    ← Data Feeder（module_010）每次執行後更新
+  last_manifest_name: "..."
+```
+
+module_012 和 module_013 都只讀此檔案決定使用哪個 manifest，確保整個流程使用同一個資料集版本。
+
+### Ghost Button 鍵盤快捷鍵模式
+
+module_012 Output page 使用 "Ghost Button" 模式實現鍵盤快捷鍵，避免在 UI 上顯示多餘按鈕：
+
+1. 以 `st.button()` 正常渲染按鈕（讓 Streamlit 處理點擊事件）
+2. 用 `MutationObserver` JS 即時將按鈕隱形化（`position:fixed; opacity:0; width:1px; height:1px`）
+3. 鍵盤事件監聽器用 `element.click()` 觸發隱形按鈕
+
+這個模式讓 Streamlit 的 session state 更新機制正常運作，同時不顯示多餘的 GUI 元件。
+
+### 詳細文件
+
+- [module_012.md](../modules/module_012.md)：Annotation Session 完整技術文件
+- [module_013.md](../modules/module_013.md)：Update 完整技術文件
+
+---
 
 ## Recommended Next Steps
 
