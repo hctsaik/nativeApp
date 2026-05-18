@@ -1,0 +1,15 @@
+id: module_001
+vendor: cimcore
+domain: cv
+name: OpenCV 影像處理
+version: "1.0.0"
+category: module
+description: 以 OpenCV 對影像進行基本處理操作（灰階、模糊、邊緣偵測等）
+author: system
+enabled: true
+tags:
+  - opencv
+  - image
+  - processing
+runner: cv_framework
+aliases: []

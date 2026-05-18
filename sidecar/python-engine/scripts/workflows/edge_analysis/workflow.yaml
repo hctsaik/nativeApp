@@ -1,0 +1,18 @@
+id: edge_analysis
+name: 邊緣品質分析
+description: 整合邊框生成、邊緣偵測與歷史查詢的完整工作流程
+version: "1.0.0"
+author: system
+steps:
+  - plugin_id: module_003
+    tab_label: "影像來源"
+    description: "生成測試邊框，或直接上傳影像"
+    optional: true
+  - plugin_id: module_004
+    tab_label: "偵測分析"
+    description: "邊緣偵測、量測指標，並儲存至資料庫"
+    optional: false
+  - plugin_id: module_005
+    tab_label: "歷史查詢"
+    description: "查詢歷史量測記錄"
+    optional: true

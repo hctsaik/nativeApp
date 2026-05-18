@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1a1a2e;
+    background: #f8f9fc;
+    padding: 20px;
+  }
+  h1 { font-size: 22px; color: #1565c0; margin-bottom: 6px; }
+  h2 { font-size: 16px; color: #1565c0; margin: 20px 0 8px; border-left: 4px solid #1565c0; padding-left: 10px; }
+  h3 { font-size: 14px; color: #333; margin: 12px 0 4px; }
+  p  { margin-bottom: 8px; color: #444; }
+
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 16px; }
+
+  /* ── 流程橫排 ── */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 14px 0;
+    flex-wrap: wrap;
+  }
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 110px;
+  }
+  .step-icon {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    margin-bottom: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+  }
+  .step-num {
+    font-size: 11px;
+    font-weight: 700;
+    color: #888;
+    margin-bottom: 2px;
+  }
+  .step-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #333;
+    max-width: 100px;
+  }
+  .arrow {
+    font-size: 20px;
+    color: #aaa;
+    padding: 0 4px;
+    margin-bottom: 20px;
+  }
+  .s1 .step-icon { background: #e3f2fd; }
+  .s2 .step-icon { background: #f3e5f5; }
+  .s3 .step-icon { background: #e8f5e9; }
+  .s4 .step-icon { background: #fff3e0; }
+  .s5 .step-icon { background: #fce4ec; }
+
+  /* ── 說明卡 ── */
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    border-left: 4px solid #1565c0;
+  }
+  .card.warn  { border-left-color: #f59e0b; }
+  .card.ok    { border-left-color: #16a34a; }
+  .card.tip   { border-left-color: #7c3aed; }
+
+  /* ── 對比圖 ── */
+  .compare { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
+  .compare-box {
+    flex: 1; min-width: 160px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .compare-box.good { background: #e8f5e9; border: 2px solid #4caf50; }
+  .compare-box.bad  { background: #ffebee; border: 2px solid #f44336; }
+  .compare-box svg  { display: block; margin: 0 auto 6px; }
+  .compare-label { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+  .compare-desc  { font-size: 11px; color: #555; }
+
+  /* ── 標籤色塊 ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  /* ── FAQ ── */
+  .faq-item { margin-bottom: 12px; }
+  .faq-q { font-weight: 700; color: #1565c0; margin-bottom: 3px; }
+  .faq-a { color: #444; font-size: 13px; }
+
+  /* ── 標注顏色圖例 ── */
+  .color-row { display: flex; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+  .color-chip {
+    display: flex; align-items: center; gap: 6px;
+    background: #fff; border-radius: 6px;
+    padding: 4px 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    font-size: 12px;
+  }
+  .dot { width: 14px; height: 14px; border-radius: 50%; }
+
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<h1>🏷 動物影像標記 — 使用指南</h1>
+<p class="subtitle">Module 006 | 適用於動物資料集的影像分類與 Bounding Box 標注</p>
+
+<hr>
+
+<!-- ── 流程圖 ── -->
+<h2>工作流程總覽</h2>
+
+<div class="flow">
+  <div class="step s1">
+    <div class="step-num">步驟①</div>
+    <div class="step-icon">📂</div>
+    <div class="step-label">設定資料夾路徑</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s2">
+    <div class="step-num">步驟②</div>
+    <div class="step-icon">▶</div>
+    <div class="step-label">點擊「執行」載入清單</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s3">
+    <div class="step-num">步驟③</div>
+    <div class="step-icon">🖱</div>
+    <div class="step-label">點擊表格選擇影像</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s4">
+    <div class="step-num">步驟④</div>
+    <div class="step-icon">🏷</div>
+    <div class="step-label">分類 + 畫標注框</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s5">
+    <div class="step-num">步驟⑤</div>
+    <div class="step-icon">💾</div>
+    <div class="step-label">儲存後自動跳下一張</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── 步驟一 ── -->
+<h2>① 設定資料夾路徑</h2>
+<div class="card">
+  <h3>📌 必填項目</h3>
+  <p><strong>影像資料夾路徑</strong>：包含動物圖片的資料夾（預設 <code>testData/animal/</code>）</p>
+  <p><strong>資料庫路徑</strong>：存放標記記錄的 SQLite 檔案（預設 <code>testData/animal/animals.db</code>）</p>
+</div>
+<div class="card warn">
+  <h3>⚠️ 最常犯的錯誤</h3>
+  <p>路徑打錯，或資料庫尚未建立。如果按下「執行」後看到「資料庫不存在」，請確認 <code>animals.db</code> 的路徑是否正確。</p>
+</div>
+
+<!-- ── 步驟二 ── -->
+<h2>② 執行並載入影像清單</h2>
+<p>填好路徑後，點選上方 <strong>▶ 執行</strong> 按鈕。系統會從資料庫讀取影像清單，顯示在右側表格。</p>
+<div class="card ok">
+  <h3>✅ 成功的樣子</h3>
+  <p>右側顯示「共 N 筆 | 已分類 M 筆 | 已標注 K 筆」統計列，以及可點擊的影像清單表格。</p>
+</div>
+
+<!-- ── 步驟三 ── -->
+<h2>③ 從清單選擇影像</h2>
+<p>在表格中點擊任意一列，右側就會出現該影像的預覽。</p>
+<p>可用上方的 <strong>類別篩選</strong>（全部 / 貓 / 狗 / 大象）快速縮小範圍，找出尚未標記的影像。</p>
+
+<!-- ── 步驟四 ── -->
+<h2>④ 分類標記與 Bounding Box 標注</h2>
+
+<h3>4a — 分類標記</h3>
+<p>在影像預覽右側選擇正確類別，然後點選 <strong>Submit</strong>。系統會自動跳到下一張尚未分類的影像。</p>
+
+<div class="compare">
+  <div class="compare-box good">
+    <div class="compare-label">✅ 正確</div>
+    <svg width="100" height="60" viewBox="0 0 100 60">
+      <rect x="5" y="5" width="90" height="50" rx="4" fill="#e8f5e9" stroke="#4caf50" stroke-width="2"/>
+      <rect x="25" y="15" width="50" height="30" rx="2" fill="none" stroke="#4caf50" stroke-width="2.5"/>
+      <text x="50" y="55" text-anchor="middle" font-size="9" fill="#2e7d32">框緊貼動物輪廓</text>
+    </svg>
+    <div class="compare-desc">框剛好包圍動物<br>沒有多餘空白</div>
+  </div>
+  <div class="compare-box bad">
+    <div class="compare-label">❌ 避免</div>
+    <svg width="100" height="60" viewBox="0 0 100 60">
+      <rect x="5" y="5" width="90" height="50" rx="4" fill="#ffebee" stroke="#f44336" stroke-width="2"/>
+      <rect x="10" y="8" width="80" height="44" rx="2" fill="none" stroke="#f44336" stroke-width="2.5" stroke-dasharray="4"/>
+      <rect x="30" y="18" width="40" height="22" rx="2" fill="none" stroke="#888" stroke-width="1.5"/>
+      <text x="50" y="55" text-anchor="middle" font-size="9" fill="#c62828">框太鬆（有大片空白）</text>
+    </svg>
+    <div class="compare-desc">框比動物大很多<br>影響追蹤精度</div>
+  </div>
+  <div class="compare-box bad">
+    <div class="compare-label">❌ 避免</div>
+    <svg width="100" height="60" viewBox="0 0 100 60">
+      <rect x="5" y="5" width="90" height="50" rx="4" fill="#ffebee" stroke="#f44336" stroke-width="2"/>
+      <rect x="20" y="10" width="55" height="42" rx="2" fill="none" stroke="#888" stroke-width="1.5"/>
+      <rect x="35" y="15" width="55" height="30" rx="2" fill="none" stroke="#f44336" stroke-width="2.5" stroke-dasharray="4"/>
+      <text x="50" y="55" text-anchor="middle" font-size="9" fill="#c62828">框切到動物邊緣</text>
+    </svg>
+    <div class="compare-desc">框裁切到動物<br>部分身體不在框內</div>
+  </div>
+</div>
+
+<h3>4b — Bounding Box 標注</h3>
+<p>點擊 <strong>🏷 標注</strong> 按鈕進入標注畫布，在動物身上的目標部位拖拉畫框。</p>
+
+<div class="card">
+  <h3>標注類別顏色對應</h3>
+  <div class="color-row">
+    <div class="color-chip"><div class="dot" style="background:#ff5050"></div>貓</div>
+    <div class="color-chip"><div class="dot" style="background:#50ff50"></div>狗</div>
+    <div class="color-chip"><div class="dot" style="background:#5050ff"></div>大象</div>
+    <div class="color-chip"><div class="dot" style="background:#ffc800"></div>unknown</div>
+  </div>
+</div>
+
+<div class="card tip">
+  <h3>💡 標注小技巧</h3>
+  <p>• 同一張影像可以畫<strong>多個框</strong>（例如：眼睛、鼻子各一個框）</p>
+  <p>• 畫完所有框後，務必點 <strong>💾 儲存標注</strong>，否則重新整理頁面後會消失</p>
+  <p>• 畫錯了？點 <strong>🗑 清除全部</strong> 重來</p>
+</div>
+
+<!-- ── 步驟五 ── -->
+<h2>⑤ 儲存後自動跳至下一張</h2>
+<p>點選 <strong>Submit</strong> 或 <strong>💾 儲存標注</strong> 後，系統會自動跳至下一張尚未完成的影像。</p>
+<p>統計列（共 N 筆 | 已分類 M 筆 | 已標注 K 筆）會即時更新，讓你知道進度。</p>
+
+<hr>
+
+<!-- ── 標注類別設定 ── -->
+<h2>修改標注類別</h2>
+<p>預設標注類別為「眼睛、鼻子、嘴巴」。若需要新增或修改，請聯絡管理員調整 <strong>Module 006 設定</strong>（位於 <code>config/module_006.json</code>）。</p>
+
+<hr>
+
+<!-- ── FAQ ── -->
+<h2>常見問題</h2>
+
+<div class="faq-item">
+  <div class="faq-q">Q：點擊「執行」後畫面空白，什麼都沒有？</div>
+  <div class="faq-a">A：請確認「資料庫路徑」設定正確，且 <code>animals.db</code> 確實存在。也可嘗試點選「進階：路徑設定」手動輸入完整路徑。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：儲存標注後，頁面沒有自動跳到下一張？</div>
+  <div class="faq-a">A：如果所有影像都已標注完畢，系統就不會再跳了。查看統計列確認「已標注」數量是否等於總筆數。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：標注框畫了沒有反應？</div>
+  <div class="faq-a">A：請確認你已點擊 <strong>🏷 標注</strong> 進入標注模式（按鈕會變成「🏷 標注中」）。在預覽模式下無法畫框。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：匯出的標注檔在哪裡？</div>
+  <div class="faq-a">A：每張影像的標注以 <code>{檔名}_annotations.json</code> 的格式，儲存在與影像相同的資料夾中。</div>
+</div>
+
+</body>
+</html>

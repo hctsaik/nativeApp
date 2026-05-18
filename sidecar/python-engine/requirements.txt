@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+streamlit
+requests
+pandas
+numpy
+scipy
+Pillow
+matplotlib
+scikit-learn
+opencv-python-headless
+pyinstaller
+streamlit-image-annotation
+streamlit-autorefresh
+pyyaml
+psutil
+

@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CIM — 新增 CV 模組開發指南</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #5b8dee;
+      --accent2: #3ecf8e;
+      --warn: #f0a030;
+      --danger: #e05c5c;
+      --text: #e2e8f0;
+      --muted: #8892a4;
+      --code-bg: #141722;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    /* ── Layout ── */
+    .layout { display: flex; min-height: 100vh; }
+
+    nav {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 2rem 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    nav .logo {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--accent);
+      padding: 0 1.5rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1rem;
+      letter-spacing: .04em;
+    }
+    nav ul { list-style: none; }
+    nav ul li a {
+      display: block;
+      padding: .45rem 1.5rem;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .88rem;
+      border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    nav ul li a:hover,
+    nav ul li a.active {
+      color: var(--text);
+      background: var(--surface2);
+      border-left-color: var(--accent);
+    }
+    nav ul li.section-header {
+      padding: .9rem 1.5rem .3rem;
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+    }
+
+    main {
+      flex: 1;
+      max-width: 880px;
+      padding: 3rem 2.5rem;
+    }
+
+    /* ── Typography ── */
+    h1 { font-size: 2rem; font-weight: 700; color: var(--accent); margin-bottom: .4rem; }
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-top: 3rem;
+      margin-bottom: 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    h3 { font-size: 1.05rem; font-weight: 600; margin-top: 1.6rem; margin-bottom: .6rem; color: var(--accent2); }
+    p { margin-bottom: .9rem; color: var(--text); }
+    ul, ol { margin: .5rem 0 1rem 1.3rem; }
+    li { margin-bottom: .35rem; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    strong { color: var(--text); font-weight: 600; }
+    .muted { color: var(--muted); font-size: .88rem; }
+
+    /* ── Callouts ── */
+    .callout {
+      display: flex;
+      gap: .75rem;
+      padding: .9rem 1.1rem;
+      border-radius: 8px;
+      margin: 1.2rem 0;
+      font-size: .9rem;
+    }
+    .callout .icon { font-size: 1.1rem; flex-shrink: 0; margin-top: .05rem; }
+    .callout.info  { background: rgba(91,141,238,.12); border: 1px solid rgba(91,141,238,.3); }
+    .callout.ok    { background: rgba(62,207,142,.12); border: 1px solid rgba(62,207,142,.3); }
+    .callout.warn  { background: rgba(240,160,48,.12);  border: 1px solid rgba(240,160,48,.3); }
+    .callout.danger{ background: rgba(224,92,92,.12);   border: 1px solid rgba(224,92,92,.3); }
+
+    /* ── Code ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.3rem;
+      overflow-x: auto;
+      font-size: .83rem;
+      line-height: 1.6;
+      margin: .8rem 0 1.2rem;
+      position: relative;
+    }
+    pre .label {
+      position: absolute;
+      top: .4rem;
+      right: .7rem;
+      font-size: .7rem;
+      color: var(--muted);
+      font-family: monospace;
+    }
+    code { font-family: "Cascadia Code", "Fira Code", monospace; }
+    p code, li code {
+      background: var(--surface2);
+      padding: .1em .4em;
+      border-radius: 4px;
+      font-size: .85em;
+      color: var(--accent2);
+    }
+
+    /* ── File tree ── */
+    .tree {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.3rem;
+      font-family: monospace;
+      font-size: .85rem;
+      line-height: 1.9;
+      margin: .8rem 0 1.2rem;
+    }
+    .tree .dir  { color: var(--accent); }
+    .tree .new  { color: var(--accent2); font-weight: 600; }
+    .tree .note { color: var(--muted); }
+
+    /* ── Table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+      margin: 1rem 0 1.4rem;
+    }
+    th {
+      background: var(--surface2);
+      text-align: left;
+      padding: .55rem .9rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      color: var(--accent);
+    }
+    td {
+      padding: .5rem .9rem;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:hover td { background: rgba(255,255,255,.025); }
+    .badge {
+      display: inline-block;
+      padding: .1em .5em;
+      border-radius: 4px;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+    .badge.must  { background: rgba(224,92,92,.2);   color: #e05c5c; border: 1px solid rgba(224,92,92,.4); }
+    .badge.no    { background: rgba(240,160,48,.15);  color: #f0a030; border: 1px solid rgba(240,160,48,.35); }
+    .badge.ok2   { background: rgba(62,207,142,.15);  color: #3ecf8e; border: 1px solid rgba(62,207,142,.35); }
+
+    /* ── Step badges ── */
+    .steps { counter-reset: step; list-style: none; margin-left: 0; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      align-items: flex-start;
+    }
+    .steps li::before {
+      content: counter(step);
+      flex-shrink: 0;
+      width: 1.8rem;
+      height: 1.8rem;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: .8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Section anchor ── */
+    h2[id], h3[id] { scroll-margin-top: 1.5rem; }
+
+    /* ── Hero banner ── */
+    .hero {
+      background: linear-gradient(135deg, rgba(91,141,238,.15), rgba(62,207,142,.08));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      margin-bottom: 2.5rem;
+    }
+    .hero .subtitle { color: var(--muted); margin-top: .3rem; font-size: .95rem; }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+<!-- ══════════ NAV ══════════ -->
+<nav>
+  <div class="logo">CIM Platform<br><span style="font-weight:400;color:var(--muted)">模組開發指南</span></div>
+  <ul>
+    <li class="section-header">快速開始</li>
+    <li><a href="#overview">概覽</a></li>
+    <li><a href="#checklist">開發清單</a></li>
+
+    <li class="section-header">核心概念</li>
+    <li><a href="#contract">三層契約</a></li>
+    <li><a href="#plugin-yaml">plugin.yaml</a></li>
+    <li><a href="#json-rules">JSON 序列化規則</a></li>
+
+    <li class="section-header">撰寫模組</li>
+    <li><a href="#input-layer">Input 層</a></li>
+    <li><a href="#process-layer">Process 層</a></li>
+    <li><a href="#output-layer">Output 層</a></li>
+    <li><a href="#sqlite">SQLite 持久儲存</a></li>
+    <li><a href="#navigation">跨模組導航</a></li>
+
+    <li class="section-header">品質保證</li>
+    <li><a href="#testing">測試規範</a></li>
+    <li><a href="#common-patterns">常用 Pattern</a></li>
+
+    <li class="section-header">參考</li>
+    <li><a href="#module-list">現有模組列表</a></li>
+    <li><a href="#faq">FAQ</a></li>
+  </ul>
+</nav>
+
+<!-- ══════════ MAIN ══════════ -->
+<main>
+
+  <section id="overview">
+    <div class="hero">
+      <h1>新增 CV 模組指南</h1>
+      <p class="subtitle">CIM CV Framework — 工程師版 · 2026-05</p>
+    </div>
+
+    <p>
+      CIM Platform 採用 <strong>plugin.yaml 自動掃描</strong> 機制。
+      只需在 <code>scripts/</code> 資料夾建立子目錄並放入 <code>plugin.yaml</code> 與三個 Python 檔案，
+      重啟 sidecar 後新模組即自動出現在選單中。<strong>無需修改 engine.py</strong>。
+    </p>
+
+    <div class="callout ok">
+      <span class="icon">✅</span>
+      <div>自 2026-05 起，<code>engine.py</code> 在啟動時自動掃描所有 <code>scripts/*/plugin.yaml</code>。
+      新模組只需建立資料夾與 yaml，不需要手動 seed 或修改任何共用檔案。</div>
+    </div>
+  </section>
+
+  <!-- ══ CHECKLIST ══ -->
+  <section id="checklist">
+    <h2 id="checklist">開發清單</h2>
+    <p>新增一個模組共需完成以下步驟：</p>
+    <ol class="steps">
+      <li>確認 module ID 不重複（執行 <code>ls sidecar/python-engine/scripts/</code>）</li>
+      <li>建立資料夾 <code>scripts/module_{NNN}/</code></li>
+      <li>撰寫 <code>plugin.yaml</code>（必填，engine.py 自動讀取）</li>
+      <li>撰寫 <code>__init__.py</code></li>
+      <li>撰寫 <code>{NNN}_input.py</code> — <code>render_input() → dict</code></li>
+      <li>撰寫 <code>{NNN}_process.py</code> — <code>execute_logic(params) → dict</code>（禁止 import streamlit）</li>
+      <li>撰寫 <code>{NNN}_output.py</code> — <code>render_output(result) → None</code></li>
+      <li>撰寫 <code>{NNN}_process_test.py</code> — 至少 8 個 pytest 測試</li>
+      <li>執行 <code>pytest scripts/module_{NNN}/</code> 全部通過</li>
+      <li>重啟 sidecar，確認模組出現在選單</li>
+    </ol>
+  </section>
+
+  <!-- ══ CONTRACT ══ -->
+  <section id="contract">
+    <h2 id="contract">三層契約</h2>
+    <p>每個模組由三個 Python 檔案組成，框架按序呼叫：</p>
+
+    <div class="tree">
+      <span class="dir">scripts/module_NNN/</span><br>
+      ├── <span class="new">__init__.py</span>           <span class="note"># MODULE_NAME = "模組名稱"</span><br>
+      ├── <span class="new">plugin.yaml</span>           <span class="note"># 模組唯一真相來源</span><br>
+      ├── <span class="new">{NNN}_input.py</span>        <span class="note"># render_input() → dict</span><br>
+      ├── <span class="new">{NNN}_process.py</span>      <span class="note"># execute_logic(params) → dict</span><br>
+      ├── <span class="new">{NNN}_output.py</span>       <span class="note"># render_output(result) → None</span><br>
+      └── <span class="new">{NNN}_process_test.py</span> <span class="note"># pytest，至少 8 個測試</span>
+    </div>
+
+    <h3>執行流程</h3>
+    <p>
+      <code>render_input()</code>
+      → 使用者按 <strong>▶ 執行</strong>
+      → <code>execute_logic(params)</code>
+      → <code>render_output(result)</code>
+    </p>
+
+    <table>
+      <tr>
+        <th>層</th><th>檔案</th><th>必須實作</th><th>限制</th>
+      </tr>
+      <tr>
+        <td>Input</td>
+        <td><code>{NNN}_input.py</code></td>
+        <td><span class="badge must">MUST</span> <code>render_input() → dict</code></td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>Process</td>
+        <td><code>{NNN}_process.py</code></td>
+        <td><span class="badge must">MUST</span> <code>execute_logic(params: dict) → dict</code></td>
+        <td><span class="badge no">禁止</span> <code>import streamlit</code></td>
+      </tr>
+      <tr>
+        <td>Output</td>
+        <td><code>{NNN}_output.py</code></td>
+        <td><span class="badge must">MUST</span> <code>render_output(result: dict) → None</code></td>
+        <td>—</td>
+      </tr>
+    </table>
+
+    <div class="callout warn">
+      <span class="icon">⚠️</span>
+      <div>
+        <code>execute_logic()</code> 的回傳值會透過 JSON 序列化後傳給 <code>render_output()</code>。
+        只能回傳 JSON-safe 型別（見下節）。
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ PLUGIN.YAML ══ -->
+  <section id="plugin-yaml">
+    <h2 id="plugin-yaml">plugin.yaml</h2>
+    <p>plugin.yaml 是模組的唯一設定來源。engine.py 在啟動時掃描並自動寫入 DB，不需要手動 seed。</p>
+
+<pre><code class="label">plugin.yaml</code><span style="color:#8892a4"># 必填欄位</span>
+id: module_014                 <span style="color:#8892a4"># 唯一識別碼，格式 module_NNN</span>
+vendor: cimcore                <span style="color:#8892a4"># 核心模組用 cimcore；外部貢獻者用 partner_{github_id}</span>
+domain: cv                     <span style="color:#8892a4"># cv | edge | annotation | pipeline</span>
+name: 模組名稱                  <span style="color:#8892a4"># 顯示在 Portal 選單</span>
+version: "1.0.0"
+category: module
+description: 一句話說明功能
+author: yourname
+enabled: true                  <span style="color:#8892a4"># false = 停用（不出現在選單，但仍寫入 DB）</span>
+tags: [tag1, tag2]
+runner: cv_framework           <span style="color:#8892a4"># 固定填 cv_framework（一般 CV 模組）</span>
+input_file: 014_input.py
+output_file: 014_output.py
+process_file: 014_process.py
+aliases: []                    <span style="color:#8892a4"># 未來 ID 重命名時填舊 ID，保持向下相容</span></code></pre>
+
+    <h3>Runner 類型</h3>
+    <table>
+      <tr><th>runner 值</th><th>用途</th><th>對應 script</th></tr>
+      <tr><td><code>cv_framework</code></td><td>一般 CV / 標注模組</td><td><code>cv_framework_runner.py</code></td></tr>
+      <tr><td><code>annotation_runner</code></td><td>複雜標注平台（內嵌外部 UI）</td><td><code>annotation_runner.py</code></td></tr>
+      <tr><td><code>sheet</code></td><td>試算表型工具</td><td><code>sheet_runner.py</code></td></tr>
+    </table>
+
+    <h3>Vendor 命名規範</h3>
+    <table>
+      <tr><th>情境</th><th>vendor 值</th></tr>
+      <tr><td>核心團隊開發</td><td><code>cimcore</code></td></tr>
+      <tr><td>外部貢獻者 / 合作夥伴</td><td><code>partner_{github_id}</code>（如 <code>partner_johndoe</code>）</td></tr>
+    </table>
+  </section>
+
+  <!-- ══ JSON RULES ══ -->
+  <section id="json-rules">
+    <h2 id="json-rules">JSON 序列化規則（最重要）</h2>
+    <p>
+      <code>execute_logic()</code> 的回傳值會序列化為 JSON，再由 <code>render_output()</code> 讀取。
+      只能回傳以下型別：
+    </p>
+
+    <table>
+      <tr><th>類型</th><th>狀態</th><th>處理方式</th></tr>
+      <tr><td><code>str, int, float, bool, None</code></td><td><span class="badge ok2">允許</span></td><td>直接回傳</td></tr>
+      <tr><td><code>list, dict</code></td><td><span class="badge ok2">允許</span></td><td>直接回傳（元素亦須符合規則）</td></tr>
+      <tr><td><code>bytes</code></td><td><span class="badge must">禁止</span></td><td>轉 <code>base64.b64encode(data).decode("ascii")</code></td></tr>
+      <tr><td><code>numpy.ndarray</code></td><td><span class="badge must">禁止</span></td><td><code>arr.tolist()</code> 或 base64</td></tr>
+      <tr><td><code>datetime</code></td><td><span class="badge must">禁止</span></td><td><code>dt.isoformat()</code></td></tr>
+      <tr><td><code>tuple</code></td><td><span class="badge no">注意</span></td><td>序列化後變 list，render_output 需轉回 tuple</td></tr>
+    </table>
+
+<pre><code><span style="color:#3ecf8e"># ✅ 正確：bytes 轉 base64</span>
+import base64, io
+from PIL import Image
+
+def execute_logic(params: dict) -> dict:
+    img: Image.Image = ...          <span style="color:#8892a4"># 處理後的圖片</span>
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return {
+        "image_b64": base64.b64encode(buf.getvalue()).decode("ascii"),
+        "width": img.width,
+        "height": img.height,
+    }
+
+<span style="color:#e05c5c"># ❌ 錯誤：直接回傳 bytes 或 ndarray</span>
+return {"image_bytes": buf.getvalue()}   <span style="color:#8892a4"># bytes → JSON 序列化失敗</span>
+return {"array": np_array}               <span style="color:#8892a4"># ndarray → JSON 序列化失敗</span></code></pre>
+  </section>
+
+  <!-- ══ INPUT LAYER ══ -->
+  <section id="input-layer">
+    <h2 id="input-layer">撰寫 Input 層</h2>
+    <p><code>render_input()</code> 負責渲染 Streamlit UI 並收集使用者輸入，最後 return dict。</p>
+
+<pre><code class="label">{NNN}_input.py</code>import streamlit as st
+
+def render_input() -> dict:
+    st.subheader("參數設定")
+
+    <span style="color:#8892a4"># 文字輸入</span>
+    threshold = st.slider("閾值", 0, 255, 128)
+
+    <span style="color:#8892a4"># 影像上傳（重要：只傳 bytes，不傳 Image 物件）</span>
+    uploaded = st.file_uploader("上傳影像", type=["jpg", "jpeg", "png"])
+    file_bytes = uploaded.read() if uploaded else None
+    image_name = uploaded.name   if uploaded else ""
+
+    return {
+        "threshold": threshold,
+        "file_bytes": file_bytes,
+        "image_name": image_name,
+    }</code></pre>
+
+    <h3>通知元件</h3>
+    <p>使用 <code>st.toast</code> 而非 <code>st.success</code>（後者佔版面）：</p>
+<pre><code>st.toast("儲存成功！", icon="✅")
+st.toast("操作失敗", icon="❌")</code></pre>
+
+    <h3>日期區間</h3>
+<pre><code>import importlib.util
+from pathlib import Path
+
+def _load_shared(name: str):
+    path = Path(__file__).resolve().parent.parent / "shared" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+_ui = _load_shared("ui_components")
+
+def render_input() -> dict:
+    date_from, date_to = _ui.date_input_range()
+    return {"date_from": str(date_from), "date_to": str(date_to)}</code></pre>
+  </section>
+
+  <!-- ══ PROCESS LAYER ══ -->
+  <section id="process-layer">
+    <h2 id="process-layer">撰寫 Process 層</h2>
+    <p>
+      <code>execute_logic()</code> 是純運算函式。<strong>嚴禁 import streamlit</strong>，
+      因為此層在 sidecar 的獨立 process 中執行，且需要被 pytest 測試。
+    </p>
+
+<pre><code class="label">{NNN}_process.py</code>import base64
+import io
+from PIL import Image
+
+<span style="color:#e05c5c"># ❌ 絕對不能在這裡 import streamlit</span>
+
+def execute_logic(params: dict) -> dict:
+    file_bytes: bytes | None = params.get("file_bytes")
+    threshold: int = params.get("threshold", 128)
+
+    if not file_bytes:
+        return {"error": "no_image"}
+
+    img = Image.open(io.BytesIO(file_bytes)).convert("L")
+    result = img.point(lambda p: 255 if p > threshold else 0)
+
+    buf = io.BytesIO()
+    result.save(buf, format="PNG")
+
+    return {
+        "image_b64": base64.b64encode(buf.getvalue()).decode("ascii"),
+        "image_name": params.get("image_name", "output.png"),
+        "threshold_used": threshold,
+    }</code></pre>
+  </section>
+
+  <!-- ══ OUTPUT LAYER ══ -->
+  <section id="output-layer">
+    <h2 id="output-layer">撰寫 Output 層</h2>
+<pre><code class="label">{NNN}_output.py</code>import base64
+import streamlit as st
+
+def render_output(result: dict) -> None:
+    if result.get("error"):
+        st.error(f"錯誤：{result['error']}")
+        return
+
+    st.subheader("處理結果")
+
+    image_b64: str = result.get("image_b64", "")
+    if image_b64:
+        image_bytes = base64.b64decode(image_b64)
+        st.image(image_bytes, caption=result.get("image_name", ""))
+
+    st.metric("使用閾值", result.get("threshold_used", "—"))</code></pre>
+
+    <h3>影像在表格中的呈現</h3>
+    <p>不要把 <code>st.image</code> 放在 table cell 裡。改用 <code>@st.dialog</code>：</p>
+<pre><code>@st.dialog("影像預覽", width="large")
+def _show_preview(rec: dict) -> None:
+    if rec.get("image_b64"):
+        st.image(base64.b64decode(rec["image_b64"]))
+
+def render_output(result: dict) -> None:
+    rows = result.get("records", [])
+    for rec in rows:
+        cols = st.columns([3, 1])
+        cols[0].write(rec["name"])
+        if cols[1].button("預覽", key=f"view_{rec['id']}"):
+            _show_preview(rec)</code></pre>
+  </section>
+
+  <!-- ══ SQLITE ══ -->
+  <section id="sqlite">
+    <h2 id="sqlite">SQLite 持久儲存</h2>
+
+    <div class="callout warn">
+      <span class="icon">⚠️</span>
+      <div>
+        DB 路徑必須在<strong>呼叫時</strong>解析，不能在 import 時解析。
+        否則 pytest 的 <code>monkeypatch</code> 無法覆蓋 <code>CIM_LOG_DIR</code>。
+      </div>
+    </div>
+
+<pre><code class="label">{NNN}_process.py — SQLite 樣板</code>import os
+import sqlite3
+from pathlib import Path
+
+<span style="color:#e05c5c"># ❌ 錯誤：import 時解析（monkeypatch 失效）</span>
+# DB_PATH = Path(os.environ.get("CIM_LOG_DIR", "/tmp")) / "records.sqlite"
+
+<span style="color:#3ecf8e"># ✅ 正確：函式內解析</span>
+def _db_path() -> Path:
+    return Path(os.environ.get("CIM_LOG_DIR", "/tmp")) / "my_records.sqlite"
+
+def _ensure_db(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS my_records (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            name  TEXT NOT NULL,
+            score REAL,
+            ts    TEXT
+        )
+    """)
+    <span style="color:#8892a4"># 安全遷移：用 PRAGMA 而非直接 ALTER（欄位已存在不報錯）</span>
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(my_records)").fetchall()}
+    if "new_column" not in existing:
+        conn.execute("ALTER TABLE my_records ADD COLUMN new_column TEXT")
+
+def execute_logic(params: dict) -> dict:
+    with sqlite3.connect(_db_path()) as conn:
+        _ensure_db(conn)
+        conn.execute(
+            "INSERT INTO my_records (name, score, ts) VALUES (?, ?, ?)",
+            (params["name"], params["score"], params["ts"])
+        )
+        conn.commit()
+    return {"saved": True}</code></pre>
+  </section>
+
+  <!-- ══ NAVIGATION ══ -->
+  <section id="navigation">
+    <h2 id="navigation">跨模組導航（SWITCH_TAB）</h2>
+    <p>若模組執行完需要跳轉到另一個模組，使用 <code>postMessage</code> 通知 Portal：</p>
+
+<pre><code class="label">{NNN}_output.py — 跨模組導航</code>import json
+import streamlit as st
+import streamlit.components.v1 as components
+
+def _post_message(msg_type: str, payload: dict) -> None:
+    blob = json.dumps({
+        "type": msg_type,
+        <span style="color:#e05c5c">"source": "cim-platform",</span>  <span style="color:#8892a4"># ← 必填，缺少此欄位訊息會被 Portal 靜默丟棄</span>
+        "payload": payload,
+        "_cim": True,
+    })
+    components.html(f"&lt;script&gt;window.top.postMessage({blob}, '*');&lt;/script&gt;", height=0)
+
+def render_output(result: dict) -> None:
+    st.success("處理完成")
+
+    if st.button("📁 前往 Update →", type="primary"):
+        _post_message("SWITCH_TAB", {
+            "plugin_id": "module_013",
+            "tab": "input",
+        })</code></pre>
+
+    <div class="callout danger">
+      <span class="icon">🚫</span>
+      <div>
+        <strong><code>source: "cim-platform"</code> 為必填。</strong>
+        Portal 的 <code>isProtocolMessage()</code> 會驗證此欄位，缺少則訊息靜默丟棄。
+        此為常見錯誤，且不會有任何錯誤提示。
+      </div>
+    </div>
+
+    <h3>Navigation Race Condition</h3>
+    <p>
+      Portal 每 2 秒 polling 一次 result file mtime。若模組執行後需要跳頁，
+      結果檔案寫入（觸發 polling）會早於 <code>components.html()</code> 的 postMessage 觸發。
+    </p>
+    <p>
+      Portal 已內建保護：<code>EXECUTE_START</code> 設定 10 秒 suppression；
+      <code>SWITCH_TAB</code> handler 再延長 6 秒。合計保護約 16 秒不被 polling 覆蓋。
+      一般情況下不需要額外處理。
+    </p>
+
+    <h3>可用 MessageTypes</h3>
+    <table>
+      <tr><th>type</th><th>用途</th><th>payload</th></tr>
+      <tr><td><code>SWITCH_TAB</code></td><td>跳轉到指定模組</td><td><code>{plugin_id, tab}</code></td></tr>
+      <tr><td><code>EXECUTE_START</code></td><td>通知 Portal 開始執行（框架自動送出）</td><td><code>{}</code></td></tr>
+      <tr><td><code>EXECUTE_COMPLETE</code></td><td>通知 Portal 執行完畢（框架自動送出）</td><td><code>{success, error?}</code></td></tr>
+    </table>
+  </section>
+
+  <!-- ══ TESTING ══ -->
+  <section id="testing">
+    <h2 id="testing">測試規範</h2>
+    <p>每個模組至少 8 個 pytest 測試，覆蓋 happy path、edge case、與錯誤處理。</p>
+
+<pre><code class="label">{NNN}_process_test.py</code>import os
+import pytest
+from pathlib import Path
+from {NNN}_process import execute_logic
+
+<span style="color:#8892a4"># ─── Fixtures ───────────────────────────────────────────────────────</span>
+
+@pytest.fixture
+def tmp_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path))
+    return tmp_path
+
+def _make_png_bytes() -> bytes:
+    from PIL import Image
+    import io
+    img = Image.new("RGB", (4, 4), color=(128, 128, 128))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+<span style="color:#8892a4"># ─── Happy path ─────────────────────────────────────────────────────</span>
+
+def test_returns_image_b64():
+    result = execute_logic({"file_bytes": _make_png_bytes(), "threshold": 100})
+    assert "image_b64" in result
+    assert isinstance(result["image_b64"], str)
+
+def test_image_b64_is_valid_base64():
+    import base64
+    result = execute_logic({"file_bytes": _make_png_bytes(), "threshold": 100})
+    decoded = base64.b64decode(result["image_b64"])
+    assert len(decoded) > 0
+
+def test_threshold_applied():
+    result = execute_logic({"file_bytes": _make_png_bytes(), "threshold": 200})
+    assert result.get("threshold_used") == 200
+
+def test_default_threshold():
+    result = execute_logic({"file_bytes": _make_png_bytes()})
+    assert result.get("threshold_used") == 128
+
+<span style="color:#8892a4"># ─── Edge cases ─────────────────────────────────────────────────────</span>
+
+def test_no_image_returns_error():
+    result = execute_logic({})
+    assert result.get("error") == "no_image"
+
+def test_image_name_preserved():
+    result = execute_logic({"file_bytes": _make_png_bytes(), "image_name": "test.png"})
+    assert result.get("image_name") == "test.png"
+
+def test_threshold_zero():
+    result = execute_logic({"file_bytes": _make_png_bytes(), "threshold": 0})
+    assert "error" not in result
+
+def test_threshold_max():
+    result = execute_logic({"file_bytes": _make_png_bytes(), "threshold": 255})
+    assert "error" not in result</code></pre>
+
+    <h3>執行測試</h3>
+<pre><code><span style="color:#8892a4"># 執行單一模組的測試</span>
+pytest sidecar/python-engine/scripts/module_014/ -v
+
+<span style="color:#8892a4"># 執行所有模組測試</span>
+pytest sidecar/python-engine/scripts/ -v</code></pre>
+  </section>
+
+  <!-- ══ COMMON PATTERNS ══ -->
+  <section id="common-patterns">
+    <h2 id="common-patterns">常用 Pattern</h2>
+
+    <h3>載入 shared 模組</h3>
+    <p>避免依賴 <code>sys.path</code>，改用 <code>importlib.util</code>：</p>
+<pre><code>import importlib.util
+from pathlib import Path
+
+def _load_shared(name: str):
+    path = Path(__file__).resolve().parent.parent / "shared" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+_db_shared = _load_shared("db_utils")   <span style="color:#8892a4"># 按需載入</span></code></pre>
+
+    <h3>查詢其他模組的 DB</h3>
+<pre><code>def _query_other_module_db() -> list[dict]:
+    other_db = Path(os.environ.get("CIM_LOG_DIR", "/tmp")) / "other_records.sqlite"
+    if not other_db.exists():
+        return []
+    with sqlite3.connect(other_db) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM other_table ORDER BY id DESC").fetchall()
+    return [dict(r) for r in rows]</code></pre>
+
+    <h3>完整的 __init__.py</h3>
+<pre><code>MODULE_NAME = "模組名稱"</code></pre>
+  </section>
+
+  <!-- ══ MODULE LIST ══ -->
+  <section id="module-list">
+    <h2 id="module-list">現有模組列表</h2>
+    <table>
+      <tr><th>ID</th><th>名稱</th><th>Domain</th><th>狀態</th></tr>
+      <tr><td>module_001</td><td>OpenCV 影像處理</td><td>cv</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_002</td><td>影像資訊讀取</td><td>cv</td><td><span class="badge no">disabled</span></td></tr>
+      <tr><td>module_003</td><td>不規則邊框產生器</td><td>edge</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_004</td><td>邊緣完整度偵測</td><td>edge</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_005</td><td>邊緣記錄查詢</td><td>edge</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_006</td><td>動物影像標記</td><td>annotation</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_008</td><td>影片追蹤標注</td><td>annotation</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_009</td><td>統一標注平台</td><td>annotation</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_010</td><td>Data Feeder</td><td>pipeline</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_012</td><td>Annotation Session</td><td>annotation</td><td><span class="badge ok2">enabled</span></td></tr>
+      <tr><td>module_013</td><td>Update</td><td>pipeline</td><td><span class="badge ok2">enabled</span></td></tr>
+    </table>
+    <p class="muted">下一個可用 ID：module_014（先執行 <code>ls scripts/</code> 確認）</p>
+  </section>
+
+  <!-- ══ FAQ ══ -->
+  <section id="faq">
+    <h2 id="faq">FAQ</h2>
+
+    <h3>Q: 要修改 engine.py 嗎？</h3>
+    <p>
+      <strong>不需要。</strong>engine.py 在啟動時自動掃描 <code>scripts/*/plugin.yaml</code>。
+      只需建立正確的資料夾結構，重啟 sidecar 即可。
+    </p>
+
+    <h3>Q: execute_logic 跑太慢怎麼辦？</h3>
+    <p>
+      框架在按下「▶ 執行」後會顯示 spinner。長時間任務可考慮分段回傳進度，
+      或在 output 層使用 <code>st.progress</code> 配合 session_state。
+    </p>
+
+    <h3>Q: 為什麼 postMessage 沒有效果？</h3>
+    <p>最常見的兩個原因：</p>
+    <ol>
+      <li>缺少 <code>"source": "cim-platform"</code>——Portal 的 <code>isProtocolMessage()</code> 會靜默丟棄不含此欄位的訊息。</li>
+      <li>MessageType 不在白名單——確認使用的 type 已定義在 <code>shared-protocol/src/index.js</code> 的 <code>MessageTypes</code>。</li>
+    </ol>
+
+    <h3>Q: 測試中如何隔離 DB？</h3>
+<pre><code>@pytest.fixture
+def tmp_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path))
+    return tmp_path</code></pre>
+    <p>DB 路徑函式在呼叫時讀取 <code>CIM_LOG_DIR</code>，monkeypatch 即可生效。</p>
+
+    <h3>Q: enabled: false 和刪除資料夾有什麼差別？</h3>
+    <p>
+      <code>enabled: false</code>：模組仍寫入 DB（保留 ID 記錄），但不出現在選單。適合暫時停用或廢棄標記。<br>
+      刪除資料夾：模組完全消失，ID 可以被重用（謹慎使用）。
+    </p>
+
+    <h3>Q: 如何使用 AI 輔助建立模組？</h3>
+    <p>
+      在 Claude Code 執行 <code>/new-cv-module</code> skill，AI 會詢問必要參數並自動生成全部 6 個檔案。
+    </p>
+
+    <hr>
+    <p class="muted" style="text-align:center;margin-top:2rem">
+      CIM Platform · 文件版本 2026-05 · 如有疑問請查閱 <code>.claude/commands/new-cv-module.md</code>
+    </p>
+  </section>
+
+</main>
+</div>
+
+<script>
+  // Highlight active nav item on scroll
+  const sections = document.querySelectorAll("section[id], h2[id], h3[id]");
+  const navLinks = document.querySelectorAll("nav a");
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(a => {
+          a.classList.toggle("active", a.getAttribute("href") === `#${entry.target.id}`);
+        });
+      }
+    });
+  }, { rootMargin: "-10% 0px -80% 0px" });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

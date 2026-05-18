@@ -1,0 +1,15 @@
+id: module_013
+vendor: cimcore
+domain: pipeline
+name: Update
+version: "1.0.0"
+category: module
+description: 將標注與分類結果寫回原始目錄，支援複製標注 JSON 與依分類整理圖片
+author: system
+enabled: true
+tags: [annotation, update, export, organize]
+runner: cv_framework
+input_file: 013_input.py
+output_file: 013_output.py
+process_file: 013_process.py
+aliases: []

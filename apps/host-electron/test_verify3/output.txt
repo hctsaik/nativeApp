@@ -1,0 +1,4 @@
+process.type: browser
+electron type: object
+has ipcMain: true
+SUCCESS

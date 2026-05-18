@@ -1,0 +1,30 @@
+node_modules/
+dist/
+dist-electron/
+build/
+release/
+_release/
+tmp/
+logs/
+logs-*/
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-xanylabeling/
+venv/
+.env
+
+# 機器專屬設定
+.mcp.json
+.claude/
+
+# 大型二進位 / 測試資料
+external_exe/
+testData/
+
+# PyInstaller
+sidecar/python-engine/dist/
+sidecar/python-engine/build/
+sidecar/python-engine/*.spec.bak

@@ -1,0 +1,21 @@
+{
+  "name": "cim-hybrid-edge-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/host-electron",
+    "dev:portal": "npm run dev -w apps/portal-react",
+    "build": "npm run build -w apps/host-electron",
+    "package:portable": "npm run package:portable -w apps/host-electron",
+    "package:portable:x64": "npm run package:portable:x64 -w apps/host-electron",
+    "test": "npm run test -w packages/shared-protocol && npm run test -w apps/host-electron",
+    "test:python": "python -m pytest sidecar/python-engine/tests/ -v"
+  },
+  "devDependencies": {
+    "puppeteer": "^24.42.0"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "name": "host-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron host for the CIM hybrid edge platform",
+  "author": "CIM Platform Team",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "concurrently -k --success first \"npm --prefix ../portal-react run dev\" \"node dev-wait-portal.js\"",
+    "build": "npm --prefix ../portal-react run build",
+    "package:portable": "npm run build && electron-builder --win portable",
+    "package:portable:x64": "npm run build && electron-builder --win portable --x64",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "39.8.9",
+    "electron-builder": "^26.0.12",
+    "vitest": "^4.1.5",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.cim.hybrid-edge-platform",
+    "productName": "CIM Hybrid Edge Platform",
+    "electronVersion": "39.8.9",
+    "directories": {
+      "output": "../../release"
+    },
+    "files": [
+      "src/**/*",
+      "../../apps/portal-react/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../sidecar/python-engine/dist/engine.exe",
+        "to": "engine/engine.exe",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../apps/portal-react/dist",
+        "to": "portal",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../LabelMe_Dino/dist/LabelMe_Dino_launcher",
+        "to": "labelme-dino",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "../../sidecar/python-engine",
+        "to": "sidecar-source",
+        "filter": [
+          "engine.py",
+          "plugin_registry.py",
+          "plugin_loader.py",
+          "auth_provider.py",
+          "requirements.txt",
+          "tools/**/*",
+          "!tools/sample_csv_tool.py",
+          "!tools/opencv_tool.py",
+          "!tools/opencv_tool_input.py",
+          "!tools/opencv_tool_output.py",
+          "!tools/animal_tagger.py",
+          "!tools/animal_tagger_input.py",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*_test.py"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}

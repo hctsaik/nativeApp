@@ -1,0 +1,16 @@
+id: module_005
+vendor: cimcore
+domain: edge
+name: 邊緣記錄查詢
+version: "1.0.0"
+category: module
+description: 依日期範圍查詢歷史邊緣量測記錄，含影像預覽與下載
+author: system
+enabled: true
+tags:
+  - edge
+  - history
+  - query
+  - database
+runner: cv_framework
+aliases: []

@@ -1,0 +1,10 @@
+id: edge_analysis
+name: 邊緣品質分析
+description: 整合邊框生成、偵測與歷史查詢
+tabs:
+  - plugin_id: module_003
+    label: 影像來源
+  - plugin_id: module_004
+    label: 偵測分析
+  - plugin_id: module_005
+    label: 歷史查詢

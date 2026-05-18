@@ -1,0 +1,16 @@
+id: module_004
+vendor: cimcore
+domain: edge
+name: 邊緣完整度偵測
+version: "1.0.0"
+category: module
+description: 上傳影像後進行 Canny 邊緣偵測，量測粗糙度、梯度方向變異與 PSD 高頻能量比，並儲存至資料庫
+author: system
+enabled: true
+tags:
+  - edge
+  - detection
+  - canny
+  - measurement
+runner: cv_framework
+aliases: []
