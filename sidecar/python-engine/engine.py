@@ -496,6 +496,7 @@ class ToolProcessManager:
             env["CIM_SHEET_ID"] = tool.tool_id[len("sheet-"):]
         if plugin_id:
             env["CIM_PLUGIN_ID"] = plugin_id
+        env["CIM_TOOLS_DB"] = str(ROOT_DIR / "config" / "tools.sqlite")
         return env
 
     def _spawn(self, script: Path, tool: ToolDefinition, port: int, label: str,
@@ -516,7 +517,7 @@ class ToolProcessManager:
         )
 
     def _get_sheet_tabs(self, sheet_id: str) -> list[dict]:
-        db_path = self._log_dir / "data" / "tools.sqlite"
+        db_path = ROOT_DIR / "config" / "tools.sqlite"
         try:
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -1243,7 +1244,7 @@ def main() -> None:
     configure_logging(args.log_dir)
     os.environ["CIM_CONTROL_PORT"] = str(args.control_port)
     selected_paths = SelectedPathStore(args.log_dir / "selected_paths.json")
-    registry = ToolRegistry(SQLiteToolAdapter(args.log_dir / "data" / "tools.sqlite"))
+    registry = ToolRegistry(SQLiteToolAdapter(ROOT_DIR / "config" / "tools.sqlite"))
     manager = ToolProcessManager(args.log_dir, args.log_dir / "selected_paths.json")
     app = create_app(manager, registry, selected_paths)
     uvicorn.run(app, host="127.0.0.1", port=args.control_port, log_level="info")

@@ -15,7 +15,7 @@ sys.path.insert(0, str(_ENGINE_DIR))
 from plugin_registry import PluginRegistry, _is_dev_mode  # noqa: E402
 
 LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", "/tmp"))
-_DB_PATH = LOG_DIR / "data" / "tools.sqlite"
+_DB_PATH = Path(os.environ.get("CIM_TOOLS_DB", str(LOG_DIR / "data" / "tools.sqlite")))
 _SCRIPTS_DIR = _ENGINE_DIR / "scripts"
 _LAYER = os.environ.get("CIM_TOOL_LAYER", "input")
 _CONTROL_PORT = os.environ.get("CIM_CONTROL_PORT", "")

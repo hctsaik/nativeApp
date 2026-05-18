@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "cim-gui": {
+      "command": "python",
+      "args": ["-m", "cim_gui_mcp.server"],
+      "env": {
+        "PYTHONPATH": "<YOUR_PROJECT_ROOT>/mcp",
+        "CIM_SIDECAR_PORT": "8765",
+        "CIM_MCP_HEADLESS": "1",
+        "CIM_MCP_TIMEOUT": "10000"
+      }
+    },
+    "annotation": {
+      "command": "python",
+      "args": ["-m", "annotation_mcp.server"],
+      "env": {
+        "PYTHONPATH": "<YOUR_PROJECT_ROOT>/mcp;<YOUR_PROJECT_ROOT>/sidecar/python-engine",
+        "ANNOTATION_WORKSPACE": "<YOUR_PROJECT_ROOT>/tmp/annotation-workspace"
+      }
+    }
+  }
+}

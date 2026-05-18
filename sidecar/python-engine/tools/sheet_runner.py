@@ -20,7 +20,7 @@ LOG_DIR   = Path(os.environ.get("CIM_LOG_DIR", "/tmp"))
 SHEET_ID  = os.environ.get("CIM_SHEET_ID", "")
 PLUGIN_ID = os.environ.get("CIM_PLUGIN_ID", "")
 _LAYER    = os.environ.get("CIM_TOOL_LAYER", "input")
-_DB_PATH  = LOG_DIR / "data" / "tools.sqlite"
+_DB_PATH  = Path(os.environ.get("CIM_TOOLS_DB", str(LOG_DIR / "data" / "tools.sqlite")))
 
 
 def _result_file() -> Path:

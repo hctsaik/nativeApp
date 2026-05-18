@@ -21,7 +21,7 @@ TOOL_ID = os.environ.get("CIM_TOOL_ID", "cv-framework")
 MODULE_ID = os.environ.get("CIM_MODULE_ID", "")     # set → skip module selector
 LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", "/tmp"))
 RESULT_FILE = LOG_DIR / f"{TOOL_ID}_result.json"
-_DB_PATH = LOG_DIR / "data" / "tools.sqlite"
+_DB_PATH = Path(os.environ.get("CIM_TOOLS_DB", str(LOG_DIR / "data" / "tools.sqlite")))
 _auth = AuthProvider(db_path=_DB_PATH)
 
 
