@@ -39,17 +39,7 @@ def save_config(config: dict) -> None:
 
 
 def get_shared_manifest_id() -> str:
-    """
-    決定 module_012 input 預選的 manifest_id。
-    優先用 module_012 自己上次 session 用的 manifest（module_012.json），
-    確保 Update 後回到 module_012 仍選同一個 manifest，標注不會消失。
-    Fallback 才用 Data Feeder 最後建的（shared.json）。
-    """
-    # 1. 優先：module_012 自己上次用的
-    own = load_config().get("last_manifest_id", "")
-    if own:
-        return own
-    # 2. Fallback：Data Feeder 最後建的
+    """回傳 Data Feeder 最後建立的 manifest_id（從 shared.json 讀取）。"""
     p = _shared_path()
     if not p.exists():
         return ""

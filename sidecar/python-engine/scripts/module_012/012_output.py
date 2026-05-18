@@ -185,6 +185,22 @@ def _make_thumb(file_path: str) -> bytes | None:
         return None
 
 
+@st.cache_data(show_spinner=False, max_entries=500)
+def _make_ann_thumb(file_path: str, ann_path: str) -> bytes | None:
+    """標注結果縮圖（含框線），用於左欄列表。"""
+    try:
+        label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
+        ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
+        from PIL import Image
+        img = Image.open(io.BytesIO(ann_bytes))
+        img.thumbnail((120, 90), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
 # ─── hover popup 注入（parent-frame JS） ─────────────────────────────────────
 
 _POPUP_JS = """
@@ -277,52 +293,66 @@ def _thumb_html(thumb_bytes: bytes | None, img_path: str, tag: str,
 # ─── 鍵盤快捷鍵注入 ───────────────────────────────────────────────────────────
 
 def _keyboard_listener() -> None:
-    """注入鍵盤快捷鍵：↑/K 上一張、↓/J 下一張、A 標注工具、C 強化對比、1-4 快速分類、Enter 確認。"""
+    """注入鍵盤快捷鍵 + 隱藏幽靈按鈕。
+
+    快捷鍵對應：
+      ↑/K  — 上一張      ↓/J — 下一張
+      A    — 標注工具    C   — 強化對比
+      1-9  — 快速分類（①②③…）
+    """
     components.html("""
 <script>
 (function() {
     if (window.parent._kb012_active) return;
     window.parent._kb012_active = true;
+    var d = window.parent.document;
+
+    // 將幽靈按鈕縮成 1×1px 隱形（pointer-events:none 不影響 JS .click()）
+    function hideGhosts() {
+        d.querySelectorAll('button').forEach(function(b) {
+            var txt = b.textContent.trim();
+            if (txt === '← 上一張' || txt === '→ 下一張' ||
+                /^[①②③④⑤⑥⑦⑧⑨]/.test(txt)) {
+                b.style.cssText += ';position:fixed!important;opacity:0!important;' +
+                    'pointer-events:none!important;width:1px!important;' +
+                    'height:1px!important;overflow:hidden!important;padding:0!important;border:0!important;';
+                var wrap = b.closest('[data-testid="stButton"]');
+                if (wrap) wrap.style.cssText += ';position:fixed!important;opacity:0!important;' +
+                    'pointer-events:none!important;width:1px!important;height:1px!important;overflow:hidden!important;';
+            }
+        });
+    }
+    hideGhosts();
+    new MutationObserver(hideGhosts).observe(d.body, {childList: true, subtree: true});
 
     function clickByText(needle) {
-        var btns = window.parent.document.querySelectorAll('button');
+        var btns = d.querySelectorAll('button');
         for (var b of btns) {
             if (b.textContent.trim().indexOf(needle) >= 0) { b.click(); return true; }
         }
         return false;
     }
 
-    window.parent.document.addEventListener('keydown', function(e) {
+    d.addEventListener('keydown', function(e) {
         var tag = e.target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         var k = e.key;
-        if (k === 'ArrowUp'   || k === 'k' || k === 'K') { e.preventDefault(); clickByText('← 上一張'); }
-        else if (k === 'ArrowDown' || k === 'j' || k === 'J') { e.preventDefault(); clickByText('→ 下一張'); }
-        else if (k === 'a' || k === 'A') { e.preventDefault(); clickByText('🖊 標注工具'); }
-        else if (k === 'c' || k === 'C') {
-            var inputs = window.parent.document.querySelectorAll('input[type="checkbox"]');
+        if (k === 'ArrowUp' || k === 'k' || k === 'K') {
+            e.preventDefault(); clickByText('← 上一張');
+        } else if (k === 'ArrowDown' || k === 'j' || k === 'J') {
+            e.preventDefault(); clickByText('→ 下一張');
+        } else if (k === 'a' || k === 'A') {
+            e.preventDefault(); clickByText('🖊 標注工具');
+        } else if (k === 'c' || k === 'C') {
+            var inputs = d.querySelectorAll('input[type="checkbox"]');
             for (var inp of inputs) {
-                var container = inp.closest('label') || inp.parentElement;
-                if (container && container.textContent.indexOf('強化對比') >= 0) { inp.click(); break; }
+                var cont = inp.closest('label') || inp.parentElement;
+                if (cont && cont.textContent.indexOf('對比') >= 0) { inp.click(); break; }
             }
-        }
-        else if (k >= '1' && k <= '4') {
-            var idx = parseInt(k) - 1;
-            var btns2 = window.parent.document.querySelectorAll('button');
-            var targets = [];
-            for (var b of btns2) {
-                var txt = b.textContent.trim();
-                if (txt.startsWith('①') || txt.startsWith('②') ||
-                    txt.startsWith('③') || txt.startsWith('④')) {
-                    targets.push(b);
-                }
-            }
-            if (targets[idx]) { e.preventDefault(); targets[idx].click(); }
-        }
-        else if (k === 'Enter') {
-            e.preventDefault();
-            clickByText('✅ 確認');
+        } else if (k >= '1' && k <= '9') {
+            var syms = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨'];
+            e.preventDefault(); clickByText(syms[parseInt(k) - 1]);
         }
     }, true);
 })();
@@ -333,11 +363,15 @@ def _keyboard_listener() -> None:
 # ─── 分類輔助函式 ────────────────────────────────────────────────────────────
 
 def _save_clf(workspace_dir: str, item_id: str, label: str, cache: dict) -> None:
+    if not workspace_dir:
+        return
     cache[item_id] = label
     _cfg.save_classifications(workspace_dir, cache)
 
 
 def _clear_clf(workspace_dir: str, item_id: str, cache: dict) -> None:
+    if not workspace_dir:
+        return
     cache.pop(item_id, None)
     _cfg.save_classifications(workspace_dir, cache)
 
@@ -409,10 +443,6 @@ def render_output(result: dict) -> None:
 
     # ── 標題 ─────────────────────────────────────────────────────────────────
     st.markdown(f"## 🏷️ {manifest_name}")
-    st.caption(
-        f"Manifest ID：`{manifest_id[:8]}…`　｜　"
-        f"類別：{', '.join(labels) or '（未設定）'}"
-    )
 
     # ── metrics + 進度條 ─────────────────────────────────────────────────────
     pct = annotated / total if total else 0
@@ -434,32 +464,6 @@ def render_output(result: dict) -> None:
 
     if st.button("📁 前往 Update →", type="primary", key="m012_goto_update"):
         _post_message("SWITCH_TAB", {"plugin_id": "module_013", "tab": "input"})
-
-    with st.expander("📖 狀態說明", expanded=False):
-        st.markdown(
-            "⏳ **待標注** — 尚未有 X-AnyLabeling 標注框  \n"
-            "✅ **已標注** — X-AnyLabeling 已標框並儲存"
-        )
-
-    # ── auto-refresh 控制 ─────────────────────────────────────────────────────
-    ar_col, num_col, _ = st.columns([2, 1, 5])
-    with ar_col:
-        auto_refresh = st.toggle(
-            "🔄 自動更新",
-            value=st.session_state.get("m012_auto_refresh", True),
-            key="m012_auto_refresh",
-        )
-    with num_col:
-        refresh_interval = st.number_input(
-            "間隔（秒）",
-            min_value=5,
-            max_value=300,
-            value=st.session_state.get("m012_refresh_interval", 5),
-            step=5,
-            key="m012_refresh_interval",
-            label_visibility="collapsed",
-            disabled=not auto_refresh,
-        )
 
     st.divider()
 
@@ -505,9 +509,13 @@ def render_output(result: dict) -> None:
                 is_selected = (global_idx == st.session_state["m012_selected_idx"])
 
                 thumb_bytes = _make_thumb(fp) if fp else None
+                ann_thumb_bytes = (
+                    _make_ann_thumb(fp, item["ann_path"])
+                    if has_ann and item["ann_path"] else None
+                )
 
-                # 縮圖 + 資訊
-                thumb_c, info_c = st.columns([1, 2])
+                # 原圖縮圖 | 標注縮圖 | 資訊
+                thumb_c, ann_c, info_c = st.columns([1, 1, 2])
                 with thumb_c:
                     if thumb_bytes:
                         border = "#1a73e8" if is_selected else "#cbd5e1"
@@ -523,6 +531,20 @@ def render_output(result: dict) -> None:
                         st.markdown(html, unsafe_allow_html=True)
                     else:
                         st.markdown("🖼️")
+
+                with ann_c:
+                    if ann_thumb_bytes:
+                        ann_html = _thumb_html(
+                            ann_thumb_bytes,
+                            img_path=fp,
+                            tag=f"{fname} (標注)",
+                            color="#16a34a",
+                            border="#16a34a",
+                        )
+                        st.markdown(ann_html, unsafe_allow_html=True)
+                    elif has_ann:
+                        st.markdown('<span style="color:#94a3b8;font-size:10px">無框</span>',
+                                    unsafe_allow_html=True)
 
                 with info_c:
                     if is_selected:
@@ -540,7 +562,7 @@ def render_output(result: dict) -> None:
                     clf_status = f"　🏷 {clf_label}" if clf_label else ""
                     st.caption(f"{ann_status}{clf_status}")
 
-                    sel_c, ann_c, ref_c = st.columns(3)
+                    sel_c, ann_c = st.columns(2)
                     with sel_c:
                         if st.button(
                             "選取",
@@ -561,14 +583,6 @@ def render_output(result: dict) -> None:
                                 st.error(f"啟動失敗：{err}")
                             else:
                                 st.toast(f"X-AnyLabeling 已開啟：{fname}", icon="🖊")
-                    with ref_c:
-                        if st.button(
-                            "↻",
-                            key=f"ref_{item['item_id']}",
-                            use_container_width=True,
-                            help="從 X-AnyLabeling 標注完成後按此更新",
-                        ):
-                            st.rerun()
 
         # 選取項目 scroll into view
         components.html("""<script>
@@ -595,76 +609,87 @@ setTimeout(function() {
             ann_path   = item["ann_path"]
             shape_count = item["shape_count"]
 
-            # 鍵盤提示
-            st.caption("⌨️ ↑/K 上一張　↓/J 下一張　Enter 確認　1-4 快速分類　A 標注工具　C 強化對比")
-
-            # 檔名 + 路徑
-            st.markdown(f"### {fname}")
+            # 檔名 + 路徑合併 + 強化對比（同一列）
             parts = Path(fp).parts if fp else ()
             short = str(Path(*parts[-3:])) if len(parts) >= 3 else fp
-            st.caption(f"`{short}`")
+            fname_c, enhance_c = st.columns([4, 1])
+            with fname_c:
+                st.markdown(f"**{fname}**  \n`{short}`")
+            with enhance_c:
+                st.markdown("<div style='margin-top:8px'>", unsafe_allow_html=True)
+                enhance = st.toggle(
+                    "🔆 對比",
+                    key=f"enhance_{item['item_id']}",
+                    help="強化對比度與飽和度（僅影響標注結果顯示）",
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
 
             st.divider()
 
             # ── 分類 UI（只有在設定了分類類別時才顯示） ──────────────────────
             item_id = item.get("item_id", "")
+            n_items = len(items)
+
+            # ── 幽靈導覽按鈕（鍵盤 ↑/K ↓/J 用，JS 會隱形化） ─────────────────
+            if st.button("← 上一張", key="m012_prev_btn"):
+                st.session_state["m012_selected_idx"] = (sel_idx - 1) % n_items
+                st.rerun()
+            if st.button("→ 下一張", key="m012_next_btn"):
+                st.session_state["m012_selected_idx"] = (sel_idx + 1) % n_items
+                st.rerun()
+
             if classification_labels:
                 current_clf = classifications.get(item_id, "")
-                if current_clf:
-                    st.markdown(f"**目前分類：** 🏷 `{current_clf}`")
-                else:
-                    st.markdown("**目前分類：** 📋 尚未分類")
 
-                # 快速分類按鈕（最多 4 個，超過用 selectbox 即可）
-                if len(classification_labels) <= 4:
-                    syms = ["①", "②", "③", "④"]
-                    q_cols = st.columns(len(classification_labels))
-                    for qi, lbl in enumerate(classification_labels):
-                        with q_cols[qi]:
-                            if st.button(
-                                f"{syms[qi]} {lbl}",
-                                key=f"qc_{item_id}_{qi}",
-                                use_container_width=True,
-                                help=f"快速分類為「{lbl}」（快捷鍵 {qi + 1}）",
-                            ):
-                                _save_clf(workspace_dir, item_id, lbl, classifications)
-                                st.session_state["m012_selected_idx"] = _next_unclassified(
-                                    items, sel_idx, classifications
-                                )
-                                st.rerun()
-
-                # selectbox + 確認 / 跳過 / 重設
-                clf_options = ["請選擇分類"] + classification_labels
-                clf_default = clf_options.index(current_clf) if current_clf in clf_options else 0
-                tag_c, btn_c, skip_c, reset_c = st.columns([3, 1, 1, 1])
-                with tag_c:
-                    tag_choice = st.selectbox(
-                        "分類", clf_options, index=clf_default,
-                        key=f"clf_sel_{item_id}", label_visibility="collapsed",
-                    )
-                with btn_c:
-                    if st.button(
-                        "✅ 確認", type="primary", use_container_width=True,
-                        key=f"clf_confirm_{item_id}",
-                        help="儲存分類並跳至下一張 (Enter)",
-                    ):
-                        if tag_choice != "請選擇分類":
-                            _save_clf(workspace_dir, item_id, tag_choice, classifications)
-                            st.session_state["m012_selected_idx"] = _next_unclassified(
-                                items, sel_idx, classifications
-                            )
-                            st.rerun()
-                with skip_c:
-                    if st.button(
-                        "→ 跳過", use_container_width=True,
-                        key=f"clf_skip_{item_id}",
-                        help="暫時跳過（快捷鍵 ↓/J）",
-                    ):
-                        st.session_state["m012_selected_idx"] = (sel_idx + 1) % len(items)
+                # ── 幽靈分類按鈕（鍵盤 1-9 用，JS 會隱形化） ─────────────────
+                _syms = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"]
+                for _qi, _lbl in enumerate(classification_labels[:9]):
+                    if st.button(f"{_syms[_qi]} {_lbl}", key=f"qc_{item_id}_{_qi}"):
+                        _save_clf(workspace_dir, item_id, _lbl, classifications)
+                        st.session_state["m012_selected_idx"] = _next_unclassified(
+                            items, sel_idx, classifications
+                        )
                         st.rerun()
-                with reset_c:
+
+                # selectbox（選即存）+ 重設
+                # 前 9 個加 [1]…[9] 快捷鍵提示
+                def _display(i: int, lbl: str) -> str:
+                    return f"[{i+1}] {lbl}" if i < 9 else lbl
+
+                clf_display = ["請選擇分類"] + [
+                    _display(i, lbl) for i, lbl in enumerate(classification_labels)
+                ]
+                # 把 raw label 對應到 display 選項的索引
+                clf_default = 0
+                if current_clf:
+                    for _di, _dlbl in enumerate(clf_display):
+                        if current_clf in _dlbl:
+                            clf_default = _di
+                            break
+
+                def _on_clf_change():
+                    chosen = st.session_state.get(f"clf_sel_{item_id}", "請選擇分類")
+                    if chosen == "請選擇分類":
+                        return
+                    # 從 "[1] 物件A" 還原為 "物件A"
+                    import re as _re
+                    raw = _re.sub(r"^\[\d+\] ", "", chosen)
+                    _save_clf(workspace_dir, item_id, raw, classifications)
+                    st.session_state["m012_selected_idx"] = _next_unclassified(
+                        items, sel_idx, classifications
+                    )
+
+                sel_c2, reset_c2 = st.columns([5, 1])
+                with sel_c2:
+                    st.selectbox(
+                        "分類", clf_display, index=clf_default,
+                        key=f"clf_sel_{item_id}",
+                        label_visibility="collapsed",
+                        on_change=_on_clf_change,
+                    )
+                with reset_c2:
                     if current_clf and st.button(
-                        "✕ 重設", use_container_width=True,
+                        "✕", use_container_width=True,
                         key=f"clf_reset_{item_id}",
                         help="清除分類",
                     ):
@@ -672,30 +697,6 @@ setTimeout(function() {
                         st.rerun()
 
                 st.divider()
-
-            # 導覽按鈕（置於圖片上方）
-            # 注意：不使用 disabled，否則 JS .click() 無法觸發；改用循環跳轉
-            n_items = len(items)
-            prev_c, next_c = st.columns(2)
-            with prev_c:
-                if st.button("← 上一張", key="m012_prev_btn",
-                             use_container_width=True,
-                             help="上一張（快捷鍵 ↑/K）"):
-                    st.session_state["m012_selected_idx"] = (sel_idx - 1) % n_items
-                    st.rerun()
-            with next_c:
-                if st.button("→ 下一張", key="m012_next_btn",
-                             use_container_width=True,
-                             help="下一張（快捷鍵 ↓/J）"):
-                    st.session_state["m012_selected_idx"] = (sel_idx + 1) % n_items
-                    st.rerun()
-
-            # 強化對比 toggle（僅對標注結果圖有效）
-            enhance = st.toggle(
-                "🔆 強化對比（僅標注結果）",
-                key=f"enhance_{item['item_id']}",
-                help="對右側標注結果圖套用對比度與飽和度強化，原圖保持不變。",
-            )
 
             # 圖片顯示
             if not fp or not Path(fp).exists():
@@ -722,13 +723,12 @@ setTimeout(function() {
                             st.warning(f"畫框失敗：{e}")
                             st.image(fp, use_container_width=True)
 
-                    # 標注明細 expander
-                    with st.expander("標注明細", expanded=True):
+                    with st.expander(f"標注明細（{len(shapes)} 個物件）", expanded=False):
                         rows = [
                             {
-                                "Label":      s.get("label", "?"),
-                                "Shape":      s.get("shape_type", "?"),
-                                "Points":     len(s.get("points", [])),
+                                "Label":  s.get("label", "?"),
+                                "Shape":  s.get("shape_type", "?"),
+                                "Points": len(s.get("points", [])),
                             }
                             for s in shapes
                         ]
@@ -742,7 +742,5 @@ setTimeout(function() {
                 st.image(fp, use_container_width=True)
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
 
-    # ── auto-refresh ─────────────────────────────────────────────────────────
-    if st.session_state.get("m012_auto_refresh", True):
-        interval_ms = int(st.session_state.get("m012_refresh_interval", 30)) * 1000
-        st_autorefresh(interval=interval_ms, key="m012_autorefresh")
+    # ── auto-refresh（固定 30 秒）────────────────────────────────────────────
+    st_autorefresh(interval=30_000, key="m012_autorefresh")

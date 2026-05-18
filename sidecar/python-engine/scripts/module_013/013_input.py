@@ -46,56 +46,30 @@ def render_input() -> dict:
             "dry_run": True,
         }
 
-    # ── 1. 選擇 Manifest ──────────────────────────────────────────────────────
-    st.subheader("1. 選擇 Manifest")
-
+    # ── 自動銜接最後一個 manifest（從 shared.json 讀取） ──────────────────────
     shared_id = _cfg.get_shared_manifest_id()
     manifests_list = list(manifests)
-
-    # 若 shared_id 被外部更新（例如 module_012 新 session），強制重設 selectbox
-    prev_shared = st.session_state.get("_m013_last_shared_id", None)
-    if prev_shared != shared_id:
-        st.session_state["_m013_last_shared_id"] = shared_id
-        new_idx = next(
-            (i for i, m in enumerate(manifests_list) if m["manifest_id"] == shared_id),
-            0,
-        )
-        st.session_state["m013_manifest_idx"] = new_idx
-
-    options_display = [
-        f"{m['name']}  ({m.get('item_count', 0)} 張)  — {m['manifest_id'][:8]}…"
-        for m in manifests_list
-    ]
-
-    selected_idx = st.selectbox(
-        "Manifest",
-        options=range(len(options_display)),
-        format_func=lambda i: options_display[i],
-        key="m013_manifest_idx",
+    selected = next(
+        (m for m in manifests_list if m["manifest_id"] == shared_id),
+        manifests_list[0],
     )
-
-    selected = manifests_list[selected_idx]
     manifest_id = selected["manifest_id"]
 
-    if shared_id and manifest_id == shared_id:
-        st.success(f"✅ 自動銜接自 Data Feeder：**{selected['name']}**")
-    else:
-        with st.expander("Manifest 摘要", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("來源", selected.get("source_type", "—"))
-            c2.metric("建立時間", (selected.get("created_at") or "—")[:10])
-            c3.metric("圖片數", selected.get("item_count", 0))
+    st.info(
+        f"📦 **{selected['name']}**　{selected.get('item_count', 0)} 張　"
+        f"　｜　若要切換請回 Data Feeder 重新執行"
+    )
 
     st.divider()
 
-    # ── 2. 標注輸出位置（自動）────────────────────────────────────────────────
-    st.subheader("2. 標注輸出位置")
+    # ── 1. 標注輸出位置（自動）────────────────────────────────────────────────
+    st.subheader("1. 標注輸出位置")
     st.info("✅ 標注 JSON 將直接存回**影像所在的同一目錄**（與影像同名，例：`image_001.json`）。")
 
     st.divider()
 
-    # ── 3. 整理圖片輸出資料夾（C）────────────────────────────────────────────
-    st.subheader("3. 整理圖片輸出資料夾（C）")
+    # ── 2. 整理圖片輸出資料夾（C）────────────────────────────────────────────
+    st.subheader("2. 整理圖片輸出資料夾（C）")
     st.caption(
         "分類後的圖片會複製到此資料夾的 `{分類名稱}/` 子目錄。"
         "**請務必設為原始圖片資料夾以外的位置**，避免重複掃描造成資料增殖。"
@@ -117,16 +91,16 @@ def render_input() -> dict:
 
     st.divider()
 
-    # ── 4. 更新選項 ───────────────────────────────────────────────────────────
-    st.subheader("4. 更新選項")
+    # ── 3. 更新選項 ───────────────────────────────────────────────────────────
+    st.subheader("3. 更新選項")
 
     cfg = _cfg.load_config()
 
     copy_annotations = st.checkbox(
-        "B｜將標注 JSON 寫回影像所在目錄（與影像同名）",
+        "B｜確認標注 JSON 已存回影像所在目錄（與影像同名）",
         value=cfg.get("copy_annotations", True),
         key="m013_copy_annotations",
-        help="將 workspace/annotations/*.json 寫回各影像所在目錄，例：image_001.jpg → image_001.json。",
+        help="X-AnyLabeling 已將標注存在影像同目錄（例：image_001.jpg → image_001.json）。此選項確認並統計已存在的標注檔。",
     )
 
     organize_images = st.checkbox(
@@ -140,7 +114,7 @@ def render_input() -> dict:
 
     st.divider()
 
-    # ── 4. 外部 DB 更新（placeholder） ───────────────────────────────────────
+    # ── 4. 外部 DB 更新（placeholder）────────────────────────────────────────
     st.subheader("4. 外部 DB 更新")
     st.info("🔧 外部 DB 更新功能開發中", icon="🔧")
 

@@ -33,17 +33,11 @@ def get_workspace_dir_for_manifest(manifest_id: str) -> Path:
     return _CIM_LOG_DIR / "annotation_workspaces" / f"module_012_{manifest_id[:12]}"
 
 def get_shared_manifest_id() -> str:
-    # 優先讀 module_012 的最後 session manifest（每次標注 session 都會更新）
-    p012 = _CIM_LOG_DIR / "config" / "module_012.json"
-    if p012.exists():
-        try:
-            last_id = json.loads(p012.read_text(encoding="utf-8")).get("last_manifest_id", "")
-            if last_id:
-                return last_id
-        except Exception:
-            pass
-    # fallback 到 shared.json（Data Feeder 寫的）
+    """回傳 Data Feeder 最後建立的 manifest_id（從 shared.json 讀取）。"""
     p = _CIM_LOG_DIR / "config" / "shared.json"
-    if not p.exists(): return ""
-    try: return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
-    except: return ""
+    if not p.exists():
+        return ""
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
+    except Exception:
+        return ""

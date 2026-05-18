@@ -160,18 +160,10 @@ def execute_logic(params: dict) -> dict:
 
     # ── 4. 確定 workspace 路徑 ─────────────────────────────────────────────────
     workspace_dir: Path = _cfg.get_workspace_dir_for_manifest(manifest_id)
-    annotations_dir: Path = workspace_dir / "annotations"
     classifications_path: Path = workspace_dir / "classifications.json"
 
-    ann_dir_exists = annotations_dir.exists()
-    ann_files = sorted(annotations_dir.glob("*.json")) if ann_dir_exists else []
     _log.info("[013] workspace: %s", workspace_dir)
-    _log.info("[013] annotations/: exists=%s | 檔案數=%d",
-              ann_dir_exists, len(ann_files))
-    if ann_files:
-        _log.info("[013] 標注檔清單: %s", [f.name for f in ann_files])
-    else:
-        _log.warning("[013] annotations/ 為空或不存在 → 所有圖片 b_action 將為 n/a，按鈕會 disabled")
+    _log.info("[013] 標注檔查詢模式：影像同目錄同名 .json")
 
     # ── 5. 讀取分類結果 ────────────────────────────────────────────────────────
     classifications: dict[str, str] = {}
@@ -210,8 +202,8 @@ def execute_logic(params: dict) -> dict:
         filename = Path(fp).name if fp else ""
         stem = Path(fp).stem if fp else ""
 
-        # 標注資訊（只查 workspace/annotations/）
-        ann_src_path = annotations_dir / f"{stem}.json" if stem else None
+        # 標注資訊：X-AnyLabeling 存在影像同目錄同名 .json
+        ann_src_path = Path(fp).with_suffix(".json") if fp else None
         ann_src = str(ann_src_path) if (ann_src_path and ann_src_path.exists()) else ""
         has_annotation = bool(ann_src)
         shape_count = _count_shapes(ann_src) if has_annotation else 0
