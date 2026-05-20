@@ -9,7 +9,7 @@
 | ID | `module_013` |
 | Runner | `cv_framework` |
 | Sheet | `sheet-annotation_workflow`（與 module_010、module_012 組合） |
-| 上游依賴 | module_012（Annotation Session）的 workspace |
+| 上游依賴 | module_012（Annotation Session）的 manifest-scoped 分類 config |
 
 將 module_012 的標注與分類結果整理成摘要 JSON，並支援：
 - **B 操作**：偵測並確認影像同目錄的標注 JSON（X-AnyLabeling 輸出）
@@ -23,7 +23,7 @@
 013_input.py   → 讀 shared.json 取 manifest_id，設定 export_dir 和操作選項
 013_process.py → 掃描標注 + 分類資料，建立 items 清單，執行 B/C 操作
 013_output.py  → 預覽表格 + 確認執行按鈕
-_config.py     → 設定持久化 + workspace 路徑管理
+_config.py     → 設定持久化 + 分類 config / export 路徑管理
 ```
 
 ---
@@ -40,13 +40,12 @@ def get_shared_manifest_id() -> str:
     return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
 ```
 
-### Workspace 路徑
+### 分類檔路徑
 
-讀取與 module_012 **相同的 workspace**：
+讀取 module_012 依 manifest 寫出的分類 config：
 
 ```
-{CIM_LOG_DIR}/annotation_workspaces/module_012_{manifest_id[:12]}/
-  classifications.json  ← module_012 寫入，module_013 讀取
+{CIM_LOG_DIR}/config/module_012_classifications_{manifest_id[:12]}.json
 ```
 
 ---
@@ -54,7 +53,7 @@ def get_shared_manifest_id() -> str:
 ## Input Page（`013_input.py`）
 
 - **不顯示 Manifest 選擇器**：自動從 `shared.json` 取，以 info bar 顯示
-- **整理輸出目錄（C 操作）**：預設 `{workspace}/export/`，可自訂（必須在原始圖片資料夾以外）
+- **整理輸出目錄（C 操作）**：預設 `{CIM_LOG_DIR}/exports/module_013_{manifest_id[:12]}/`，可自訂（必須在原始圖片資料夾以外）
 - **更新選項**：
   - B｜確認標注 JSON 已存回影像所在目錄
   - C｜依分類標籤將圖片複製到整理輸出目錄的子資料夾
@@ -83,7 +82,7 @@ ann_src_path = Path(fp).with_suffix(".json") if fp else None
 ann_src = str(ann_src_path) if (ann_src_path and ann_src_path.exists()) else ""
 ```
 
-**不使用** `workspace/annotations/` 舊路徑。`b_action` 的值：
+**只使用影像同目錄同名 JSON**。`b_action` 的值：
 
 | 值 | 說明 |
 |----|------|
@@ -96,7 +95,7 @@ ann_src = str(ann_src_path) if (ann_src_path and ann_src_path.exists()) else ""
 ### 分類讀取（C 操作）
 
 ```python
-classifications_path = workspace_dir / "classifications.json"
+classifications_path = _cfg.get_classification_path(manifest_id)
 classifications = json.loads(classifications_path.read_text(encoding="utf-8"))
 classification = classifications.get(item_id, "") or classifications.get(filename, "")
 ```
@@ -119,7 +118,7 @@ C 操作目標路徑：`{export_dir}/{label}/{filename}`
 {source_folder}/update_result_{timestamp}.json
 ```
 
-（若 source_folder 為空，fallback 到 workspace 目錄）
+（若 source_folder 為空，fallback 到 `{CIM_LOG_DIR}/exports/module_013_{manifest_id[:12]}/`）
 
 ---
 
@@ -130,7 +129,7 @@ C 操作目標路徑：`{export_dir}/{label}/{filename}`
 | 欄位 | 說明 |
 |------|------|
 | filename | 圖片檔名 |
-| classification | 分類標籤（從 workspace 讀） |
+| classification | 分類標籤（從 config 讀） |
 | has_annotation | ✅ / ☐ |
 | shape_count | 標注框數量 |
 | b_action | copy / skip / n/a |
@@ -150,8 +149,8 @@ C 操作目標路徑：`{export_dir}/{label}/{filename}`
 shared.json
   └─ last_manifest_id ──────────────────────────────┐
                                                      ▼
-manifest DB (.sqlite)                    module_012 workspace/
-  └─ items (file_path, item_id, ...)       └─ classifications.json
+manifest DB (.sqlite)                    module_012 classification config
+  └─ items (file_path, item_id, ...)       └─ module_012_classifications_*.json
         │                                        │
         ▼                                        ▼
 013_process.execute_logic()
@@ -166,8 +165,8 @@ manifest DB (.sqlite)                    module_012 workspace/
 
 ### 分類欄位全部空白
 
-`shared.json` 的 manifest_id 對應的 workspace 沒有 `classifications.json`。可能原因：
-1. Data Feeder 又跑了一次建新 manifest → 新 workspace 無分類
+`shared.json` 的 manifest_id 對應的分類 config 沒有資料。可能原因：
+1. Data Feeder 又跑了一次建新 manifest → 新 manifest 尚無分類
 2. module_012 未執行（尚未建立分類）
 
 確認 Annotation 和 Update 的 info bar 顯示同一個 manifest 名稱。

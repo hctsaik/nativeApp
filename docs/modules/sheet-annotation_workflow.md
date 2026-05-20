@@ -11,7 +11,7 @@
 | Runner | `sheet_runner` |
 | 主要模組 | module_010 → module_012 → module_013 |
 
-此 sheet 將資料來源建立、X-AnyLabeling 標注、分類整理串成一條輕量流程。它不使用 `annotation-core`，而是讓 X-AnyLabeling JSON 保持在影像同目錄，並以 workspace 的 `classifications.json` 保存分類。
+此 sheet 將資料來源建立、X-AnyLabeling 標注、分類整理串成一條輕量流程。它不使用 `annotation-core`，X-AnyLabeling JSON 保持在影像同目錄，分類結果保存於 `{CIM_LOG_DIR}/config/module_012_classifications_*.json`。
 
 ---
 
@@ -25,7 +25,7 @@ module_010 Data Feeder
 module_012 Annotation Session
   ├─ 讀 shared.json:last_manifest_id
   ├─ 開啟 X-AnyLabeling，標注 JSON 寫到影像同目錄
-  └─ 分類寫入 workspace/classifications.json
+  └─ 分類寫入 config/module_012_classifications_*.json
         │
         ▼
 module_013 Update
@@ -42,8 +42,9 @@ module_013 Update
 |------|------|
 | `{CIM_LOG_DIR}/config/shared.json` | module_010 寫入最新 manifest，012/013 讀取 |
 | `{CIM_LOG_DIR}/db/manifest.sqlite` | DatasetManifest 與 manifest items |
-| `{CIM_LOG_DIR}/annotation_workspaces/module_012_{manifest_id[:12]}/classes.txt` | X-AnyLabeling label 清單 |
-| `{CIM_LOG_DIR}/annotation_workspaces/module_012_{manifest_id[:12]}/classifications.json` | module_012 分類結果，module_013 讀取 |
+| `{CIM_LOG_DIR}/config/module_012_classes_{manifest_id[:12]}.txt` | X-AnyLabeling label 清單 |
+| `{CIM_LOG_DIR}/config/module_012_classifications_{manifest_id[:12]}.json` | module_012 分類結果，module_013 讀取 |
+| `{CIM_LOG_DIR}/xanylabeling_state/module_012_{manifest_id[:12]}/` | X-AnyLabeling GUI 暫存狀態 |
 | `{image_dir}/{image_stem}.json` | X-AnyLabeling 原生 LabelMe JSON |
 
 ---

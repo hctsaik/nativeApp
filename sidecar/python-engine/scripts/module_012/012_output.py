@@ -8,7 +8,7 @@ master-detail 介面：
   右欄  — Detail Panel（原圖 vs 標注結果、標注明細 expander、上下張導覽）
 
 * 標注 JSON 由 X-AnyLabeling 直接輸出到影像所在目錄（同名 .json）
-* streamlit_autorefresh 每 30 秒自動更新（可關閉）
+* streamlit_autorefresh 可由 Input 頁設定間隔與啟停
 * 鍵盤快捷鍵：↑/K 上一張、↓/J 下一張、A 標注工具
 """
 
@@ -23,6 +23,7 @@ from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 # ─── 動態載入 _config + _manifest_db ─────────────────────────────────────────
 
@@ -85,21 +86,35 @@ def _label_px_width(text: str, font_size: int) -> int:
 
 # ─── 路徑輔助 ─────────────────────────────────────────────────────────────────
 
-def _find_annotation(img_path: str, workspace_dir: str = "") -> tuple[bool, str, int]:
-    """回傳 (has_ann, ann_path, shape_count)。
+def _json_matches_image(json_file: Path, target: Path) -> bool:
+    """Return True when a LabelMe JSON either omits imagePath or points at target."""
+    try:
+        stored = json.loads(json_file.read_text(encoding="utf-8")).get("imagePath", "")
+        if not stored:
+            return True
+        stored_path = Path(stored)
+        if not stored_path.is_absolute():
+            stored_path = json_file.parent / stored_path
+        return stored_path.resolve() == target
+    except Exception:
+        return True
 
-    直接查影像同目錄的同名 .json（X-AnyLabeling 預設輸出位置）。
-    """
+
+def _find_annotation(img_path: str) -> tuple[bool, str, int]:
+    """回傳 (has_ann, ann_path, shape_count)。module_012 只讀影像同目錄同名 JSON。"""
     if not img_path:
         return False, "", 0
-    ann_path = Path(img_path).with_suffix(".json")
-    if not ann_path.exists():
+
+    target = Path(img_path).resolve()
+    same_dir = Path(img_path).with_suffix(".json")
+    if not (same_dir.exists() and _json_matches_image(same_dir, target)):
         return False, "", 0
+
     try:
-        sc = len(json.loads(ann_path.read_text(encoding="utf-8")).get("shapes", []))
+        sc = len(json.loads(same_dir.read_text(encoding="utf-8")).get("shapes", []))
     except Exception:
         sc = 0
-    return True, str(ann_path), sc
+    return True, str(same_dir), sc
 
 
 # ─── 標注狀態快取（session_state + mtime 增量更新） ──────────────────────────
@@ -107,13 +122,13 @@ def _find_annotation(img_path: str, workspace_dir: str = "") -> tuple[bool, str,
 PAGE_SIZE = 50
 
 
-def _scan_items(db_items: list[dict], workspace_dir: str) -> tuple[list[dict], dict[str, float]]:
+def _scan_items(db_items: list[dict]) -> tuple[list[dict], dict[str, float]]:
     """Full scan — 首次載入或 manifest 換新時呼叫。"""
     items: list[dict] = []
     mtimes: dict[str, float] = {}
     for it in db_items:
         fp = it.get("file_path", "")
-        has_ann, ann_path, shape_count = _find_annotation(fp, workspace_dir)
+        has_ann, ann_path, shape_count = _find_annotation(fp)
         items.append({**it, "has_ann": has_ann, "ann_path": ann_path, "shape_count": shape_count})
         if ann_path:
             try:
@@ -124,7 +139,7 @@ def _scan_items(db_items: list[dict], workspace_dir: str) -> tuple[list[dict], d
 
 
 def _incremental_refresh(
-    cached: list[dict], mtimes: dict[str, float], workspace_dir: str
+    cached: list[dict], mtimes: dict[str, float]
 ) -> tuple[list[dict], dict[str, float]]:
     """每次 rerun 只做 stat() 比對，僅對變動的項目重讀 JSON。"""
     new_mtimes = dict(mtimes)
@@ -141,7 +156,7 @@ def _incremental_refresh(
             except Exception:
                 mtime = new_mtimes.get(ann_path, 0.0)
             if mtime != new_mtimes.get(ann_path, -999.0):
-                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                has_ann, new_ap, sc = _find_annotation(fp)
                 item["has_ann"] = has_ann
                 item["ann_path"] = new_ap
                 item["shape_count"] = sc
@@ -153,10 +168,10 @@ def _incremental_refresh(
                     except Exception:
                         new_mtimes[new_ap] = 0.0
         else:
-            # 尚無標注：只做 exists()，不讀檔案內容
+            # 尚無標注：只檢查影像同目錄同名 JSON。
             candidate = Path(fp).with_suffix(".json")
             if candidate.exists():
-                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                has_ann, new_ap, sc = _find_annotation(fp)
                 item["has_ann"] = has_ann
                 item["ann_path"] = new_ap
                 item["shape_count"] = sc
@@ -168,7 +183,7 @@ def _incremental_refresh(
     return cached, new_mtimes
 
 
-def _get_items(manifest_id: str, workspace_dir: str, db_items: list[dict]) -> list[dict]:
+def _get_items(manifest_id: str, db_items: list[dict]) -> list[dict]:
     """session_state 快取入口：cache miss → full scan；hit → incremental refresh。"""
     cached = st.session_state.get("m012_items")
     if (
@@ -176,13 +191,13 @@ def _get_items(manifest_id: str, workspace_dir: str, db_items: list[dict]) -> li
         or cached is None
         or len(cached) != len(db_items)
     ):
-        items, mtimes = _scan_items(db_items, workspace_dir)
+        items, mtimes = _scan_items(db_items)
         st.session_state["m012_items"]     = items
         st.session_state["m012_mtimes"]    = mtimes
         st.session_state["m012_cache_mid"] = manifest_id
         return items
 
-    items, mtimes = _incremental_refresh(cached, st.session_state["m012_mtimes"], workspace_dir)
+    items, mtimes = _incremental_refresh(cached, st.session_state["m012_mtimes"])
     st.session_state["m012_items"]  = items
     st.session_state["m012_mtimes"] = mtimes
     return items
@@ -244,17 +259,16 @@ def _find_venv_python_cmd(xany_exe: str) -> list[str]:
     return [str(Path(xany_exe).parent / "python.exe")]
 
 
-def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
-                 xany_exe: str, ann_path: str = "") -> str | None:
+def _launch_xany(file_path: str, labels: list[str], classes_path: str,
+                 xany_work_dir: str, xany_exe: str, ann_path: str = "") -> str | None:
     """以 X-AnyLabeling 開啟圖片（非阻塞），輸出到影像所在目錄。"""
-    ws = Path(workspace_dir)
-    classes_txt = ws / "classes.txt"
+    classes_txt = Path(classes_path) if classes_path else Path()
     out_dir = Path(file_path).parent
 
     xany_args = [
         "--filename", file_path,
         "--output", str(out_dir),
-        "--work-dir", str(ws / ".xanylabeling"),
+        "--work-dir", xany_work_dir,
         "--nodata", "--autosave", "--no-auto-update-check",
     ]
     if classes_txt.exists():
@@ -283,6 +297,51 @@ def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
                 "重建後重啟應用程式即可自動使用 py -3.11 啟動。"
             )
         return str(e)
+
+
+def _launch_labelme(file_path: str, classes_path: str, labelme_exe: str) -> str | None:
+    """以 LabelMe 開啟圖片（非阻塞），輸出到影像同目錄同名 JSON。"""
+    out_json = str(Path(file_path).with_suffix(".json"))
+    classes_txt = Path(classes_path) if classes_path else Path()
+
+    labelme_args = [
+        file_path,
+        "--output", out_json,
+        "--nodata",
+        "--autosave",
+    ]
+    if classes_txt.exists():
+        labelme_args += ["--labels", str(classes_txt)]
+
+    exe_path = Path(labelme_exe)
+    if labelme_exe != "labelme" and (exe_path.parent / "python.exe").exists():
+        cmd = [str(exe_path.parent / "python.exe"), "-m", "labelme"] + labelme_args
+    else:
+        cmd = [labelme_exe] + labelme_args
+
+    try:
+        subprocess.Popen(cmd)
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def _launch_annotation_tool(
+    annotation_tool: str,
+    file_path: str,
+    labels: list[str],
+    classes_path: str,
+    xany_work_dir: str,
+    xany_exe: str,
+    labelme_exe: str,
+    ann_path: str = "",
+) -> tuple[str, str | None]:
+    """Launch selected annotation tool. Returns (display_name, error)."""
+    if annotation_tool == "labelme":
+        return "LabelMe", _launch_labelme(file_path, classes_path, labelme_exe)
+    return "X-AnyLabeling", _launch_xany(
+        file_path, labels, classes_path, xany_work_dir, xany_exe, ann_path=ann_path
+    )
 
 
 def _show_img(fp: str, enhance: bool) -> None:
@@ -364,91 +423,52 @@ def _make_ann_thumb(file_path: str, ann_path: str) -> bytes | None:
         return None
 
 
-# ─── hover popup 注入（parent-frame JS） ─────────────────────────────────────
-
-_POPUP_JS = """
-<script>
-(function(){
-  try {
-    var p = window.parent;
-    var d = p.document;
-    if (!d.getElementById('_c012_popup')) {
-      var el = d.createElement('div');
-      el.id = '_c012_popup';
-      el.style.cssText =
-        'display:none;position:fixed;z-index:99999;pointer-events:none;' +
-        'background:#fff;border:1.5px solid #94a3b8;border-radius:10px;' +
-        'padding:10px;box-shadow:0 8px 32px rgba(0,0,0,.28);max-width:500px;';
-      el.innerHTML =
-        '<img id="_c012_pimg" style="max-height:400px;max-width:480px;' +
-        'display:block;border-radius:4px;" />' +
-        '<div id="_c012_ptag" style="margin-top:5px;font-size:11px;' +
-        'text-align:center;color:#64748b;font-family:sans-serif;"></div>';
-      d.body.appendChild(el);
-    }
-    var popup = d.getElementById('_c012_popup');
-    var pImg  = d.getElementById('_c012_pimg');
-    var pTag  = d.getElementById('_c012_ptag');
-
-    function move(e) {
-      var x = e.clientX + 18, y = e.clientY - 12;
-      var pw = popup.offsetWidth  || 500;
-      var ph = popup.offsetHeight || 400;
-      if (x + pw > p.innerWidth)  x = e.clientX - pw - 10;
-      if (y + ph > p.innerHeight) y = p.innerHeight - ph - 8;
-      if (y < 0) y = 4;
-      popup.style.left = x + 'px';
-      popup.style.top  = y + 'px';
-    }
-
-    function bind() {
-      d.querySelectorAll('[data-m012p]').forEach(function(img) {
-        if (img._m012ok) return;
-        img._m012ok = true;
-        img.style.cursor = 'zoom-in';
-        img.addEventListener('mouseenter', function(e) {
-          pImg.src = img.getAttribute('data-m012p');
-          pTag.textContent = img.getAttribute('data-m012t') || '';
-          pTag.style.color = img.getAttribute('data-m012c') || '#64748b';
-          popup.style.display = 'block';
-          move(e);
-        });
-        img.addEventListener('mousemove', move);
-        img.addEventListener('mouseleave', function() {
-          popup.style.display = 'none';
-        });
-      });
-    }
-
-    bind();
-    new p.MutationObserver(bind).observe(d.body, { childList: true, subtree: true });
-  } catch(e) { /* cross-origin or not in parent frame */ }
-})();
-</script>
-"""
-
-
-def _inject_popup() -> None:
-    """在 parent Streamlit frame 注入 hover popup 機制（一次性）。"""
-    components.html(_POPUP_JS, height=0)
-
-
 # ─── 縮圖 HTML 片段（供 hover popup 使用） ───────────────────────────────────
 
+@st.cache_data(show_spinner=False, max_entries=500)
+def _make_preview(file_path: str) -> bytes | None:
+    try:
+        from PIL import Image, ImageOps
+        img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
+        img.thumbnail((640, 480), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False, max_entries=500)
+def _make_ann_preview(file_path: str, ann_path: str) -> bytes | None:
+    try:
+        label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
+        ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
+        from PIL import Image
+        img = Image.open(io.BytesIO(ann_bytes)).convert("RGB")
+        img.thumbnail((640, 480), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
 def _thumb_html(thumb_bytes: bytes | None, img_path: str, tag: str,
-                color: str, border: str) -> str:
+                color: str, border: str, preview_bytes: bytes | None = None) -> str:
     if not thumb_bytes:
         return '<span style="color:#94a3b8;font-size:10px">—</span>'
     b64 = base64.b64encode(thumb_bytes).decode()
-    # 用原圖路徑產生 file:// URL 供 popup 預覽（parent-frame）
-    prev_src = f"data:image/jpeg;base64,{b64}"
+    p64 = base64.b64encode(preview_bytes or thumb_bytes).decode()
     return (
-        f'<div style="display:inline-block;text-align:center;">'
+        f'<div class="m012-thumb" style="display:inline-block;text-align:center;position:relative;">'
         f'<img src="data:image/jpeg;base64,{b64}"'
-        f' data-m012p="{prev_src}"'
-        f' data-m012t="{tag}" data-m012c="{color}"'
         f' style="max-height:80px;width:auto;border-radius:5px;'
-        f'border:2px solid {border};display:block;" />'
+        f'border:2px solid {border};display:block;cursor:zoom-in;" />'
+        f'<div class="m012-preview">'
+        f'<img src="data:image/jpeg;base64,{p64}" />'
+        f'<div style="margin-top:6px;font-size:12px;text-align:center;color:{color};'
+        f'font-family:sans-serif;">{tag}</div>'
+        f'</div>'
         f'</div>'
     )
 
@@ -525,18 +545,18 @@ def _keyboard_listener() -> None:
 
 # ─── 分類輔助函式 ────────────────────────────────────────────────────────────
 
-def _save_clf(workspace_dir: str, item_id: str, label: str, cache: dict) -> None:
-    if not workspace_dir:
+def _save_clf(manifest_id: str, item_id: str, label: str, cache: dict) -> None:
+    if not manifest_id:
         return
     cache[item_id] = label
-    _cfg.save_classifications(workspace_dir, cache)
+    _cfg.save_classifications(manifest_id, cache)
 
 
-def _clear_clf(workspace_dir: str, item_id: str, cache: dict) -> None:
-    if not workspace_dir:
+def _clear_clf(manifest_id: str, item_id: str, cache: dict) -> None:
+    if not manifest_id:
         return
     cache.pop(item_id, None)
-    _cfg.save_classifications(workspace_dir, cache)
+    _cfg.save_classifications(manifest_id, cache)
 
 
 def _next_unclassified(items: list, current_idx: int, clf: dict) -> int:
@@ -563,17 +583,26 @@ def render_output(result: dict) -> None:
     manifest_id            = result.get("manifest_id", "")
     manifest_name          = result.get("manifest_name", "")
     labels                 = result.get("labels", [])
+    annotation_tool        = result.get("annotation_tool", "x-anylabeling")
     classification_labels  = result.get("classification_labels", [])
-    workspace_dir          = result.get("workspace_dir", "")
     xany_exe               = result.get("xany_exe", "xanylabeling")
+    labelme_exe            = result.get("labelme_exe", "labelme")
+    classes_path           = result.get("classes_path", "")
+    xany_work_dir          = result.get("xany_work_dir", "")
+    cfg                    = _cfg.load_config()
+    autorefresh_enabled    = bool(result.get("autorefresh_enabled", cfg.get("autorefresh_enabled", True)))
+    autorefresh_seconds    = int(result.get("autorefresh_seconds", cfg.get("autorefresh_seconds", 10)) or 10)
+    autorefresh_seconds    = max(5, min(300, autorefresh_seconds))
+
+    if autorefresh_enabled:
+        st_autorefresh(
+            interval=autorefresh_seconds * 1000,
+            key="m012_annotation_autorefresh",
+        )
 
     # 每次 rerun 從磁碟重讀分類結果
-    classifications: dict[str, str] = {}
-    if workspace_dir:
-        classifications = _cfg.load_classifications(workspace_dir)
+    classifications: dict[str, str] = _cfg.load_classifications(manifest_id) if manifest_id else {}
 
-    # 注入 hover popup JS
-    _inject_popup()
     # 注入鍵盤快捷鍵
     _keyboard_listener()
 
@@ -581,6 +610,29 @@ def render_output(result: dict) -> None:
     st.markdown("""<style>
 [data-testid='stImage'] img { max-height: 58vh; width: auto !important; object-fit: contain; }
 .thumb-selected { border: 3px solid #1a73e8 !important; border-radius: 6px; padding: 2px; }
+.m012-preview {
+    display: none;
+    position: fixed;
+    left: min(46vw, 760px);
+    top: 92px;
+    z-index: 2147483000;
+    max-width: min(46vw, 680px);
+    background: #fff;
+    border: 1.5px solid #94a3b8;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 10px 36px rgba(15, 23, 42, .28);
+    pointer-events: none;
+}
+.m012-preview img {
+    display: block;
+    max-width: min(44vw, 640px);
+    max-height: 70vh;
+    width: auto;
+    height: auto;
+    border-radius: 4px;
+}
+.m012-thumb:hover .m012-preview { display: block; }
 </style>""", unsafe_allow_html=True)
 
     # ── 標注狀態：session_state 快取 + mtime 增量更新 ─────────────────────────
@@ -590,7 +642,7 @@ def render_output(result: dict) -> None:
     except Exception:
         db_items = result.get("items", [])
 
-    items     = _get_items(manifest_id, workspace_dir, db_items)
+    items     = _get_items(manifest_id, db_items)
     annotated = sum(1 for it in items if it["has_ann"])
     total     = len(items)
 
@@ -614,9 +666,21 @@ def render_output(result: dict) -> None:
         m3.metric("⏳ 待標注", total - annotated)
         m4.metric("完成率",   f"{pct * 100:.1f}%")
     st.progress(pct, text=f"已標注 {annotated} / {total} 張（{pct * 100:.1f}%）")
+    if autorefresh_enabled:
+        st.caption(f"自動重新掃描：每 {autorefresh_seconds} 秒")
+    else:
+        st.caption("自動重新掃描：已關閉")
 
-    if st.button("📁 前往 Update →", type="primary", key="m012_goto_update"):
-        _post_message("SWITCH_TAB", {"plugin_id": "module_013", "tab": "input"})
+    refresh_c, update_c = st.columns([1, 1])
+    with refresh_c:
+        if st.button("重新掃描標注", key="m012_refresh_annotations", use_container_width=True):
+            st.session_state.pop("m012_items", None)
+            st.session_state.pop("m012_mtimes", None)
+            st.session_state.pop("m012_cache_mid", None)
+            st.rerun()
+    with update_c:
+        if st.button("📁 前往 Update →", type="primary", key="m012_goto_update", use_container_width=True):
+            _post_message("SWITCH_TAB", {"plugin_id": "module_013", "tab": "input"})
 
     st.divider()
 
@@ -703,8 +767,13 @@ def render_output(result: dict) -> None:
                 is_selected = (global_idx == sel_idx)
 
                 thumb_bytes = _make_thumb(fp) if fp else None
+                preview_bytes = _make_preview(fp) if fp else None
                 ann_thumb_bytes = (
                     _make_ann_thumb(fp, item["ann_path"])
+                    if has_ann and item["ann_path"] else None
+                )
+                ann_preview_bytes = (
+                    _make_ann_preview(fp, item["ann_path"])
                     if has_ann and item["ann_path"] else None
                 )
 
@@ -719,6 +788,7 @@ def render_output(result: dict) -> None:
                             tag=fname,
                             color="#1a73e8",
                             border=border,
+                            preview_bytes=preview_bytes,
                         )
                         if is_selected:
                             html = f'<div class="thumb-selected">{html}</div>'
@@ -734,6 +804,7 @@ def render_output(result: dict) -> None:
                             tag=f"{fname} (標注)",
                             color="#16a34a",
                             border="#16a34a",
+                            preview_bytes=ann_preview_bytes,
                         )
                         st.markdown(ann_html, unsafe_allow_html=True)
                     elif has_ann:
@@ -772,11 +843,17 @@ def render_output(result: dict) -> None:
                             key=f"xany_{item['item_id']}",
                             use_container_width=True,
                         ):
-                            err = _launch_xany(fp, labels, workspace_dir, xany_exe, ann_path=item["ann_path"])
+                            st.session_state["m012_selected_idx"] = global_idx
+                            tool_name, err = _launch_annotation_tool(
+                                annotation_tool, fp, labels, classes_path,
+                                xany_work_dir, xany_exe, labelme_exe,
+                                ann_path=item["ann_path"],
+                            )
                             if err:
                                 st.error(f"啟動失敗：{err}")
                             else:
-                                st.toast(f"X-AnyLabeling 已開啟：{fname}", icon="🖊")
+                                st.toast(f"{tool_name} 已開啟：{fname}", icon="🖊")
+                            st.rerun()
 
             # ─ 分頁控制列 ────────────────────────────────────────────
             if n_pages > 1:
@@ -853,7 +930,7 @@ setTimeout(function() {
                 _syms = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"]
                 for _qi, _lbl in enumerate(classification_labels[:9]):
                     if st.button(f"{_syms[_qi]} {_lbl}", key=f"qc_{item_id}_{_qi}"):
-                        _save_clf(workspace_dir, item_id, _lbl, classifications)
+                        _save_clf(manifest_id, item_id, _lbl, classifications)
                         st.session_state["m012_selected_idx"] = _next_unclassified(
                             items, sel_idx, classifications
                         )
@@ -882,7 +959,7 @@ setTimeout(function() {
                     # 從 "[1] 物件A" 還原為 "物件A"
                     import re as _re
                     raw = _re.sub(r"^\[\d+\] ", "", chosen)
-                    _save_clf(workspace_dir, item_id, raw, classifications)
+                    _save_clf(manifest_id, item_id, raw, classifications)
                     st.session_state["m012_selected_idx"] = _next_unclassified(
                         items, sel_idx, classifications
                     )
@@ -901,7 +978,7 @@ setTimeout(function() {
                         key=f"clf_reset_{item_id}",
                         help="清除分類",
                     ):
-                        _clear_clf(workspace_dir, item_id, classifications)
+                        _clear_clf(manifest_id, item_id, classifications)
                         st.rerun()
 
                 st.divider()

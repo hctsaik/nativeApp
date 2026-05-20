@@ -10,7 +10,7 @@
 | Runner | `cv_framework` |
 | Sheet | `sheet-annotation_workflow`（與 module_010、module_013 組合） |
 | 上游依賴 | module_010（Data Feeder）寫入 `shared.json` |
-| 下游 | module_013（Update）讀同一 workspace |
+| 下游 | module_013（Update）讀同一 manifest 與分類 config |
 
 從 Data Feeder 建立的 DatasetManifest 開啟標注工作階段，逐張以 X-AnyLabeling 標注，並支援圖片快速分類。
 
@@ -22,7 +22,7 @@
 012_input.py   → 讀 shared.json 取 manifest_id，設定 annotation_labels / classification_labels
 012_process.py → (passthrough) 彙整 manifest items，偵測現有標注
 012_output.py  → 雙欄 UI：左欄圖片列表 + 右欄 Detail Panel（標注 + 分類）
-_config.py     → 設定持久化 + workspace 路徑管理
+_config.py     → 設定持久化 + manifest-scoped 分類/labels 檔
 ```
 
 ---
@@ -37,8 +37,11 @@ _config.py     → 設定持久化 + workspace 路徑管理
 
 ```json
 {
-  "annotation_labels": ["物件A", "物件B", "物件C"],
+  "annotation_tool": "x-anylabeling",
+  "annotation_labels": [],
   "classification_labels": ["A", "B"],
+  "autorefresh_enabled": true,
+  "autorefresh_seconds": 10,
   "last_manifest_id": "ad44a6e7..."
 }
 ```
@@ -52,33 +55,38 @@ _config.py     → 設定持久化 + workspace 路徑管理
   → last_manifest_id  ← Data Feeder 每次執行後更新
 ```
 
-### Workspace 路徑
+### Manifest-scoped 檔案
 
-每個 manifest 有獨立的 workspace，確保不同 session 的分類資料互不干擾：
+每個 manifest 有獨立的 config/state 檔，確保不同 session 的分類資料互不干擾：
 
 ```
-{CIM_LOG_DIR}/annotation_workspaces/module_012_{manifest_id[:12]}/
-  classes.txt           ← X-AnyLabeling 類別清單
-  classifications.json  ← 分類結果 {item_id: label}
-  .xanylabeling/        ← X-AnyLabeling 工作目錄
+{CIM_LOG_DIR}/config/module_012_classes_{manifest_id[:12]}.txt
+{CIM_LOG_DIR}/config/module_012_classifications_{manifest_id[:12]}.json
+{CIM_LOG_DIR}/xanylabeling_state/module_012_{manifest_id[:12]}/
 ```
 
 ---
 
 ## Input Page（`012_input.py`）
 
-- **不顯示 Manifest 選擇器**：自動從 `shared.json` 取 `last_manifest_id`，以 info bar 顯示（`📦 bull 16 張 ｜ 若要切換請回 Data Feeder 重新執行`）
-- **標注類別（annotation_labels）**：每行一個，存入 `module_012.json` 與 `classes.txt`
-- **分類類別（classification_labels）**：可選。Output 頁面的快速分類下拉選項，與 X-AnyLabeling 標注框無關
+Input Page 是「開始標注前確認」頁，不是完整設定中心。主路徑只要求使用者確認資料集與標注類別，其他選項收進可選/進階區塊。
+
+- **目前資料集**：自動從 `shared.json` 取 `last_manifest_id`，顯示 `目前資料集：<name>｜<N> 張圖片`；若資料集不正確，回 Data Feeder 重新選取。
+- **標注類別（annotation_labels）**：主要欄位，每行一個標注框類別；預設空白，避免 demo 類別被誤用。空白行會忽略，畫面會顯示將建立的類別數。
+- **圖片快速分類（classification_labels）**：可選 expander，用於標注列表頁替整張圖片分類，不會寫入標注框 JSON。
+- **進階設定**：包含 `X-AnyLabeling` / `LabelMe` 標注工具選擇，以及自動重新掃描標注 JSON 的設定。
+- **自動重新掃描**：預設開啟，每 `10` 秒，範圍 `5-300` 秒。
 
 回傳 result：
 
 ```python
 {
     "manifest_id": str,
+    "annotation_tool": str,       # x-anylabeling | labelme
     "labels": list[str],           # annotation_labels
     "classification_labels": list[str],
-    "workspace_dir": str,
+    "autorefresh_enabled": bool,
+    "autorefresh_seconds": int,
 }
 ```
 
@@ -107,7 +115,7 @@ _config.py     → 設定持久化 + workspace 路徑管理
 ann_path = Path(img_path).with_suffix(".json")
 ```
 
-不使用 `workspace/annotations/` 舊路徑。
+只使用影像同目錄同名 JSON。
 
 ### 分類功能
 
@@ -123,14 +131,14 @@ ann_path = Path(img_path).with_suffix(".json")
 ### 分類持久化
 
 ```python
-def _save_clf(workspace_dir: str, item_id: str, label: str, cache: dict) -> None:
-    if not workspace_dir:   # guard: 避免寫到 CWD
+def _save_clf(manifest_id: str, item_id: str, label: str, cache: dict) -> None:
+    if not manifest_id:
         return
     cache[item_id] = label
-    _cfg.save_classifications(workspace_dir, cache)
+    _cfg.save_classifications(manifest_id, cache)
 ```
 
-`classifications.json` 結構：
+分類檔存於 `{CIM_LOG_DIR}/config/module_012_classifications_{manifest_id[:12]}.json`，結構：
 
 ```json
 {
@@ -151,22 +159,36 @@ def _make_ann_thumb(file_path: str, ann_path: str) -> bytes | None:
 
 在圖片列表中顯示標注後的縮圖（120×90，綠框 `#16a34a`）。
 
-### X-AnyLabeling 啟動
+### 標注工具啟動
 
-```python
-# 繞過 Windows WDAC 對 .exe 的封鎖
-python_exe = Path(xany_exe).parent / "python.exe"
-if python_exe.exists():
-    cmd = [str(python_exe), "-c", "from anylabeling.app import main; main()", *xany_args]
-else:
-    cmd = [xany_exe, *xany_args]
-```
+Output 頁的「🖊 標注工具」依 Input 頁的 `annotation_tool` 設定啟動：
 
-X-AnyLabeling 輸出到**影像所在目錄**（`--output str(out_dir)`），不輸出到 workspace。
+- `x-anylabeling`：使用 repo-local `.venv-xanylabeling`，透過 WDAC-trusted Python 啟動 `anylabeling.app.main`
+- `labelme`：優先使用 `LABELME_EXE`，其次偵測 sibling `LabelMe_Dino/.venv/Scripts/labelme.exe`，最後 fallback 到 PATH 的 `labelme`
+
+兩者都輸出到**影像所在目錄同名 JSON**。
+
+#### X-AnyLabeling security/runtime contract
+
+請不要在未重新驗證前改動以下契約：
+
+- 已驗證 X-AnyLabeling runtime：`x-anylabeling-cvhub[cpu]` `4.0.0-beta.7`
+- 已驗證 Python：`3.11.9`
+- `.venv-xanylabeling\Scripts\xanylabeling.exe` 只用來定位 venv，不直接執行
+- 實際啟動需走 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`
+- 必須保留 `--nodata --autosave --no-auto-update-check`
+- 若 classes file 存在，必須保留 `--labels <classes.txt> --validatelabel exact`
+
+這些限制是為了避免 Windows WDAC 封鎖 uv trampoline、避免 GUI 啟動時連外更新檢查，並確保 labels 不會被輸入成非預期類別。回歸測試在 `012_output_test.py`。
 
 ### 自動更新
 
-`st_autorefresh(interval=30_000)` 固定 30 秒更新（偵測新標注）。
+由 Input 頁設定：
+
+- `autorefresh_enabled`
+- `autorefresh_seconds`（5–300 秒）
+
+Output 依設定呼叫 `st_autorefresh(interval=autorefresh_seconds * 1000)`。
 
 ---
 
@@ -186,8 +208,8 @@ X-AnyLabeling 輸出到**影像所在目錄**（`--output str(out_dir)`），不
 
 ### 分類後到 Update 看不到結果
 
-原因：Data Feeder 重新執行會建立新的 `manifest_id`，導致 workspace 不同。確認 Annotation 和 Update 都顯示同一個 manifest 名稱（info bar）。
+原因：Data Feeder 重新執行會建立新的 `manifest_id`，因此分類 config key 不同。確認 Annotation 和 Update 都顯示同一個 manifest 名稱（info bar）。
 
 ### X-AnyLabeling 標注後沒更新
 
-等 30 秒自動更新，或重新執行 Input 頁的 `▶ 執行`。
+依 Input 頁設定的間隔等待自動更新，或在 Output 頁按「重新掃描標注」。

@@ -28,9 +28,16 @@ def get_manifest_db_path() -> Path:
     d = _CIM_LOG_DIR / "db"; d.mkdir(parents=True, exist_ok=True)
     return d / "manifest.sqlite"
 
-def get_workspace_dir_for_manifest(manifest_id: str) -> Path:
-    """與 module_012 相同的 workspace 路徑，用來讀取標注和分類結果。"""
-    return _CIM_LOG_DIR / "annotation_workspaces" / f"module_012_{manifest_id[:12]}"
+def _manifest_key(manifest_id: str) -> str:
+    return manifest_id[:12] or "default"
+
+def get_classification_path(manifest_id: str) -> Path:
+    return _CIM_LOG_DIR / "config" / f"module_012_classifications_{_manifest_key(manifest_id)}.json"
+
+def get_default_export_dir(manifest_id: str) -> Path:
+    path = _CIM_LOG_DIR / "exports" / f"module_013_{_manifest_key(manifest_id)}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 def get_shared_manifest_id() -> str:
     """回傳 Data Feeder 最後建立的 manifest_id（從 shared.json 讀取）。"""

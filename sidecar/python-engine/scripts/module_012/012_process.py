@@ -57,11 +57,10 @@ def _json_matches_image(json_file: Path, target: Path) -> bool:
         return True
 
 
-def _find_annotation(img_path: str, workspace_dir: str = "") -> str | None:
+def _find_annotation(img_path: str) -> str | None:
     """尋找與圖片對應的 LabelMe JSON 標注檔，回傳路徑或 None。
 
-    優先查影像同目錄同名 .json（module_012 的 X-AnyLabeling 輸出位置）。
-    workspace/annotations 僅保留為舊版相容 fallback。
+    module_012 僅使用影像同目錄同名 .json。
     """
     if not img_path:
         return None
@@ -71,32 +70,6 @@ def _find_annotation(img_path: str, workspace_dir: str = "") -> str | None:
     same_dir = Path(img_path).with_suffix(".json")
     if same_dir.exists() and _json_matches_image(same_dir, target):
         return str(same_dir)
-
-    if not workspace_dir:
-        return None
-
-    ann_dir = Path(workspace_dir) / "annotations"
-    if not ann_dir.exists():
-        return None
-
-    # 舊版相容：workspace/annotations basename 相符且 imagePath 吻合
-    naive = ann_dir / Path(img_path).with_suffix(".json").name
-    if naive.exists() and _json_matches_image(naive, target):
-        return str(naive)
-
-    # 全掃：其他 JSON 檔是否有 imagePath 指向 target
-    for jf in ann_dir.glob("*.json"):
-        if jf == naive:
-            continue
-        try:
-            stored = json.loads(jf.read_text(encoding="utf-8")).get("imagePath", "")
-            stored_path = Path(stored)
-            if stored and not stored_path.is_absolute():
-                stored_path = jf.parent / stored_path
-            if stored and stored_path.resolve() == target:
-                return str(jf)
-        except Exception:
-            continue
 
     return None
 
@@ -121,24 +94,42 @@ def get_xany_exe() -> str:
     return "xanylabeling"
 
 
+def get_labelme_exe() -> str:
+    """回傳 LabelMe 執行檔路徑。"""
+    env_exe = os.environ.get("LABELME_EXE", "")
+    candidates = [
+        Path(env_exe) if env_exe else None,
+        _PROJECT_ROOT.parent / "LabelMe_Dino" / ".venv" / "Scripts" / "labelme.exe",
+        _PROJECT_ROOT / "LabelMe_Dino" / ".venv" / "Scripts" / "labelme.exe",
+    ]
+    for c in candidates:
+        if c and c.exists():
+            return str(c)
+    return "labelme"
+
+
 # ─── 公開 API ─────────────────────────────────────────────────────────────────
 
 def execute_logic(params: dict) -> dict:
     """
-    掃描 manifest 的所有圖片，確認標注狀態，準備 workspace。
+    掃描 manifest 的所有圖片，確認標注狀態，準備 X-AnyLabeling 設定檔。
 
     params:
         manifest_id: str
+        annotation_tool: str
         labels: list[str]
-        workspace_dir: str
-
     回傳:
         mode: 'ready' | 'error'
         manifest_id: str
         manifest_name: str
         labels: list[str]
-        workspace_dir: str
+        annotation_tool: str
+        autorefresh_enabled: bool
+        autorefresh_seconds: int
         xany_exe: str
+        labelme_exe: str
+        classes_path: str
+        xany_work_dir: str
         total: int
         annotated: int
         items: list[dict]   # {item_id, file_path, width, height, has_ann, ann_path, shape_count}
@@ -146,23 +137,28 @@ def execute_logic(params: dict) -> dict:
     """
     _log.info("=" * 60)
     _log.info("[012] execute_logic 開始")
-    _log.info("[012] 收到 params: manifest_id=%s | labels=%s | classification_labels=%s | workspace_dir=%r",
+    _log.info("[012] 收到 params: manifest_id=%s | labels=%s | classification_labels=%s",
               params.get("manifest_id", ""), params.get("labels", []),
-              params.get("classification_labels", []), params.get("workspace_dir", ""))
+              params.get("classification_labels", []))
 
     manifest_id: str = params.get("manifest_id", "")
+    annotation_tool: str = params.get("annotation_tool", "x-anylabeling")
+    if annotation_tool not in {"x-anylabeling", "labelme"}:
+        annotation_tool = "x-anylabeling"
     labels: list[str] = params.get("labels", [])
     classification_labels: list[str] = params.get("classification_labels", [])
-    workspace_dir: str = params.get("workspace_dir", "")
+    autorefresh_enabled: bool = bool(params.get("autorefresh_enabled", True))
+    autorefresh_seconds: int = int(params.get("autorefresh_seconds", 10) or 10)
+    autorefresh_seconds = max(5, min(300, autorefresh_seconds))
 
     # ── 1. 驗證 manifest_id ────────────────────────────────────────────────────
     if not manifest_id:
         _log.error("[012] manifest_id 為空，返回 error")
         return {"mode": "error", "error": "未選擇 Manifest", "manifest_id": "",
-                "manifest_name": "", "labels": labels,
+                "manifest_name": "", "annotation_tool": annotation_tool, "labels": labels,
                 "classification_labels": classification_labels,
-                "workspace_dir": workspace_dir,
-                "xany_exe": "", "total": 0, "annotated": 0, "items": []}
+                "xany_exe": "", "labelme_exe": "", "classes_path": "", "xany_work_dir": "",
+                "total": 0, "annotated": 0, "items": []}
 
     # ── 2. 讀取 manifest 基本資訊 ──────────────────────────────────────────────
     db_path = _cfg.get_manifest_db_path()
@@ -172,9 +168,10 @@ def execute_logic(params: dict) -> dict:
         _log.error("[012] 找不到 manifest_id=%s", manifest_id)
         return {"mode": "error", "error": f"找不到 Manifest：{manifest_id}",
                 "manifest_id": manifest_id, "manifest_name": "",
-                "labels": labels, "classification_labels": classification_labels,
-                "workspace_dir": workspace_dir,
-                "xany_exe": "", "total": 0, "annotated": 0, "items": []}
+                "annotation_tool": annotation_tool, "labels": labels,
+                "classification_labels": classification_labels,
+                "xany_exe": "", "labelme_exe": "", "classes_path": "", "xany_work_dir": "",
+                "total": 0, "annotated": 0, "items": []}
 
     manifest_name = manifest.get("name", manifest_id)
     _log.info("[012] manifest 找到: name=%s source_type=%s",
@@ -187,30 +184,21 @@ def execute_logic(params: dict) -> dict:
         _log.debug("[012] 前 3 筆 file_path: %s",
                    [it.get("file_path", "") for it in all_db_items[:3]])
 
-    # ── 4. 確定 workspace 路徑 ─────────────────────────────────────────────────
-    ws_for_scan = workspace_dir if workspace_dir else str(_cfg.get_workspace_dir(manifest_id))
-    _log.info("[012] workspace 路徑: %s  (來源: %s)",
-              ws_for_scan, "params" if workspace_dir else "manifest_id 推算")
-
     same_dir_ann_count = sum(
         1
         for it in all_db_items
         if it.get("file_path", "") and Path(it.get("file_path", "")).with_suffix(".json").exists()
     )
-    ann_dir = Path(ws_for_scan) / "annotations"
-    ann_dir_exists = ann_dir.exists()
-    legacy_anns = sorted(ann_dir.glob("*.json")) if ann_dir_exists else []
-    _log.info("[012] 影像同目錄標注檔數=%d | legacy annotations/ exists=%s 檔案數=%d",
-              same_dir_ann_count, ann_dir_exists, len(legacy_anns))
-    if same_dir_ann_count == 0 and not legacy_anns:
-        _log.warning("[012] 未找到影像同目錄 .json 或 legacy annotations/ JSON → 所有圖片將標示為「未標注」")
+    _log.info("[012] 影像同目錄標注檔數=%d", same_dir_ann_count)
+    if same_dir_ann_count == 0:
+        _log.warning("[012] 未找到影像同目錄 .json → 所有圖片將標示為「未標注」")
 
     # ── 5. 掃描各圖片的標注狀態 ────────────────────────────────────────────────
     items: list[dict] = []
     annotated = 0
     for it in all_db_items:
         fp = it.get("file_path", "")
-        ann_path = _find_annotation(fp, ws_for_scan) if fp else None
+        ann_path = _find_annotation(fp) if fp else None
         has_ann = ann_path is not None
         sc = _count_shapes(ann_path) if has_ann else 0
         if has_ann:
@@ -230,21 +218,24 @@ def execute_logic(params: dict) -> dict:
     _log.info("[012] 標注掃描完成: total=%d annotated=%d unannotated=%d",
               len(items), annotated, len(items) - annotated)
 
-    # ── 6. 準備 workspace ──────────────────────────────────────────────────────
-    ws = Path(workspace_dir) if workspace_dir else _cfg.get_workspace_dir(manifest_id)
-    ws.mkdir(parents=True, exist_ok=True)
-    classes_txt = ws / "classes.txt"
+    # ── 6. 準備 X-AnyLabeling labels / GUI state ──────────────────────────────
+    classes_txt = _cfg.get_classes_path(manifest_id)
     if labels:
+        classes_txt.parent.mkdir(parents=True, exist_ok=True)
         classes_txt.write_text("\n".join(labels), encoding="utf-8")
         _log.info("[012] classes.txt 寫入: %s  內容=%s", classes_txt, labels)
     else:
         _log.warning("[012] labels 為空，classes.txt 未寫入")
+    xany_work_dir = _cfg.get_xany_work_dir(manifest_id)
 
     # ── 7. 儲存 config（last_manifest_id 供 module_013 讀取）────────────────────
     try:
         cfg = _cfg.load_config()
+        cfg["annotation_tool"] = annotation_tool
         cfg["annotation_labels"] = labels
         cfg["classification_labels"] = classification_labels
+        cfg["autorefresh_enabled"] = autorefresh_enabled
+        cfg["autorefresh_seconds"] = autorefresh_seconds
         cfg["last_manifest_id"] = manifest_id
         _cfg.save_config(cfg)
         _log.info("[012] module_012.json 已儲存: last_manifest_id=%s", manifest_id)
@@ -252,19 +243,26 @@ def execute_logic(params: dict) -> dict:
         _log.error("[012] module_012.json 儲存失敗: %s", exc)
 
     xany_exe = get_xany_exe()
+    labelme_exe = get_labelme_exe()
     _log.info("[012] xany_exe: %s  exists=%s", xany_exe, Path(xany_exe).exists())
-    _log.info("[012] execute_logic 完成 ✔  total=%d annotated=%d workspace=%s",
-              len(items), annotated, str(ws))
+    _log.info("[012] labelme_exe: %s  exists=%s", labelme_exe, Path(labelme_exe).exists())
+    _log.info("[012] execute_logic 完成 ✔  total=%d annotated=%d",
+              len(items), annotated)
     _log.info("=" * 60)
 
     return {
         "mode":                 "ready",
         "manifest_id":          manifest_id,
         "manifest_name":        manifest_name,
+        "annotation_tool":      annotation_tool,
         "labels":               labels,
         "classification_labels": classification_labels,
-        "workspace_dir":        str(ws),
+        "autorefresh_enabled":   autorefresh_enabled,
+        "autorefresh_seconds":   autorefresh_seconds,
         "xany_exe":             xany_exe,
+        "labelme_exe":          labelme_exe,
+        "classes_path":          str(classes_txt),
+        "xany_work_dir":         str(xany_work_dir),
         "total":                len(items),
         "annotated":            annotated,
         "items":                items,

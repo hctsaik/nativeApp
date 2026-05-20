@@ -95,6 +95,6 @@ module_010
   ├─ 建立 manifest.sqlite
   └─ 寫入 shared.json:last_manifest_id
         │
-        ├─ module_012 讀取圖片清單、建立標注 workspace
+        ├─ module_012 讀取圖片清單、準備 X-AnyLabeling labels/config
         └─ module_013 讀取同一批圖片、整理標注與分類結果
 ```

@@ -41,7 +41,7 @@ start-dev.bat
 |------|------|------|
 | `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
-| `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策 | `012_output.py` 已改用 `python.exe -c "from anylabeling.app import main; main()"` 繞過 |
+| `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
 
 ## 工具開發規則
 
@@ -63,15 +63,15 @@ start-dev.bat
 ```python
 # 首次載入 → full scan（記錄 ann_path mtime）
 # 後續 rerun → 只做 stat() 比對，mtime 改變才重讀 JSON
-def _get_items(manifest_id, workspace_dir, db_items):
+def _get_items(manifest_id, db_items):
     if st.session_state.get("cache_mid") != manifest_id or "items" not in st.session_state:
-        items, mtimes = _scan_items(db_items, workspace_dir)   # full scan
+        items, mtimes = _scan_items(db_items)   # full scan
         st.session_state["items"] = items
         st.session_state["mtimes"] = mtimes
         st.session_state["cache_mid"] = manifest_id
         return items
     items, mtimes = _incremental_refresh(                       # mtime-only
-        st.session_state["items"], st.session_state["mtimes"], workspace_dir
+        st.session_state["items"], st.session_state["mtimes"]
     )
     st.session_state["items"] = items
     st.session_state["mtimes"] = mtimes

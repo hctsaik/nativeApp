@@ -4,6 +4,45 @@
 
 ---
 
+## 0. 目前鎖定的 runtime 與安全契約
+
+> 這段是 module_012 的保護性契約。除非重新驗證 WDAC、安全啟動與標注回寫流程，請不要任意更改。
+
+| 項目 | 目前鎖定值 / 行為 |
+|---|---|
+| 套件 | `x-anylabeling-cvhub[cpu]` |
+| 驗證版本 | `4.0.0-beta.7` |
+| Python | `3.11.9`，由 `py -3.11` 啟動 |
+| venv | repo-local `.venv-xanylabeling`，不進 git |
+| 啟動方式 | 不直接執行 `xanylabeling.exe` / uv trampoline；改用受信任 Python 執行 `from anylabeling.app import main; main()` |
+| WDAC 策略 | 優先 Windows Python Launcher `py.exe -3.X`，再找 PSF-signed python.org 安裝路徑 |
+| 標注輸出 | module_012 固定輸出到影像同目錄同名 `.json` |
+| 必要 flags | `--nodata --autosave --no-auto-update-check` |
+| labels | 有 classes file 時必須加 `--labels <file> --validatelabel exact` |
+
+安全原因：
+
+- `uv` 產生的 `xanylabeling.exe` / `python.exe` trampoline 在 Windows Application Control 下可能被封鎖。
+- 直接改回執行 `.venv-xanylabeling\Scripts\xanylabeling.exe` 會讓 Bug 4 回歸。
+- 移除 `--no-auto-update-check` 會讓 GUI 啟動時連外檢查更新，不符合目前離線/邊緣端預期。
+- 移除 `--nodata` 會把影像資料嵌入 JSON，增加檔案大小與資料外洩風險。
+
+module_012 相關回歸測試：
+
+```powershell
+python -m pytest sidecar/python-engine/scripts/module_012/012_output_test.py -q
+```
+
+其中測試會保護：
+
+- 從 `pyvenv.cfg` 讀取 `version_info = 3.11.9` 後優先使用 `py -3.11`
+- X-AnyLabeling 透過 trusted Python `-c` 啟動，不直接執行 trampoline exe
+- 啟動參數包含 `--nodata --autosave --no-auto-update-check`
+- 標注 JSON 輸出到影像同目錄
+- labels 啟用 `--validatelabel exact`
+
+---
+
 ## 1. 安裝
 
 ### 建立專用虛擬環境
@@ -35,13 +74,51 @@ py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packag
 
 | 優先順序 | 來源 |
 |:---:|---|
-| 1 | 環境變數 `XANYLABELING_EXE` |
-| 2 | 專案根目錄 `.venv-xanylabeling\Scripts\xanylabeling.exe` |
-| 3 | 系統 `PATH` 中的 `xanylabeling` |
+| 1 | 專案根目錄 `.venv-xanylabeling\Scripts\xanylabeling.exe` |
+| 2 | 系統 `PATH` 中的 `xanylabeling` |
+
+> module_012 目前由 `012_process.py::get_xany_exe()` 解析路徑。即使解析到 `xanylabeling.exe`，`012_output.py` 也只拿它定位 venv 與 site-packages；實際啟動仍走 trusted Python。
 
 ---
 
-## 2. 磁碟專案結構
+## 2. module_012 目前標注檔結構
+
+module_012 不再建立舊式 `frames/annotations` 專案資料夾，也不使用 `annotation_workspaces`。
+
+```text
+{image_dir}/
+├── frame_000001.jpg
+├── frame_000001.json          ← X-AnyLabeling / LabelMe 原生輸出
+├── frame_000002.jpg
+└── frame_000002.json
+
+{CIM_LOG_DIR}/config/
+├── module_012_classes_{manifest_id[:12]}.txt
+└── module_012_classifications_{manifest_id[:12]}.json
+
+{CIM_LOG_DIR}/xanylabeling_state/
+└── module_012_{manifest_id[:12]}/
+```
+
+module_012 啟動單張影像時的核心參數：
+
+```text
+py -3.11 -c "import sys; sys.path.insert(0, '<venv>/Lib/site-packages'); from anylabeling.app import main; main()" \
+  --filename <image_path> \
+  --output <image_dir> \
+  --work-dir {CIM_LOG_DIR}/xanylabeling_state/module_012_<manifest_key> \
+  --nodata \
+  --autosave \
+  --no-auto-update-check \
+  --labels {CIM_LOG_DIR}/config/module_012_classes_<manifest_key>.txt \
+  --validatelabel exact
+```
+
+---
+
+## 3. 舊式批次專案結構（annotation-core / module_006 用）
+
+以下 `frames/annotations` 結構是 annotation-core / module_006 批次匯入匯出模式會用到的專案結構。**module_012 不使用此結構。**
 
 X-AnyLabeling 開啟目錄後，讀寫以下結構：
 
@@ -87,7 +164,7 @@ def prepare_project(project_dir: Path, labels: list[str]) -> None:
 
 ---
 
-## 3. 啟動 X-AnyLabeling
+## 4. 啟動 X-AnyLabeling
 
 ### 開啟整個 frames 目錄（批次標注）
 
@@ -144,7 +221,7 @@ def launch_single_frame(project_dir: Path, frame_idx: int, exe: str) -> subproce
 
 ---
 
-## 4. JSON 標注格式
+## 5. JSON 標注格式
 
 X-AnyLabeling 輸出 **LabelMe v6.0.0** 相容格式：
 
@@ -248,7 +325,7 @@ def parse_confidence(description: str) -> float:
 
 ---
 
-## 5. 監控 X-AnyLabeling 結束
+## 6. 監控 X-AnyLabeling 結束
 
 X-AnyLabeling 是獨立 GUI 程序，關閉後你的程式才能讀取最終標注。用背景執行緒監控 PID：
 
@@ -276,7 +353,7 @@ start_pid_monitor(proc.pid, on_close=lambda: import_annotations(project_dir))
 
 ---
 
-## 6. 批次匯入標注結果
+## 7. 批次匯入標注結果
 
 X-AnyLabeling 關閉後，掃描 `annotations/` 目錄取回所有 JSON：
 
@@ -312,7 +389,7 @@ def import_all_annotations(project_dir: Path) -> list[dict]:
 
 ---
 
-## 7. 偵測 X-AnyLabeling 是否已安裝
+## 8. 偵測 X-AnyLabeling 是否已安裝
 
 ```python
 import subprocess
@@ -356,7 +433,7 @@ def detect_xanylabeling(project_root: Path) -> dict:
 
 ---
 
-## 8. 完整工作流程總覽
+## 9. 完整工作流程總覽
 
 ```
 你的程式
@@ -377,7 +454,7 @@ def detect_xanylabeling(project_root: Path) -> dict:
 
 ---
 
-## 9. 快速參考
+## 10. 快速參考
 
 | 項目 | 值 |
 |---|---|

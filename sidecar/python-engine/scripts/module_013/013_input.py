@@ -75,9 +75,8 @@ def render_input() -> dict:
         "**請務必設為原始圖片資料夾以外的位置**，避免重複掃描造成資料增殖。"
     )
 
-    # 預設：workspace 內的 export/ 目錄（完全在 source 資料夾之外）
-    ws_dir = _cfg.get_workspace_dir_for_manifest(manifest_id)
-    default_export = str(ws_dir / "export")
+    # 預設：logs/exports 下的獨立目錄（完全在 source 資料夾之外）
+    default_export = str(_cfg.get_default_export_dir(manifest_id))
 
     export_dir = st.text_input(
         "圖片整理輸出目錄",

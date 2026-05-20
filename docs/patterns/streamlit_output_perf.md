@@ -28,12 +28,12 @@ render 函式。Output 頁若在 render 函式內直接對 N 張圖片做檔案�
 ### 實作骨架
 
 ```python
-def _scan_items(db_items, workspace_dir):
+def _scan_items(db_items):
     """Full scan，記錄每個 ann_path 的 mtime。"""
     items, mtimes = [], {}
     for it in db_items:
         fp = it["file_path"]
-        has_ann, ann_path, shape_count = _find_annotation(fp, workspace_dir)
+        has_ann, ann_path, shape_count = _find_annotation(fp)
         items.append({**it, "has_ann": has_ann, "ann_path": ann_path, "shape_count": shape_count})
         if ann_path:
             try:    mtimes[ann_path] = Path(ann_path).stat().st_mtime
@@ -41,7 +41,7 @@ def _scan_items(db_items, workspace_dir):
     return items, mtimes
 
 
-def _incremental_refresh(cached, mtimes, workspace_dir):
+def _incremental_refresh(cached, mtimes):
     """只對 mtime 改變的項目重讀 JSON。"""
     new_mtimes = dict(mtimes)
     for item in cached:
@@ -50,7 +50,7 @@ def _incremental_refresh(cached, mtimes, workspace_dir):
             try:    mtime = Path(ann_path).stat().st_mtime
             except FileNotFoundError: mtime = -1.0
             if mtime != new_mtimes.get(ann_path, -999.0):
-                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                has_ann, new_ap, sc = _find_annotation(fp)
                 item.update(has_ann=has_ann, ann_path=new_ap, shape_count=sc)
                 new_mtimes.pop(ann_path, None)
                 if new_ap:
@@ -59,7 +59,7 @@ def _incremental_refresh(cached, mtimes, workspace_dir):
         else:
             # 尚無標注：只做 exists()，不讀內容
             if Path(fp).with_suffix(".json").exists():
-                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                has_ann, new_ap, sc = _find_annotation(fp)
                 item.update(has_ann=has_ann, ann_path=new_ap, shape_count=sc)
                 if new_ap:
                     try: new_mtimes[new_ap] = Path(new_ap).stat().st_mtime
@@ -67,7 +67,7 @@ def _incremental_refresh(cached, mtimes, workspace_dir):
     return cached, new_mtimes
 
 
-def _get_items(manifest_id, workspace_dir, db_items):
+def _get_items(manifest_id, db_items):
     """session_state 快取入口。"""
     cached = st.session_state.get("items")
     if (
@@ -75,9 +75,9 @@ def _get_items(manifest_id, workspace_dir, db_items):
         or cached is None
         or len(cached) != len(db_items)   # manifest 有新增項目時重掃
     ):
-        items, mtimes = _scan_items(db_items, workspace_dir)
+        items, mtimes = _scan_items(db_items)
     else:
-        items, mtimes = _incremental_refresh(cached, st.session_state["mtimes"], workspace_dir)
+        items, mtimes = _incremental_refresh(cached, st.session_state["mtimes"])
 
     st.session_state["items"]     = items
     st.session_state["mtimes"]    = mtimes

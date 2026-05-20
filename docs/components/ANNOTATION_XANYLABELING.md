@@ -1,6 +1,6 @@
 # Annotation Common Component and X-AnyLabeling Integration
 
-Last updated: 2026-05-19 (module_012/013 lightweight workflow, shared.json contract, WDAC workaround)
+Last updated: 2026-05-21 (module_012/013 lightweight workflow, same-directory JSON contract, WDAC-safe launch)
 
 This document summarizes the current implementation state for the platform annotation common component and the X-AnyLabeling integration.
 
@@ -58,27 +58,34 @@ Verified version:
 4.0.0-beta.7
 ```
 
-Verified command:
+Verified Python:
 
-```powershell
-C:\code\claude\nativeApp\.venv-xanylabeling\Scripts\xanylabeling.exe checks
+```text
+Python 3.11.9
 ```
 
-The project detects X-AnyLabeling in this order:
+WDAC-safe verification command:
 
-1. `XANYLABELING_EXE`
-2. `.venv-xanylabeling\Scripts\xanylabeling.exe`
-3. `PATH`
+```powershell
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
+```
+
+module_012 detects the repo-local executable first:
+
+1. `.venv-xanylabeling\Scripts\xanylabeling.exe`
+2. `PATH`
+
+The executable path is used to locate the venv. module_012 must not directly run the uv trampoline executable; launch goes through a trusted Python with the same ABI as the venv.
 
 ## Installation Notes
 
-The installed runtime follows the official X-AnyLabeling quick-start guidance for a CPU environment:
+The installed runtime follows the official X-AnyLabeling quick-start guidance for a CPU environment, with Python 3.11 so WDAC can route launch through the trusted Windows Python Launcher:
 
 ```powershell
 python -m pip install -U uv
-python -m uv venv --python 3.12 .venv-xanylabeling
+python -m uv venv --python 3.11 .venv-xanylabeling
 python -m uv pip install --python .venv-xanylabeling\Scripts\python.exe --pre "x-anylabeling-cvhub[cpu]"
-.venv-xanylabeling\Scripts\xanylabeling.exe checks
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
 ```
 
 The repo root `.gitignore` excludes `.venv-xanylabeling/`.
@@ -476,13 +483,21 @@ Implemented shortcuts:
 
 ### WDAC workaround
 
-On Windows systems where WDAC blocks `xanylabeling.exe`, module_012 launches the same app through the venv Python interpreter:
+On Windows systems where WDAC blocks `xanylabeling.exe`, module_012 launches the same app through a WDAC-trusted Python that matches the venv ABI:
 
-```python
-python.exe -c "from anylabeling.app import main; main()"
+```powershell
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; main()"
 ```
 
-The X-AnyLabeling arguments remain the same. The `--output` directory is the image folder, so saved JSON lands beside the source image.
+Required security and runtime constraints:
+
+- Keep X-AnyLabeling at the verified runtime: `x-anylabeling-cvhub[cpu]` / `4.0.0-beta.7` / Python `3.11.9`.
+- Do not change module_012 back to directly running `.venv-xanylabeling\Scripts\xanylabeling.exe`; that uv trampoline can be blocked by WDAC.
+- Keep `--nodata --autosave --no-auto-update-check`.
+- Keep `--labels <classes.txt> --validatelabel exact` whenever the classes file exists.
+- Keep the `--output` directory as the image folder so saved JSON lands beside the source image.
+
+Regression coverage lives in `sidecar/python-engine/scripts/module_012/012_output_test.py`.
 
 ### 詳細文件
 

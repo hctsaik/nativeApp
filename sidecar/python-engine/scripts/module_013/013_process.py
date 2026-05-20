@@ -174,11 +174,10 @@ def execute_logic(params: dict) -> dict:
     all_db_items = _mdb.get_manifest_items(db_path, manifest_id)
     _log.info("[013] manifest 圖片數: %d", len(all_db_items))
 
-    # ── 4. 確定 workspace 路徑 ─────────────────────────────────────────────────
-    workspace_dir: Path = _cfg.get_workspace_dir_for_manifest(manifest_id)
-    classifications_path: Path = workspace_dir / "classifications.json"
+    # ── 4. 讀取分類儲存檔路徑 ────────────────────────────────────────────────
+    classifications_path: Path = _cfg.get_classification_path(manifest_id)
 
-    _log.info("[013] workspace: %s", workspace_dir)
+    _log.info("[013] classifications: %s", classifications_path)
     _log.info("[013] 標注檔查詢模式：影像同目錄同名 .json")
 
     # ── 5. 讀取分類結果 ────────────────────────────────────────────────────────
@@ -197,14 +196,14 @@ def execute_logic(params: dict) -> dict:
     source_folder = _infer_source_folder(manifest, all_db_items)
     _log.info("[013] source_folder (顯示用): %r", source_folder)
 
-    # C：圖片整理目標（export_dir，預設 workspace/export/）
+    # C：圖片整理目標（export_dir，預設 logs/exports）
     # 必須在 source_folder 之外，避免 Data Feeder 重掃時重複計入
     if export_dir and export_dir.strip():
         img_export_dir = export_dir.strip()
         _log.info("[013] img_export_dir (C) 來源: params 指定 = %r", img_export_dir)
     else:
-        img_export_dir = str(workspace_dir / "export")
-        _log.info("[013] img_export_dir (C) 來源: 預設 workspace/export = %r", img_export_dir)
+        img_export_dir = str(_cfg.get_default_export_dir(manifest_id))
+        _log.info("[013] img_export_dir (C) 來源: 預設 logs/exports = %r", img_export_dir)
 
     # ── 7. 建立 items 清單 ─────────────────────────────────────────────────────
     items: list[dict] = []
@@ -352,7 +351,7 @@ def execute_logic(params: dict) -> dict:
     if not dry_run:
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_dir = Path(source_folder) if source_folder else workspace_dir
+            out_dir = Path(source_folder) if source_folder else _cfg.get_default_export_dir(manifest_id)
             if out_dir.exists() and not out_dir.is_dir():
                 out_dir = out_dir.parent
             output_json_path = str(out_dir / f"update_result_{ts}.json")
