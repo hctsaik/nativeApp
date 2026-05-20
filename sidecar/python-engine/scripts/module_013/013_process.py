@@ -3,6 +3,9 @@ from __future__ import annotations
 """
 013_process.py — Update 處理層。
 無 Streamlit import。
+
+操作 C：依分類標籤將圖片（及旁邊的同名 .json）複製到 export_dir/{分類名稱}/。
+B 操作已移除——標注 JSON 由 X-AnyLabeling 直接存回影像同目錄，無需另行複製。
 """
 
 import importlib.util as _ilu
@@ -93,14 +96,6 @@ def _infer_source_folder(manifest: dict, items: list[dict]) -> str:
     return most_common
 
 
-def _same_path(left: str, right: str) -> bool:
-    """Return True when two paths point to the same filesystem location."""
-    try:
-        return Path(left).resolve() == Path(right).resolve()
-    except Exception:
-        return left == right
-
-
 # ─── 公開 API ─────────────────────────────────────────────────────────────────
 
 def execute_logic(params: dict) -> dict:
@@ -109,46 +104,43 @@ def execute_logic(params: dict) -> dict:
 
     params:
         manifest_id: str
-        dest_folder: str         # 目標資料夾（可為空，會推算）
-        copy_annotations: bool   # B
-        organize_images: bool    # C
+        export_dir: str          # 整理輸出目錄（可為空，會用預設值）
+        organize_images: bool    # C：依分類整理圖片（同時帶走標注 JSON）
         dry_run: bool            # True=只掃描不動檔案, False=實際執行
 
     回傳:
         mode: "preview" | "done" | "error"
         manifest_id, manifest_name, source_folder: str
-        copy_annotations, organize_images: bool
+        export_dir: str
+        organize_images: bool
         dry_run: bool
         items: list[dict]
-        summary: dict
+        summary: dict  — total, ann_count, c_organized, ann_exported, errors
         output_json_path: str
         error: str | None
     """
     _log.info("=" * 60)
     _log.info("[013] execute_logic 開始  dry_run=%s", params.get("dry_run", True))
-    _log.info("[013] 收到 params: manifest_id=%s | dest_folder=%r | export_dir=%r | copy_annotations=%s | organize_images=%s | dry_run=%s",
-              params.get("manifest_id", ""), params.get("dest_folder", ""),
+    _log.info("[013] params: manifest_id=%s | export_dir=%r | organize_images=%s | dry_run=%s",
+              params.get("manifest_id", ""),
               params.get("export_dir", ""),
-              params.get("copy_annotations", True), params.get("organize_images", True),
+              params.get("organize_images", True),
               params.get("dry_run", True))
 
-    manifest_id: str = params.get("manifest_id", "")
-    dest_folder: str = params.get("dest_folder", "")
-    export_dir: str = params.get("export_dir", "")
-    copy_annotations: bool = bool(params.get("copy_annotations", True))
+    manifest_id: str  = params.get("manifest_id", "")
+    export_dir: str   = params.get("export_dir", "")
     organize_images: bool = bool(params.get("organize_images", True))
-    dry_run: bool = bool(params.get("dry_run", True))
+    dry_run: bool     = bool(params.get("dry_run", True))
 
     _base_result = {
         "manifest_id": manifest_id,
         "manifest_name": "",
         "source_folder": "",
         "export_dir": export_dir,
-        "copy_annotations": copy_annotations,
         "organize_images": organize_images,
         "dry_run": dry_run,
         "items": [],
-        "summary": {"total": 0, "b_copied": 0, "c_organized": 0, "errors": 0},
+        "summary": {"total": 0, "ann_count": 0, "c_organized": 0, "ann_exported": 0, "errors": 0},
         "output_json_path": "",
         "error": None,
     }
@@ -160,62 +152,51 @@ def execute_logic(params: dict) -> dict:
 
     # ── 2. 讀取 manifest 基本資訊 ──────────────────────────────────────────────
     db_path = _cfg.get_manifest_db_path()
-    _log.info("[013] 查詢 DB: %s", db_path)
     manifest = _mdb.get_manifest(db_path, manifest_id)
     if manifest is None:
         _log.error("[013] 找不到 manifest_id=%s", manifest_id)
         return {**_base_result, "mode": "error", "error": f"找不到 Manifest：{manifest_id}"}
 
     manifest_name: str = manifest.get("name", manifest_id)
-    _log.info("[013] manifest 找到: name=%s source_type=%s source_path=%r",
-              manifest_name, manifest.get("source_type", "?"), manifest.get("source_path", ""))
+    _log.info("[013] manifest: name=%s", manifest_name)
 
     # ── 3. 讀取所有圖片項目 ────────────────────────────────────────────────────
     all_db_items = _mdb.get_manifest_items(db_path, manifest_id)
-    _log.info("[013] manifest 圖片數: %d", len(all_db_items))
+    _log.info("[013] 圖片數: %d", len(all_db_items))
 
-    # ── 4. 讀取分類儲存檔路徑 ────────────────────────────────────────────────
-    classifications_path: Path = _cfg.get_classification_path(manifest_id)
-
-    _log.info("[013] classifications: %s", classifications_path)
-    _log.info("[013] 標注檔查詢模式：影像同目錄同名 .json")
-
-    # ── 5. 讀取分類結果 ────────────────────────────────────────────────────────
+    # ── 4. 讀取分類結果 ────────────────────────────────────────────────────────
+    classifications_path = _cfg.get_classification_path(manifest_id)
     classifications: dict[str, str] = {}
     if classifications_path.exists():
         try:
             classifications = json.loads(classifications_path.read_text(encoding="utf-8"))
-            _log.info("[013] 分類結果: %d 筆  %s", len(classifications), dict(list(classifications.items())[:5]))
+            _log.info("[013] 分類結果: %d 筆", len(classifications))
         except Exception as exc:
             _log.error("[013] 分類結果讀取失敗: %s", exc)
     else:
-        _log.info("[013] 無分類結果（classifications.json 不存在）")
+        _log.info("[013] 無分類結果")
 
-    # ── 6. 決定來源資料夾（僅用於 output 顯示，B 操作已改為直接寫回影像同目錄） ──
-    # source_folder 不再決定 B 的輸出路徑；B 輸出 = Path(fp).parent / stem + ".json"
+    # ── 5. source_folder（顯示用）+ export_dir ─────────────────────────────────
     source_folder = _infer_source_folder(manifest, all_db_items)
     _log.info("[013] source_folder (顯示用): %r", source_folder)
 
-    # C：圖片整理目標（export_dir，預設 logs/exports）
-    # 必須在 source_folder 之外，避免 Data Feeder 重掃時重複計入
     if export_dir and export_dir.strip():
         img_export_dir = export_dir.strip()
-        _log.info("[013] img_export_dir (C) 來源: params 指定 = %r", img_export_dir)
     else:
         img_export_dir = str(_cfg.get_default_export_dir(manifest_id))
-        _log.info("[013] img_export_dir (C) 來源: 預設 logs/exports = %r", img_export_dir)
+    _log.info("[013] img_export_dir: %r", img_export_dir)
 
-    # ── 7. 建立 items 清單 ─────────────────────────────────────────────────────
+    # ── 6. 建立 items 清單 ─────────────────────────────────────────────────────
     items: list[dict] = []
-    b_copied = 0
     c_organized = 0
+    ann_exported = 0
     errors = 0
 
     for it in all_db_items:
-        fp = it.get("file_path", "")
-        item_id = it.get("item_id", "")
+        fp       = it.get("file_path", "")
+        item_id  = it.get("item_id", "")
         filename = Path(fp).name if fp else ""
-        stem = Path(fp).stem if fp else ""
+        stem     = Path(fp).stem if fp else ""
 
         # 標注資訊：X-AnyLabeling 存在影像同目錄同名 .json
         ann_src_path = Path(fp).with_suffix(".json") if fp else None
@@ -226,57 +207,32 @@ def execute_logic(params: dict) -> dict:
         # 分類資訊
         classification = classifications.get(item_id, "") or classifications.get(filename, "")
 
-        # B：複製標注 JSON 回影像同目錄（與影像同名的 .json）
-        if fp and has_annotation:
-            ann_dst = str(Path(fp).parent / f"{stem}.json")
-            b_action = "copy"
-        elif has_annotation:
-            ann_dst = ""
-            b_action = "skip"   # 有標注但 fp 為空，無法決定目標路徑
-        else:
-            ann_dst = ""
-            b_action = "n/a"   # 無標注
-
-        # C：整理圖片到獨立 export 目錄（與 source_folder 完全分開，避免重複掃描）
+        # C：複製圖片（+ 旁邊的 .json）到 export_dir/{分類名稱}/
         if img_export_dir and classification and filename:
-            safe_label = _safe_dirname(classification)
-            organized_dst = str(Path(img_export_dir) / safe_label / filename)
+            safe_label     = _safe_dirname(classification)
+            organized_dst  = str(Path(img_export_dir) / safe_label / filename)
+            ann_export_dst = str(Path(img_export_dir) / safe_label / f"{stem}.json") if has_annotation else ""
             c_action = "copy"
         elif classification and not img_export_dir:
-            organized_dst = ""
+            organized_dst  = ""
+            ann_export_dst = ""
             c_action = "skip"
         elif not classification:
-            organized_dst = ""
+            organized_dst  = ""
+            ann_export_dst = ""
             c_action = "n/a"
         else:
-            organized_dst = ""
+            organized_dst  = ""
+            ann_export_dst = ""
             c_action = "skip"
 
-        status = "pending"
+        status    = "pending"
         error_msg = ""
 
         # ── 實際執行（dry_run=False）────────────────────────────────────────────
         if not dry_run:
-            # B：複製標注 JSON
-            if copy_annotations and b_action == "copy" and ann_src and ann_dst:
-                try:
-                    if _same_path(ann_src, ann_dst):
-                        _log.info("[013][B] ✅ confirmed %s", ann_src)
-                    else:
-                        dst_path = Path(ann_dst)
-                        dst_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(ann_src, dst_path)
-                        _log.info("[013][B] ✅ copy %s → %s", ann_src, ann_dst)
-                    b_copied += 1
-                    status = "ok"
-                except Exception as e:
-                    error_msg += f"[B] {e} "
-                    errors += 1
-                    status = "error"
-                    _log.error("[013][B] ❌ copy 失敗 %s → %s | err=%s", ann_src, ann_dst, e)
-
-            # C：複製圖片到分類子目錄
             if organize_images and c_action == "copy" and fp and organized_dst:
+                # 複製圖片
                 try:
                     src_path = Path(fp)
                     dst_path = Path(organized_dst)
@@ -284,9 +240,8 @@ def execute_logic(params: dict) -> dict:
                         dst_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(src_path, dst_path)
                         c_organized += 1
-                        if status != "error":
-                            status = "ok"
-                        _log.info("[013][C] ✅ copy %s → %s", fp, organized_dst)
+                        status = "ok"
+                        _log.info("[013][C] ✅ img  %s → %s", fp, organized_dst)
                     else:
                         error_msg += f"[C] 來源不存在：{fp} "
                         errors += 1
@@ -296,80 +251,84 @@ def execute_logic(params: dict) -> dict:
                     error_msg += f"[C] {e} "
                     errors += 1
                     status = "error"
-                    _log.error("[013][C] ❌ copy 失敗 %s → %s | err=%s", fp, organized_dst, e)
+                    _log.error("[013][C] ❌ img copy 失敗 %s → %s | err=%s", fp, organized_dst, e)
+
+                # 複製標注 JSON（與圖片同目錄）
+                if ann_src and ann_export_dst:
+                    try:
+                        ann_dst_path = Path(ann_export_dst)
+                        ann_dst_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ann_src, ann_dst_path)
+                        ann_exported += 1
+                        _log.info("[013][C] ✅ json %s → %s", ann_src, ann_export_dst)
+                    except Exception as e:
+                        error_msg += f"[C-json] {e} "
+                        errors += 1
+                        status = "error"
+                        _log.error("[013][C] ❌ json copy 失敗 %s → %s | err=%s", ann_src, ann_export_dst, e)
 
             if status == "pending":
                 status = "ok"
 
         items.append({
-            "file_path": fp,
-            "filename": filename,
+            "file_path":      fp,
+            "filename":       filename,
             "classification": classification,
             "has_annotation": has_annotation,
-            "shape_count": shape_count,
+            "shape_count":    shape_count,
             "annotation_src": ann_src,
-            "annotation_dst": ann_dst,
-            "organized_dst": organized_dst,
-            "b_action": b_action if copy_annotations else "n/a",
-            "c_action": c_action if organize_images else "n/a",
-            "status": status,
-            "error_msg": error_msg.strip(),
+            "ann_export_dst": ann_export_dst,
+            "organized_dst":  organized_dst,
+            "c_action":       c_action if organize_images else "n/a",
+            "status":         status,
+            "error_msg":      error_msg.strip(),
         })
 
-    # ── 8. 統計摘要 ────────────────────────────────────────────────────────────
-    total = len(items)
-    b_copy_cnt  = sum(1 for it in items if it["b_action"] == "copy")
-    b_skip_cnt  = sum(1 for it in items if it["b_action"] == "skip")
-    b_na_cnt    = sum(1 for it in items if it["b_action"] == "n/a")
-    c_copy_cnt  = sum(1 for it in items if it["c_action"] == "copy")
-    c_skip_cnt  = sum(1 for it in items if it["c_action"] == "skip")
-    c_na_cnt    = sum(1 for it in items if it["c_action"] == "n/a")
-    ann_cnt     = sum(1 for it in items if it["has_annotation"])
+    # ── 7. 統計摘要 ────────────────────────────────────────────────────────────
+    total     = len(items)
+    ann_count = sum(1 for it in items if it["has_annotation"])
+    c_cnt     = sum(1 for it in items if it["c_action"] == "copy")
+    c_skip    = sum(1 for it in items if it["c_action"] == "skip")
+    c_na      = sum(1 for it in items if it["c_action"] == "n/a")
 
-    _log.info("[013] items 統計: total=%d has_annotation=%d", total, ann_cnt)
-    _log.info("[013] B(標注): copy=%d skip=%d n/a=%d", b_copy_cnt, b_skip_cnt, b_na_cnt)
-    _log.info("[013] C(分類): copy=%d skip=%d n/a=%d", c_copy_cnt, c_skip_cnt, c_na_cnt)
-
-    if b_copy_cnt == 0 and b_na_cnt == total:
-        _log.warning("[013] 全部 b_action=n/a → 影像同目錄沒有任何同名 JSON，確認按鈕將 disabled")
-    if b_skip_cnt > 0:
-        _log.warning("[013] b_action=skip %d 筆 → 有標注但 file_path 為空，無法決定目標路徑", b_skip_cnt)
-
+    _log.info("[013] total=%d has_annotation=%d", total, ann_count)
+    _log.info("[013] C: copy=%d skip=%d n/a=%d", c_cnt, c_skip, c_na)
+    if c_cnt == 0:
+        _log.warning("[013] c_action=copy 為 0 → 無分類記錄或無 export_dir，確認按鈕將 disabled")
     if not dry_run:
-        _log.info("[013] 執行結果: b_copied=%d c_organized=%d errors=%d",
-                  b_copied, c_organized, errors)
+        _log.info("[013] 執行結果: c_organized=%d ann_exported=%d errors=%d",
+                  c_organized, ann_exported, errors)
 
     summary = {
-        "total": total,
-        "b_copied": b_copied,
-        "c_organized": c_organized,
-        "errors": errors,
+        "total":        total,
+        "ann_count":    ann_count,
+        "c_organized":  c_organized,
+        "ann_exported": ann_exported,
+        "errors":       errors,
     }
 
-    # ── 9. 寫入 output JSON（dry_run=False 才寫）───────────────────────────────
+    # ── 8. 寫入 output JSON（dry_run=False 才寫，存在 export_dir）───────────────
     output_json_path = ""
     if not dry_run:
         try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_dir = Path(source_folder) if source_folder else _cfg.get_default_export_dir(manifest_id)
-            if out_dir.exists() and not out_dir.is_dir():
-                out_dir = out_dir.parent
+            ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_dir = Path(img_export_dir) if img_export_dir else _cfg.get_default_export_dir(manifest_id)
+            out_dir.mkdir(parents=True, exist_ok=True)
             output_json_path = str(out_dir / f"update_result_{ts}.json")
             output_data = {
-                "manifest_id": manifest_id,
-                "manifest_name": manifest_name,
-                "source_folder": source_folder,
-                "copy_annotations": copy_annotations,
+                "manifest_id":    manifest_id,
+                "manifest_name":  manifest_name,
+                "source_folder":  source_folder,
+                "export_dir":     img_export_dir,
                 "organize_images": organize_images,
-                "summary": summary,
-                "items": items,
+                "summary":        summary,
+                "items":          items,
             }
-            out_dir.mkdir(parents=True, exist_ok=True)
             Path(output_json_path).write_text(
                 json.dumps(output_data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            _log.info("[013] output JSON 寫入成功: %s", output_json_path)
+            _log.info("[013] output JSON: %s", output_json_path)
         except Exception as e:
             output_json_path = f"[寫入失敗] {e}"
             _log.error("[013] output JSON 寫入失敗: %s", e)
@@ -379,16 +338,15 @@ def execute_logic(params: dict) -> dict:
     _log.info("=" * 60)
 
     return {
-        "mode": mode,
-        "manifest_id": manifest_id,
-        "manifest_name": manifest_name,
-        "source_folder": source_folder,
-        "export_dir": img_export_dir,
-        "copy_annotations": copy_annotations,
+        "mode":           mode,
+        "manifest_id":    manifest_id,
+        "manifest_name":  manifest_name,
+        "source_folder":  source_folder,
+        "export_dir":     img_export_dir,
         "organize_images": organize_images,
-        "dry_run": dry_run,
-        "items": items,
-        "summary": summary,
+        "dry_run":        dry_run,
+        "items":          items,
+        "summary":        summary,
         "output_json_path": output_json_path,
-        "error": None,
+        "error":          None,
     }

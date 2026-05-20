@@ -16,9 +16,10 @@ def _load_module(path: Path, name: str):
     return mod
 
 
-def test_execute_logic_writes_update_result_to_source_folder_and_confirms_same_json(tmp_path, monkeypatch):
+def test_execute_logic_writes_update_result_to_export_dir(tmp_path, monkeypatch):
     cim_log = tmp_path / "cim_log"
     source_dir = tmp_path / "source"
+    export_dir = tmp_path / "export"
     source_dir.mkdir()
     monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
 
@@ -57,24 +58,33 @@ def test_execute_logic_writes_update_result_to_source_folder_and_confirms_same_j
         ],
     )
 
+    # 設定分類（讓 C 操作能執行）
+    classification_path = cim_log / "config" / f"module_012_classifications_{manifest_id[:12]}.json"
+    classification_path.parent.mkdir(parents=True)
+    classification_path.write_text(json.dumps({"item_001": "defect"}), encoding="utf-8")
+
     result = proc.execute_logic(
         {
             "manifest_id": manifest_id,
-            "export_dir": str(tmp_path / "export"),
-            "copy_annotations": True,
-            "organize_images": False,
+            "export_dir": str(export_dir),
+            "organize_images": True,
             "dry_run": False,
         }
     )
 
     assert result["mode"] == "done"
-    assert result["summary"]["b_copied"] == 1
+    assert result["summary"]["c_organized"] == 1
+    assert result["summary"]["ann_exported"] == 1
     assert result["summary"]["errors"] == 0
     assert result["source_folder"] == str(source_dir)
 
     output_path = Path(result["output_json_path"])
-    assert output_path.parent == source_dir
+    assert output_path.parent == export_dir
     assert output_path.name.startswith("update_result_")
+
+    # 確認圖片與 JSON 都被複製到 export_dir/defect/
+    assert (export_dir / "defect" / "image_001.jpg").exists()
+    assert (export_dir / "defect" / "image_001.json").exists()
 
 
 def test_infer_source_folder_normalizes_file_source_path(tmp_path, monkeypatch):
@@ -132,7 +142,6 @@ def test_execute_logic_reads_manifest_scoped_classification_config(tmp_path, mon
     result = proc.execute_logic(
         {
             "manifest_id": manifest_id,
-            "copy_annotations": False,
             "organize_images": True,
             "dry_run": True,
         }

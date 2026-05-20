@@ -22,8 +22,8 @@ def _render_done(result: dict) -> None:
     st.success("✅ Update 完成！")
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("B 複製標注", summary.get("b_copied", 0))
-    m2.metric("C 整理圖片", summary.get("c_organized", 0))
+    m1.metric("整理圖片", summary.get("c_organized", 0))
+    m2.metric("帶走標注 JSON", summary.get("ann_exported", 0))
     m3.metric("錯誤數", summary.get("errors", 0))
 
     out_path = result.get("output_json_path", "")
@@ -40,8 +40,9 @@ def _render_done(result: dict) -> None:
                 "filename": it["filename"],
                 "classification": it["classification"],
                 "has_annotation": it["has_annotation"],
-                "b_action": it["b_action"],
                 "c_action": it["c_action"],
+                "organized_dst": it["organized_dst"],
+                "ann_export_dst": it["ann_export_dst"],
                 "status": it["status"],
                 "error_msg": it["error_msg"],
             }
@@ -57,29 +58,25 @@ def _render_preview(result: dict) -> None:
     summary = result.get("summary", {})
     items = result.get("items", [])
 
-    # Summary metrics
     total = summary.get("total", len(items))
-    has_ann_count = sum(1 for it in items if it.get("has_annotation"))
-    has_cls_count = sum(1 for it in items if it.get("classification"))
+    ann_count = summary.get("ann_count", sum(1 for it in items if it.get("has_annotation")))
+    categories = len({it["classification"] for it in items if it.get("classification")})
 
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3 = st.columns(3)
     m1.metric("總圖片數", total)
-    m2.metric("有標注", has_ann_count)
-    m3.metric("有分類", has_cls_count)
-    m4.metric("錯誤", summary.get("errors", 0))
+    m2.metric("有標注", ann_count)
+    m3.metric("分類數", categories)
 
-    # 設定摘要
     sf = result.get("source_folder", "")
-    copy_ann = result.get("copy_annotations", True)
     org_img = result.get("organize_images", True)
+    export_dir = result.get("export_dir", "")
 
     st.markdown(f"**原始資料夾**：`{sf}`" if sf else "**原始資料夾**：（無法推算）")
     st.markdown(
-        f"**B 複製標注 JSON**：{'✅ 啟用' if copy_ann else '⬜ 停用'}　"
-        f"**C 整理圖片**：{'✅ 啟用' if org_img else '⬜ 停用'}"
+        f"**整理輸出目錄**：`{export_dir}`　"
+        f"**整理圖片**：{'✅ 啟用' if org_img else '⬜ 停用'}"
     )
 
-    # 預覽 dataframe
     if items:
         rows = [
             {
@@ -87,10 +84,9 @@ def _render_preview(result: dict) -> None:
                 "classification": it["classification"],
                 "has_annotation": it["has_annotation"],
                 "shape_count": it["shape_count"],
-                "b_action": it["b_action"],
-                "annotation_dst": it["annotation_dst"],
                 "c_action": it["c_action"],
                 "organized_dst": it["organized_dst"],
+                "ann_export_dst": it["ann_export_dst"],
             }
             for it in items
         ]
@@ -100,7 +96,6 @@ def _render_preview(result: dict) -> None:
 
     st.divider()
 
-    # 若已有執行結果，顯示之
     execute_result = st.session_state.get("m013_execute_result")
     if execute_result:
         _render_done(execute_result)
@@ -109,25 +104,17 @@ def _render_preview(result: dict) -> None:
             st.rerun()
         return
 
-    # 確認執行按鈕
     if not items:
         return
 
-    b_count = sum(1 for it in items if it.get("b_action") == "copy")
     c_count = sum(1 for it in items if it.get("c_action") == "copy")
 
-    warn_parts = []
-    if copy_ann and b_count > 0:
-        warn_parts.append(f"將 **{b_count}** 個標注 JSON 寫回影像所在目錄（同名 .json）")
     if org_img and c_count > 0:
-        warn_parts.append(f"整理 **{c_count}** 張圖片到分類子目錄")
-
-    if warn_parts:
-        st.warning("⚠️ 確認後將執行：\n- " + "\n- ".join(warn_parts) + "\n\n衝突時直接覆蓋。")
+        st.warning(f"⚠️ 確認後將複製 **{c_count}** 張圖片（及旁邊的標注 JSON）到分類子目錄。衝突時直接覆蓋。")
     else:
-        st.info("ℹ️ 目前條件下沒有需要執行的操作（無標注或無分類）。")
+        st.info("ℹ️ 目前條件下沒有需要執行的操作（無分類記錄或整理功能已停用）。")
 
-    btn_disabled = len(warn_parts) == 0
+    btn_disabled = not (org_img and c_count > 0)
 
     if st.button(
         "✅ 確認執行 Update",
@@ -140,15 +127,11 @@ def _render_preview(result: dict) -> None:
             manifest_id = result.get("manifest_id", "")
             execute_params = {
                 "manifest_id": manifest_id,
-                "dest_folder": result.get("source_folder", ""),
                 "export_dir": result.get("export_dir", ""),
-                "copy_annotations": result.get("copy_annotations", True),
                 "organize_images": result.get("organize_images", True),
                 "dry_run": False,
             }
             result2 = mod.execute_logic(execute_params)
-            # Update 完成後把 manifest_id 同步回 module_012.json，
-            # 讓 module_012 回到此頁仍選同一個 manifest
             if manifest_id and result2.get("mode") == "done":
                 try:
                     import importlib.util as _ilu012

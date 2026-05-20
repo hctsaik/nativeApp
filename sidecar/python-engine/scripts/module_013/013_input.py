@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util as _ilu
-import json
 from pathlib import Path
 
 import streamlit as st
@@ -26,8 +25,7 @@ _mdb_spec.loader.exec_module(_mdb)
 def render_input() -> dict:
     st.subheader("📁 Update — 結果更新")
     st.caption(
-        "將 module_012 的標注（X-AnyLabeling JSON）與分類結果整理成摘要 JSON，"
-        "並可選擇複製回原始資料夾，或依分類標籤整理圖片到子資料夾。"
+        "依分類標籤將圖片（及旁邊的同名標注 JSON）複製到整理輸出目錄的子資料夾。"
         "執行後請切換至 Output 頁面預覽並確認。"
     )
 
@@ -40,8 +38,7 @@ def render_input() -> dict:
         )
         return {
             "manifest_id": "",
-            "dest_folder": "",
-            "copy_annotations": True,
+            "export_dir": "",
             "organize_images": True,
             "dry_run": True,
         }
@@ -62,20 +59,13 @@ def render_input() -> dict:
 
     st.divider()
 
-    # ── 1. 標注輸出位置（自動）────────────────────────────────────────────────
-    st.subheader("1. 標注輸出位置")
-    st.info("✅ 標注 JSON 將直接存回**影像所在的同一目錄**（與影像同名，例：`image_001.json`）。")
-
-    st.divider()
-
-    # ── 2. 整理圖片輸出資料夾（C）────────────────────────────────────────────
-    st.subheader("2. 整理圖片輸出資料夾（C）")
+    # ── 1. 整理圖片輸出資料夾（C）────────────────────────────────────────────
+    st.subheader("1. 整理圖片輸出資料夾")
     st.caption(
-        "分類後的圖片會複製到此資料夾的 `{分類名稱}/` 子目錄。"
+        "分類後的圖片（及旁邊的標注 JSON）會複製到此資料夾的 `{分類名稱}/` 子目錄。"
         "**請務必設為原始圖片資料夾以外的位置**，避免重複掃描造成資料增殖。"
     )
 
-    # 預設：logs/exports 下的獨立目錄（完全在 source 資料夾之外）
     default_export = str(_cfg.get_default_export_dir(manifest_id))
 
     export_dir = st.text_input(
@@ -90,36 +80,22 @@ def render_input() -> dict:
 
     st.divider()
 
-    # ── 3. 更新選項 ───────────────────────────────────────────────────────────
-    st.subheader("3. 更新選項")
+    # ── 2. 更新選項 ───────────────────────────────────────────────────────────
+    st.subheader("2. 更新選項")
 
     cfg = _cfg.load_config()
 
-    copy_annotations = st.checkbox(
-        "B｜確認標注 JSON 已存回影像所在目錄（與影像同名）",
-        value=cfg.get("copy_annotations", True),
-        key="m013_copy_annotations",
-        help="X-AnyLabeling 已將標注存在影像同目錄（例：image_001.jpg → image_001.json）。此選項確認並統計已存在的標注檔。",
-    )
-
     organize_images = st.checkbox(
-        "C｜依分類標籤將圖片複製到整理輸出目錄的子資料夾",
+        "依分類標籤將圖片複製到整理輸出目錄的子資料夾（同時帶走旁邊的標注 JSON）",
         value=cfg.get("organize_images", True),
         key="m013_organize_images",
-        help="圖片複製到「整理輸出目錄/分類名稱/」。原始圖片不會被刪除。",
+        help="圖片與同名 .json 一起複製到「整理輸出目錄/分類名稱/」。原始檔案不會被刪除。",
     )
 
-    st.caption("⚠️ 以上操作均為「複製」，原始檔案不會被刪除或移動。衝突時以新檔案覆蓋。")
-
-    st.divider()
-
-    # ── 4. 外部 DB 更新（placeholder）────────────────────────────────────────
-    st.subheader("4. 外部 DB 更新")
-    st.info("🔧 外部 DB 更新功能開發中", icon="🔧")
+    st.caption("⚠️ 此操作為「複製」，原始檔案不會被刪除或移動。衝突時以新檔案覆蓋。")
 
     # 儲存選項到 config（下次自動恢復）
     try:
-        cfg["copy_annotations"] = copy_annotations
         cfg["organize_images"] = organize_images
         _cfg.save_config(cfg)
     except Exception:
@@ -127,9 +103,7 @@ def render_input() -> dict:
 
     return {
         "manifest_id": manifest_id,
-        "dest_folder": "",  # 不再使用；B 操作直接寫回影像同目錄
         "export_dir": export_dir,
-        "copy_annotations": copy_annotations,
         "organize_images": organize_images,
         "dry_run": True,
     }

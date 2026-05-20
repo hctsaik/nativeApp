@@ -6,8 +6,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _CIM_LOG_DIR  = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
 
 _DEFAULTS = {
-    "copy_annotations": True,   # B
-    "organize_images":  True,   # C
+    "organize_images": True,
 }
 
 def _config_path() -> Path:
