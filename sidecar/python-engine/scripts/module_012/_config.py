@@ -95,3 +95,26 @@ def get_xany_work_dir(manifest_id: str) -> Path:
     path = _CIM_LOG_DIR / "xanylabeling_state" / f"module_012_{_manifest_key(manifest_id)}"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_filepath_classifications_path() -> Path:
+    """分類結果的 file_path 索引（跨 manifest 存活，key 為 file_path）。"""
+    return _CIM_LOG_DIR / "config" / "module_012_classifications_by_path.json"
+
+
+def load_classifications_by_path() -> dict[str, str]:
+    """載入以 file_path 為 key 的分類 dict：{file_path → label}。"""
+    p = get_filepath_classifications_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_classifications_by_path(data: dict[str, str]) -> None:
+    """儲存以 file_path 為 key 的分類 dict。"""
+    p = get_filepath_classifications_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

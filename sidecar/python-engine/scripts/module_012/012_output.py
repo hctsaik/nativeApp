@@ -545,18 +545,27 @@ def _keyboard_listener() -> None:
 
 # ─── 分類輔助函式 ────────────────────────────────────────────────────────────
 
-def _save_clf(manifest_id: str, item_id: str, label: str, cache: dict) -> None:
+def _save_clf(manifest_id: str, item_id: str, label: str, cache: dict, file_path: str = "") -> None:
     if not manifest_id:
         return
     cache[item_id] = label
     _cfg.save_classifications(manifest_id, cache)
+    # 同時以 file_path 為 key 存一份，跨 manifest 存活
+    if file_path:
+        _fp_clf = _cfg.load_classifications_by_path()
+        _fp_clf[file_path] = label
+        _cfg.save_classifications_by_path(_fp_clf)
 
 
-def _clear_clf(manifest_id: str, item_id: str, cache: dict) -> None:
+def _clear_clf(manifest_id: str, item_id: str, cache: dict, file_path: str = "") -> None:
     if not manifest_id:
         return
     cache.pop(item_id, None)
     _cfg.save_classifications(manifest_id, cache)
+    if file_path:
+        _fp_clf = _cfg.load_classifications_by_path()
+        _fp_clf.pop(file_path, None)
+        _cfg.save_classifications_by_path(_fp_clf)
 
 
 def _next_unclassified(items: list, current_idx: int, clf: dict) -> int:
@@ -641,8 +650,10 @@ def render_output(result: dict) -> None:
             key="m012_annotation_autorefresh",
         )
 
-    # 每次 rerun 從磁碟重讀分類結果
+    # 每次 rerun 從磁碟重讀分類結果（per-manifest + file_path 兩層合併）
     classifications: dict[str, str] = _cfg.load_classifications(manifest_id) if manifest_id else {}
+    # file_path-based 分類（跨 manifest 存活），待 items 載入後 merge
+    _fp_clf: dict[str, str] = _cfg.load_classifications_by_path()
 
     # 注入鍵盤快捷鍵
     _keyboard_listener()
@@ -686,6 +697,15 @@ def render_output(result: dict) -> None:
     items     = _get_items(manifest_id, db_items)
     annotated = sum(1 for it in items if it["has_ann"])
     total     = len(items)
+
+    # 用 file_path-based 分類補齊目前 manifest 沒有分類的項目
+    if _fp_clf:
+        for _it in items:
+            _iid = _it.get("item_id", "")
+            if _iid and _iid not in classifications:
+                _fp = _it.get("file_path", "")
+                if _fp and _fp in _fp_clf:
+                    classifications[_iid] = _fp_clf[_fp]
 
     # ── 標題 ─────────────────────────────────────────────────────────────────
     st.markdown(f"## 🏷️ {manifest_name}")
@@ -971,7 +991,7 @@ setTimeout(function() {
                 _syms = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"]
                 for _qi, _lbl in enumerate(classification_labels[:9]):
                     if st.button(f"{_syms[_qi]} {_lbl}", key=f"qc_{item_id}_{_qi}"):
-                        _save_clf(manifest_id, item_id, _lbl, classifications)
+                        _save_clf(manifest_id, item_id, _lbl, classifications, file_path=fp)
                         st.session_state["m012_selected_idx"] = _next_unclassified(
                             items, sel_idx, classifications
                         )
@@ -1000,7 +1020,7 @@ setTimeout(function() {
                     # 從 "[1] 物件A" 還原為 "物件A"
                     import re as _re
                     raw = _re.sub(r"^\[\d+\] ", "", chosen)
-                    _save_clf(manifest_id, item_id, raw, classifications)
+                    _save_clf(manifest_id, item_id, raw, classifications, file_path=fp)
                     st.session_state["m012_selected_idx"] = _next_unclassified(
                         items, sel_idx, classifications
                     )
@@ -1019,7 +1039,7 @@ setTimeout(function() {
                         key=f"clf_reset_{item_id}",
                         help="清除分類",
                     ):
-                        _clear_clf(manifest_id, item_id, classifications)
+                        _clear_clf(manifest_id, item_id, classifications, file_path=fp)
                         st.rerun()
 
                 st.divider()
