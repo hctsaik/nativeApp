@@ -135,6 +135,7 @@ def _render_preview(result: dict) -> None:
             if manifest_id and result2.get("mode") == "done":
                 try:
                     import importlib.util as _ilu012
+                    import json as _json012
                     from pathlib import Path as _Path012
                     _cfg012_spec = _ilu012.spec_from_file_location(
                         "_012_config",
@@ -142,9 +143,16 @@ def _render_preview(result: dict) -> None:
                     )
                     _cfg012 = _ilu012.module_from_spec(_cfg012_spec)
                     _cfg012_spec.loader.exec_module(_cfg012)
-                    _c = _cfg012.load_config()
-                    _c["last_manifest_id"] = manifest_id
-                    _cfg012.save_config(_c)
+                    # 直接讀原始 JSON，只更新 last_manifest_id
+                    # 避免 load_config() 的 default merge 把 classification_labels 清空
+                    _cfg012_path = _cfg012._config_path()
+                    try:
+                        _raw = _json012.loads(_cfg012_path.read_text(encoding="utf-8")) if _cfg012_path.exists() else {}
+                    except Exception:
+                        _raw = {}
+                    _raw["last_manifest_id"] = manifest_id
+                    _cfg012_path.parent.mkdir(parents=True, exist_ok=True)
+                    _cfg012_path.write_text(_json012.dumps(_raw, ensure_ascii=False, indent=2), encoding="utf-8")
                 except Exception:
                     pass
             st.session_state["m013_execute_result"] = result2

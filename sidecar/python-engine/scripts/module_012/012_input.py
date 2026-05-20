@@ -173,6 +173,13 @@ def render_input() -> dict:
                 )
             )
 
+    # 儲存分類類別到 config，避免 session 重啟後消失
+    try:
+        cfg["classification_labels"] = clf_labels
+        _cfg.save_config(cfg)
+    except Exception:
+        pass
+
     return {
         "manifest_id": manifest_id,
         "annotation_tool": annotation_tool,
