@@ -580,6 +580,30 @@ def render_output(result: dict) -> None:
         # engine 重啟時會刪除 result JSON；嘗試從上次儲存的 config 自動重建
         _fallback_cfg = _cfg.load_config()
         _last_mid = _fallback_cfg.get("last_manifest_id", "")
+
+        # 若 last_manifest_id 的 manifest 沒有分類，改找最近有分類的 manifest
+        if _last_mid and not _cfg.load_classifications(_last_mid):
+            _clf_dir = _cfg.get_classification_path("_dummy").parent
+            _best_mid, _best_mtime = "", 0.0
+            for _cf in _clf_dir.glob("module_012_classifications_*.json"):
+                try:
+                    _mt = _cf.stat().st_mtime
+                    if _mt > _best_mtime and json.loads(_cf.read_text(encoding="utf-8")):
+                        _best_mtime = _mt
+                        _best_mid = _cf.stem.replace("module_012_classifications_", "")
+                except Exception:
+                    pass
+            # 用 best_mid 的前 12 碼反查完整 manifest_id（從 DB）
+            if _best_mid:
+                try:
+                    _db_path = _cfg.get_manifest_db_path()
+                    _all = _mdb.list_manifests(_db_path)
+                    _match = next((m["manifest_id"] for m in _all if m["manifest_id"][:12] == _best_mid), "")
+                    if _match:
+                        _last_mid = _match
+                except Exception:
+                    pass
+
         if _last_mid:
             _proc_spec = _ilu.spec_from_file_location("_012_process", _HERE / "012_process.py")
             _proc = _ilu.module_from_spec(_proc_spec)

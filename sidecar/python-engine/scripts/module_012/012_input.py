@@ -62,20 +62,37 @@ def render_input() -> dict:
             "autorefresh_seconds": 10,
         }
 
-    # ── 自動銜接最後一個 manifest（優先用 shared.json 的 last_manifest_id） ───
-    shared_id = _cfg.get_shared_manifest_id()
-    selected = next(
-        (m for m in manifests if m["manifest_id"] == shared_id),
-        manifests[0],
+    # ── manifest 選擇器（預設最後使用的，可手動切換回舊批次） ─────────────────
+    cfg = _cfg.load_config()
+    shared_id  = _cfg.get_shared_manifest_id()
+    saved_mid  = cfg.get("last_manifest_id", "") or shared_id
+
+    manifests_list = list(manifests)
+    mid_list   = [m["manifest_id"] for m in manifests_list]
+    default_idx = next((i for i, mid in enumerate(mid_list) if mid == saved_mid), 0)
+
+    # 標示各 manifest 是否有分類記錄
+    def _clf_tag(mid: str) -> str:
+        clf = _cfg.load_classifications(mid)
+        return f"🏷 {len(clf)}" if clf else ""
+
+    def _fmt(i: int) -> str:
+        m = manifests_list[i]
+        tag = _clf_tag(m["manifest_id"])
+        return f"{m['name']}  ({m.get('item_count', 0)} 張)  {tag}".strip()
+
+    sel_idx = st.selectbox(
+        "資料集",
+        range(len(manifests_list)),
+        index=default_idx,
+        format_func=_fmt,
+        key="m012_manifest_sel",
     )
+    selected    = manifests_list[sel_idx]
     manifest_id = selected["manifest_id"]
 
-    st.info(
-        f"目前資料集：**{selected['name']}**｜{selected.get('item_count', 0)} 張圖片"
-        "｜不是這批？請回 Data Feeder 重新選取。"
-    )
-
-    cfg = _cfg.load_config()
+    if manifest_id != shared_id:
+        st.warning("⚠️ 目前選取的不是 Data Feeder 最新建立的批次。")
 
     # ── 標注類別 ──────────────────────────────────────────────────────────────
     st.markdown("#### 標注類別")
