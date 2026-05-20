@@ -55,44 +55,25 @@ def _render_preview(result: dict) -> None:
     """顯示 dry_run=True 的預覽，並提供確認執行按鈕。"""
     st.subheader("📋 Update 預覽")
 
-    summary = result.get("summary", {})
     items = result.get("items", [])
-
-    total = summary.get("total", len(items))
-    ann_count = summary.get("ann_count", sum(1 for it in items if it.get("has_annotation")))
-    categories = len({it["classification"] for it in items if it.get("classification")})
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("總圖片數", total)
-    m2.metric("有標注", ann_count)
-    m3.metric("分類數", categories)
-
-    sf = result.get("source_folder", "")
     org_img = result.get("organize_images", True)
     export_dir = result.get("export_dir", "")
+    sf = result.get("source_folder", "")
+
+    c_count = sum(1 for it in items if it.get("c_action") == "copy")
+    categories = len({it["classification"] for it in items if it.get("classification")})
+    ann_in_copy = sum(1 for it in items if it.get("c_action") == "copy" and it.get("has_annotation"))
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("待複製圖片", c_count)
+    m2.metric("分類數", categories)
+    m3.metric("含標注", ann_in_copy)
 
     st.markdown(f"**原始資料夾**：`{sf}`" if sf else "**原始資料夾**：（無法推算）")
     st.markdown(
-        f"**整理輸出目錄**：`{export_dir}`　"
+        f"**輸出目錄**：`{export_dir}`　"
         f"**整理圖片**：{'✅ 啟用' if org_img else '⬜ 停用'}"
     )
-
-    if items:
-        rows = [
-            {
-                "filename": it["filename"],
-                "classification": it["classification"],
-                "has_annotation": it["has_annotation"],
-                "shape_count": it["shape_count"],
-                "c_action": it["c_action"],
-                "organized_dst": it["organized_dst"],
-                "ann_export_dst": it["ann_export_dst"],
-            }
-            for it in items
-        ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
-    else:
-        st.warning("沒有圖片資料，請確認已選擇正確的 Manifest。")
 
     st.divider()
 
@@ -105,30 +86,31 @@ def _render_preview(result: dict) -> None:
         return
 
     if not items:
+        st.warning("沒有圖片資料，請確認已選擇正確的 Manifest。")
         return
 
-    c_count = sum(1 for it in items if it.get("c_action") == "copy")
-
+    # ── 確認摘要 + 執行按鈕（在詳細列表之前）────────────────────────────────────
     if org_img and c_count > 0:
-        st.warning(f"⚠️ 確認後將複製 **{c_count}** 張圖片（及旁邊的標注 JSON）到分類子目錄。衝突時直接覆蓋。")
+        ann_note = f"（含 {ann_in_copy} 個標注 JSON）" if ann_in_copy else ""
+        st.warning(
+            f"確認後將複製 **{c_count}** 張圖片{ann_note}到 `{export_dir}`。衝突檔案直接覆蓋。"
+        )
     else:
-        st.info("ℹ️ 目前條件下沒有需要執行的操作（無分類記錄或整理功能已停用）。")
-
-    btn_disabled = not (org_img and c_count > 0)
+        st.info("目前沒有已分類的圖片需要複製。請先在 Annotation Session 完成分類。")
 
     if st.button(
         "✅ 確認執行 Update",
         type="primary",
         key="m013_confirm_execute",
-        disabled=btn_disabled,
+        disabled=not (org_img and c_count > 0),
     ):
         with st.spinner("執行中..."):
             mod = _load_process_mod()
             manifest_id = result.get("manifest_id", "")
             execute_params = {
                 "manifest_id": manifest_id,
-                "export_dir": result.get("export_dir", ""),
-                "organize_images": result.get("organize_images", True),
+                "export_dir": export_dir,
+                "organize_images": org_img,
                 "dry_run": False,
             }
             result2 = mod.execute_logic(execute_params)
@@ -143,8 +125,6 @@ def _render_preview(result: dict) -> None:
                     )
                     _cfg012 = _ilu012.module_from_spec(_cfg012_spec)
                     _cfg012_spec.loader.exec_module(_cfg012)
-                    # 直接讀原始 JSON，只更新 last_manifest_id
-                    # 避免 load_config() 的 default merge 把 classification_labels 清空
                     _cfg012_path = _cfg012._config_path()
                     try:
                         _raw = _json012.loads(_cfg012_path.read_text(encoding="utf-8")) if _cfg012_path.exists() else {}
@@ -158,6 +138,23 @@ def _render_preview(result: dict) -> None:
             st.session_state["m013_execute_result"] = result2
         st.rerun()
 
+    # ── 詳細清單（預設收合，避免遮擋確認按鈕）───────────────────────────────────
+    st.divider()
+    with st.expander(f"查看詳細清單（{len(items)} 張）", expanded=False):
+        rows = [
+            {
+                "filename": it["filename"],
+                "classification": it["classification"],
+                "has_annotation": it["has_annotation"],
+                "shape_count": it["shape_count"],
+                "c_action": it["c_action"],
+                "organized_dst": it["organized_dst"],
+                "ann_export_dst": it["ann_export_dst"],
+            }
+            for it in items
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
 
 # ── dispatcher ────────────────────────────────────────────────────────────────
 
@@ -165,7 +162,7 @@ def render_output(result: dict) -> None:
     mode = result.get("mode", "idle")
 
     if mode == "idle":
-        st.info("尚未執行，請在 Input 頁籤按下 ▶ 執行。")
+        st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行，預覽結果會顯示在這裡。")
         return
 
     if mode == "error":

@@ -24,10 +24,7 @@ _mdb_spec.loader.exec_module(_mdb)
 
 def render_input() -> dict:
     st.subheader("📁 Update — 結果更新")
-    st.caption(
-        "依分類標籤將圖片（及旁邊的同名標注 JSON）複製到整理輸出目錄的子資料夾。"
-        "執行後請切換至 Output 頁面預覽並確認。"
-    )
+    st.caption("依分類標籤將圖片與標注 JSON 複製到指定輸出目錄的子資料夾。")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
@@ -60,11 +57,8 @@ def render_input() -> dict:
     st.divider()
 
     # ── 1. 整理圖片輸出資料夾（C）────────────────────────────────────────────
-    st.subheader("1. 整理圖片輸出資料夾")
-    st.caption(
-        "分類後的圖片（及旁邊的標注 JSON）會複製到此資料夾的 `{分類名稱}/` 子目錄。"
-        "**請務必設為原始圖片資料夾以外的位置**，避免重複掃描造成資料增殖。"
-    )
+    st.subheader("1. 整理圖片輸出目錄")
+    st.caption("有分類標籤的圖片會依「輸出目錄/分類名稱/」結構複製，原始檔案不受影響。")
 
     default_export = str(_cfg.get_default_export_dir(manifest_id))
 
@@ -73,7 +67,7 @@ def render_input() -> dict:
         value=st.session_state.get("m013_export_dir_" + manifest_id, default_export),
         key="m013_export_dir_" + manifest_id,
         placeholder="例：C:/Users/user/export",
-        help="分類圖片輸出到此目錄的子資料夾，與原始圖片分開，不影響下次 Data Feeder 掃描。",
+        help="有分類的圖片與同名 .json 會複製到此目錄的子資料夾。預設為 CIM log 目錄下的 exports/。",
     )
     if export_dir:
         st.info(f"輸出範例：`{export_dir}/分類A/frame_000001.jpg`")
@@ -81,18 +75,18 @@ def render_input() -> dict:
     st.divider()
 
     # ── 2. 更新選項 ───────────────────────────────────────────────────────────
-    st.subheader("2. 更新選項")
+    st.subheader("2. 執行選項")
 
     cfg = _cfg.load_config()
 
     organize_images = st.checkbox(
-        "依分類標籤將圖片複製到整理輸出目錄的子資料夾（同時帶走旁邊的標注 JSON）",
+        "依分類整理圖片並帶走標注 JSON",
         value=cfg.get("organize_images", True),
         key="m013_organize_images",
-        help="圖片與同名 .json 一起複製到「整理輸出目錄/分類名稱/」。原始檔案不會被刪除。",
+        help="圖片與同名 .json 一起複製到「輸出目錄/分類名稱/」。原始檔案不受影響，衝突時以新檔覆蓋。",
     )
-
-    st.caption("⚠️ 此操作為「複製」，原始檔案不會被刪除或移動。衝突時以新檔案覆蓋。")
+    if not organize_images:
+        st.caption("停用後不會複製任何檔案。")
 
     # 儲存選項到 config（下次自動恢復）
     try:

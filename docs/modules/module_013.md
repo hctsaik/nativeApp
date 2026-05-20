@@ -1,6 +1,6 @@
 # module_013 — Update（標注與分類結果回寫）
 
-> 最後更新：2026-05-19
+> 最後更新：2026-05-21
 
 ## 概覽
 
@@ -53,10 +53,9 @@ def get_shared_manifest_id() -> str:
 ## Input Page（`013_input.py`）
 
 - **不顯示 Manifest 選擇器**：自動從 `shared.json` 取，以 info bar 顯示
-- **整理輸出目錄（C 操作）**：預設 `{CIM_LOG_DIR}/exports/module_013_{manifest_id[:12]}/`，可自訂（必須在原始圖片資料夾以外）
-- **更新選項**：
-  - B｜確認標注 JSON 已存回影像所在目錄
-  - C｜依分類標籤將圖片複製到整理輸出目錄的子資料夾
+- **整理輸出目錄**：預設 `{CIM_LOG_DIR}/exports/module_013_{manifest_id[:12]}/`，可自訂
+- **執行選項**：
+  - **依分類整理圖片並帶走標注 JSON**（checkbox）：有分類標籤的圖片與同名 `.json` 複製到 `{export_dir}/{分類名稱}/`
 
 回傳 result：
 
@@ -64,7 +63,6 @@ def get_shared_manifest_id() -> str:
 {
     "manifest_id": str,
     "export_dir": str,
-    "copy_annotations": bool,   # B
     "organize_images": bool,    # C
     "dry_run": bool,            # True = 預覽不執行
 }
@@ -124,22 +122,29 @@ C 操作目標路徑：`{export_dir}/{label}/{filename}`
 
 ## Output Page（`013_output.py`）
 
-### 預覽表格欄位
+### 預覽頁佈局（`mode == "preview"`）
+
+1. **Metrics 摘要**：待複製圖片 / 分類數 / 含標注（直接呈現本次操作規模）
+2. **路徑資訊**：原始資料夾 / 輸出目錄
+3. **確認摘要 + 確認按鈕**（在詳細清單之前，一眼可見）
+4. **詳細清單**（`st.expander`，預設收合）
+
+### 詳細清單欄位
 
 | 欄位 | 說明 |
 |------|------|
 | filename | 圖片檔名 |
 | classification | 分類標籤（從 config 讀） |
-| has_annotation | ✅ / ☐ |
+| has_annotation | True / False |
 | shape_count | 標注框數量 |
-| b_action | copy / skip / n/a |
-| annotation_dst | B 目標路徑 |
 | c_action | copy / skip / n/a |
 | organized_dst | C 目標路徑 |
+| ann_export_dst | 標注 JSON 目標路徑 |
 
 ### 確認按鈕
 
-預覽模式（`dry_run=True`）→ 顯示 `▶ 確認執行` → 觸發 `dry_run=False` 重新執行。
+預覽模式（`dry_run=True`）→ 摘要警告 + `✅ 確認執行 Update` → 觸發 `dry_run=False` 重新執行。
+無分類圖片時按鈕 disabled，顯示說明提示。
 
 ---
 
