@@ -192,7 +192,7 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
 
-function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab, onTabChange, isExecuting, isStarting }) {
+function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab, onTabChange, isExecuting, isStarting, sheetOutputNonces = {} }) {
   return (
     <div className="left-panel">
       {/* Sheet module tabs */}
@@ -220,20 +220,24 @@ function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab
 
       {/* Iframes: all tabs rendered, only active shown */}
       <div className="tab-content">
-        {sheetTabs.map((tab, i) => (
-          <React.Fragment key={tab.plugin_id}>
-            <iframe
-              title={`${tab.plugin_id}-input`}
-              src={tab.input_url}
-              style={{ display: i === activeSheetTabIdx && activeTab === "input" ? "block" : "none" }}
-            />
-            <iframe
-              title={`${tab.plugin_id}-output`}
-              src={tab.output_url}
-              style={{ display: i === activeSheetTabIdx && activeTab === "output" ? "block" : "none" }}
-            />
-          </React.Fragment>
-        ))}
+        {sheetTabs.map((tab, i) => {
+          const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
+          const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
+          return (
+            <React.Fragment key={tab.plugin_id}>
+              <iframe
+                title={`${tab.plugin_id}-input`}
+                src={tab.input_url}
+                style={{ display: i === activeSheetTabIdx && activeTab === "input" ? "block" : "none" }}
+              />
+              <iframe
+                title={`${tab.plugin_id}-output`}
+                src={outputSrc}
+                style={{ display: i === activeSheetTabIdx && activeTab === "output" ? "block" : "none" }}
+              />
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {isStarting && (
@@ -322,6 +326,7 @@ function App() {
   // Sheet-specific state
   const [sheetTabs, setSheetTabs] = useState([]);
   const [activeSheetTabIdx, setActiveSheetTabIdx] = useState(0);
+  const [sheetOutputNonces, setSheetOutputNonces] = useState({});
   // Ref so the polling closure always sees the latest sheetTabs without restarting the interval
   const sheetTabsRef = useRef([]);
   useEffect(() => { sheetTabsRef.current = sheetTabs; }, [sheetTabs]);
@@ -411,6 +416,8 @@ function App() {
                   setActiveTab("output");
                   setIsExecuting(false);
                 }
+                // Always reload the output iframe when mtime changes, regardless of suppression
+                setSheetOutputNonces(prev => ({ ...prev, [pluginId]: (prev[pluginId] ?? 0) + 1 }));
               }
             }
           }
@@ -472,9 +479,10 @@ function App() {
           setIsExecuting(false);
           if (payload.success) {
             if (payload.plugin_id && sheetTabsRef.current.length > 0) {
-              // Sheet tool: switch to the right module tab's Output
+              // Sheet tool: switch to the right module tab's Output and reload its iframe
               const idx = sheetTabsRef.current.findIndex(t => t.plugin_id === payload.plugin_id);
               if (idx >= 0) setActiveSheetTabIdx(idx);
+              setSheetOutputNonces(prev => ({ ...prev, [payload.plugin_id]: (prev[payload.plugin_id] ?? 0) + 1 }));
             }
             setActiveTab("output");
           } else {
@@ -617,6 +625,7 @@ function App() {
             onTabChange={setActiveTab}
             isExecuting={isExecuting}
             isStarting={isStarting}
+            sheetOutputNonces={sheetOutputNonces}
           />
         ) : (
           <LeftPanel
