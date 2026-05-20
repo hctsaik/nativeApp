@@ -577,8 +577,25 @@ def render_output(result: dict) -> None:
         return
 
     if mode != "ready":
-        st.info("請在 Input 頁面選擇 Manifest 與標注類別，點選「▶ 執行」開始工作階段。")
-        return
+        # engine 重啟時會刪除 result JSON；嘗試從上次儲存的 config 自動重建
+        _fallback_cfg = _cfg.load_config()
+        _last_mid = _fallback_cfg.get("last_manifest_id", "")
+        if _last_mid:
+            _proc_spec = _ilu.spec_from_file_location("_012_process", _HERE / "012_process.py")
+            _proc = _ilu.module_from_spec(_proc_spec)
+            _proc_spec.loader.exec_module(_proc)
+            result = _proc.execute_logic({
+                "manifest_id": _last_mid,
+                "annotation_tool": _fallback_cfg.get("annotation_tool", "x-anylabeling"),
+                "labels": _fallback_cfg.get("annotation_labels", []),
+                "classification_labels": _fallback_cfg.get("classification_labels", []),
+                "autorefresh_enabled": _fallback_cfg.get("autorefresh_enabled", True),
+                "autorefresh_seconds": _fallback_cfg.get("autorefresh_seconds", 10),
+            })
+            mode = result.get("mode", "idle")
+        if mode != "ready":
+            st.info("請在 Input 頁面選擇 Manifest 與標注類別，點選「▶ 執行」開始工作階段。")
+            return
 
     manifest_id            = result.get("manifest_id", "")
     manifest_name          = result.get("manifest_name", "")
