@@ -101,7 +101,7 @@ except Exception as exc:
 
 ---
 
-## ⏳ Bug 4：X-AnyLabeling 啟動失敗（WDAC 封鎖）— 需用戶操作
+## ✅ Bug 4：X-AnyLabeling 啟動失敗（WDAC 封鎖）
 
 ### 症狀
 點擊「🖊 標注工具」出現：`啟動失敗：[WinError 4551] 應用程式控制原則已封鎖此檔案`
@@ -114,11 +114,11 @@ except Exception as exc:
 | `.venv-xanylabeling\Scripts\python.exe` | uv trampoline (46KB) | ❌ 封鎖 |
 | `AppData\Roaming\uv\python\cpython-3.12-...\python.exe` | uv 下載，未簽章 (91KB) | ❌ 封鎖 |
 | `C:\Users\...\AppData\Local\Python\pythoncore-3.14-64\python.exe` | PSF-signed | ✅ 信任，但 ABI 不符（cp312 venv）|
-| `C:\Users\...\AppData\Local\Python\pythoncore-3.11-64\python.exe` | PSF-signed | ✅ 信任，但 ABI 不符（cp312 venv）|
+| `C:\Users\...\AppData\Local\Python\pythoncore-3.11-64\python.exe` | PSF-signed | ✅ 信任，已重建 venv 後可用 |
 
-`.venv-xanylabeling` 以 `uv venv --python 3.12` 建立，所有 `.pyd` 為 `cp312-win_amd64`，需要 Python 3.12 才能載入。系統上沒有 PSF-signed 的 Python 3.12。
+修復前 `.venv-xanylabeling` 以 `uv venv --python 3.12` 建立，所有 `.pyd` 為 `cp312-win_amd64`，需要 Python 3.12 才能載入。系統上沒有 PSF-signed 的 Python 3.12。
 
-### 程式碼已更新（等用戶操作後自動生效）
+### 程式碼已更新
 
 **`sidecar/python-engine/scripts/module_012/012_output.py`** 新增 `_find_venv_python_cmd()`：
 
@@ -127,27 +127,34 @@ except Exception as exc:
 3. 嘗試 `%LOCALAPPDATA%\Programs\Python\PythonXYZ\python.exe` 等常見路徑
 4. Fallback 到 pyvenv.cfg home → venv python.exe
 
-### 需要用戶執行的操作
+### 本次已完成的操作
 
-**方案 A：用 Python 3.11 重建 venv（推薦，不需安裝新 Python）**
+已用 Python 3.11 重建 venv（不需安裝新 Python）：
 
 ```powershell
 # 在專案根目錄執行
-python -m uv venv --python 3.11 .venv-xanylabeling
+python -m uv venv --python 3.11 --clear .venv-xanylabeling
 python -m uv pip install --python .venv-xanylabeling\Scripts\python.exe --pre "x-anylabeling-cvhub[cpu]"
 ```
 
-重建後 `pyvenv.cfg` 會記錄 `version_info = 3.11.x`，程式碼自動走 `py -3.11`（已安裝，WDAC 信任）。
-
-**方案 B：安裝 Python 3.12 官方版（不需重建 venv）**
-
-1. 下載 `python-3.12.x-amd64.exe` from [python.org](https://www.python.org/downloads/release/python-3128/)
-2. 安裝時勾選「Install py launcher」
-3. 重啟應用程式，程式碼自動走 `py -3.12`
+重建後 `pyvenv.cfg` 記錄 `version_info = 3.11.9`，程式碼自動走 `py -3.11`（已安裝，WDAC 信任）。
 
 ### 預期結果
 
-操作完成後不需任何程式碼修改，重啟 app 即可正常啟動 X-AnyLabeling。
+重啟 app 後，點擊「🖊 標注工具」應可透過 `py -3.11` 正常啟動 X-AnyLabeling。
+
+### 已驗證
+
+```powershell
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); import anylabeling; print(anylabeling.__version__)"
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; print('anylabeling.app main ok')"
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
+```
+
+結果：
+- `anylabeling` 版本 `4.0.0-beta.7`
+- `from anylabeling.app import main` 成功
+- `xanylabeling checks` 成功，Python Version 顯示 `3.11.9`
 
 ---
 

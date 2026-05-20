@@ -14,18 +14,21 @@ X-AnyLabeling 需安裝在獨立的 venv，不與主程式共用（其 PyQt5 依
 # 安裝 uv（快速套件管理器）
 python -m pip install -U uv
 
-# 建立 Python 3.12 獨立 venv
-python -m uv venv --python 3.12 .venv-xanylabeling
+# 建立 Python 3.11 獨立 venv
+# 本機 WDAC 會封鎖 uv 下載的 unsigned Python 3.12 runtime；
+# 3.11 可透過受信任的 Windows Python Launcher 啟動。
+python -m uv venv --python 3.11 .venv-xanylabeling
 
 # 安裝 x-anylabeling-cvhub（CPU 版本）
 python -m uv pip install --python .venv-xanylabeling\Scripts\python.exe `
     --pre "x-anylabeling-cvhub[cpu]"
 
-# 驗證安裝
-.venv-xanylabeling\Scripts\xanylabeling.exe checks
+# 驗證安裝（WDAC-safe，不直接執行 uv trampoline exe）
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
 ```
 
 > 目前驗證通過的版本：**4.0.0-beta.7**  
+> 目前本機驗證的 Python 版本：**3.11.9**
 > `.venv-xanylabeling/` 應加入 `.gitignore`。
 
 ### 可執行檔路徑解析順序
@@ -380,7 +383,7 @@ def detect_xanylabeling(project_root: Path) -> dict:
 |---|---|
 | 套件名稱 | `x-anylabeling-cvhub[cpu]` |
 | 驗證版本 | 4.0.0-beta.7 |
-| Python 版本 | 3.12 |
+| Python 版本 | 3.11.9 |
 | 可執行檔 | `Scripts/xanylabeling.exe` |
 | JSON 格式 | LabelMe v6.0.0 |
 | `imageData` | 永遠為 `null` |

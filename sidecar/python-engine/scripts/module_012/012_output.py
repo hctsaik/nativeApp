@@ -201,7 +201,7 @@ def _find_venv_python_cmd(xany_exe: str) -> list[str]:
     """
     import shutil
 
-    # Determine required version from pyvenv.cfg (e.g. "3.12" → ver="3.12", short="312")
+    # Determine required version from pyvenv.cfg (e.g. "3.11" -> ver="3.11", short="311")
     pyvenv_cfg = Path(xany_exe).parents[1] / "pyvenv.cfg"
     ver = ""
     if pyvenv_cfg.exists():
@@ -260,11 +260,10 @@ def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
     if classes_txt.exists():
         xany_args += ["--labels", str(classes_txt), "--validatelabel", "exact"]
 
-    # WDAC 繞過策略：
-    #   xanylabeling.exe 與 .venv-xanylabeling/Scripts/python.exe 均為 uv trampoline（未簽章），
-    #   uv 自動下載的 CPython 3.12 同樣未簽章 — 三者都被 WDAC 封鎖。
-    #   需使用 PSF-signed 的 Python 3.12（从 python.org 安裝）。
-    #   優先序：py.exe -3.12 launcher（Microsoft-signed）→ 常見 PSF 安裝路徑 → pyvenv.cfg home → fallback
+    # WDAC bypass strategy:
+    #   xanylabeling.exe and some uv-created venv python.exe launchers may be blocked.
+    #   Run X-AnyLabeling through a trusted Python with the same ABI as pyvenv.cfg,
+    #   while pointing sys.path at the venv's site-packages.
     venv_root = Path(xany_exe).parents[1]
     venv_sp = str(venv_root / "Lib" / "site-packages")
     launch_stmt = f"import sys; sys.path.insert(0, r'{venv_sp}'); from anylabeling.app import main; main()"
@@ -278,9 +277,10 @@ def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
         if "4551" in str(e) or "policy" in str(e).lower() or "blocked" in str(e).lower():
             return (
                 f"{e}\n\n"
-                "【解決方法】請安裝官方 Python 3.12：\n"
-                "  https://www.python.org/downloads/release/python-3128/\n"
-                "  安裝後重啟應用程式即可自動使用。"
+                "【解決方法】請用已信任的 Python 重建 .venv-xanylabeling，例如：\n"
+                "  python -m uv venv --python 3.11 --clear .venv-xanylabeling\n"
+                "  python -m uv pip install --python .venv-xanylabeling\\Scripts\\python.exe --pre \"x-anylabeling-cvhub[cpu]\"\n"
+                "重建後重啟應用程式即可自動使用 py -3.11 啟動。"
             )
         return str(e)
 
@@ -949,4 +949,3 @@ setTimeout(function() {
                 # 無標注
                 _show_img(fp, enhance)
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
-

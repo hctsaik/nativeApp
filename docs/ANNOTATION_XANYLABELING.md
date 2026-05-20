@@ -58,10 +58,16 @@ Verified version:
 4.0.0-beta.7
 ```
 
+Verified Python runtime:
+
+```text
+Python 3.11.9
+```
+
 Verified command:
 
 ```powershell
-C:\code\claude\nativeApp\.venv-xanylabeling\Scripts\xanylabeling.exe checks
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
 ```
 
 The project detects X-AnyLabeling in this order:
@@ -72,13 +78,13 @@ The project detects X-AnyLabeling in this order:
 
 ## Installation Notes
 
-The installed runtime follows the official X-AnyLabeling quick-start guidance for a CPU environment:
+The installed runtime follows the official X-AnyLabeling quick-start guidance for a CPU environment, with Python 3.11 on this machine so WDAC can route launch through the trusted Windows Python Launcher:
 
 ```powershell
 python -m pip install -U uv
-python -m uv venv --python 3.12 .venv-xanylabeling
+python -m uv venv --python 3.11 .venv-xanylabeling
 python -m uv pip install --python .venv-xanylabeling\Scripts\python.exe --pre "x-anylabeling-cvhub[cpu]"
-.venv-xanylabeling\Scripts\xanylabeling.exe checks
+py -3.11 -c "import sys; sys.path.insert(0, r'.venv-xanylabeling\Lib\site-packages'); from anylabeling.app import main; sys.argv=['xanylabeling','checks']; main()"
 ```
 
 The repo root `.gitignore` excludes `.venv-xanylabeling/`.
