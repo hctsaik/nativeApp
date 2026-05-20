@@ -162,7 +162,11 @@ def _render_preview(result: dict) -> None:
 # ── dispatcher ────────────────────────────────────────────────────────────────
 
 def render_output(result: dict) -> None:
-    mode = result.get("mode", "error")
+    mode = result.get("mode", "idle")
+
+    if mode == "idle":
+        st.info("尚未執行，請在 Input 頁籤按下 ▶ 執行。")
+        return
 
     if mode == "error":
         st.error(result.get("error", "未知錯誤"))

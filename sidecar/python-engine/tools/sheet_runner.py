@@ -152,26 +152,21 @@ def run_output() -> None:
         return
 
     rfile = _result_file()
-    if not rfile.exists():
-        st.info("尚未執行，請在左側 Input 頁籤按下 ▶ 執行。")
-        time.sleep(1)
-        st.rerun()
-        return
-
-    current_mtime = rfile.stat().st_mtime
-    last_mtime = st.session_state.get("_sheet_result_mtime")
-    if last_mtime != current_mtime:
-        st.session_state["_sheet_result_mtime"] = current_mtime
-        st.rerun()
-        return
-
-    try:
-        result = json.loads(rfile.read_text(encoding="utf-8"))
-    except Exception as exc:
-        st.error(f"讀取結果失敗：{exc}")
-        time.sleep(2)
-        st.rerun()
-        return
+    result: dict = {}
+    if rfile.exists():
+        current_mtime = rfile.stat().st_mtime
+        last_mtime = st.session_state.get("_sheet_result_mtime")
+        if last_mtime != current_mtime:
+            st.session_state["_sheet_result_mtime"] = current_mtime
+            st.rerun()
+            return
+        try:
+            result = json.loads(rfile.read_text(encoding="utf-8"))
+        except Exception as exc:
+            st.error(f"讀取結果失敗：{exc}")
+            time.sleep(2)
+            st.rerun()
+            return
 
     try:
         registry = _registry()
