@@ -184,11 +184,12 @@ def run_output() -> None:
         output_mod = PluginLoader.load_module(PLUGIN_ID, "output", content_json)
         output_mod.render_output(result)
     except Exception as exc:
+        # Re-raise Streamlit control-flow exceptions (RerunException, StopException)
+        # so that st.rerun() / st.stop() inside render_output() work correctly.
+        if type(exc).__module__.startswith("streamlit"):
+            raise
         st.error(f"載入 {PLUGIN_ID} output 失敗：{exc}")
         st.json(result)
-
-    time.sleep(2)
-    st.rerun()
 
 
 # ── 進入點 ─────────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ from pathlib import Path
 _LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(Path(__file__).resolve().parents[4] / "tmp" / "cim_log")))
 _LOG_FILE = _LOG_DIR / "module_012_process.log"
 
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
 _handler = logging.FileHandler(str(_LOG_FILE), encoding="utf-8")
 _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 _log = logging.getLogger("module_012")
@@ -42,33 +43,45 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 # ─── 輔助函式 ─────────────────────────────────────────────────────────────────
 
+def _json_matches_image(json_file: Path, target: Path) -> bool:
+    """Return True when a LabelMe JSON either omits imagePath or points at target."""
+    try:
+        stored = json.loads(json_file.read_text(encoding="utf-8")).get("imagePath", "")
+        if not stored:
+            return True
+        stored_path = Path(stored)
+        if not stored_path.is_absolute():
+            stored_path = json_file.parent / stored_path
+        return stored_path.resolve() == target
+    except Exception:
+        return True
+
+
 def _find_annotation(img_path: str, workspace_dir: str = "") -> str | None:
     """尋找與圖片對應的 LabelMe JSON 標注檔，回傳路徑或 None。
 
-    先以 basename 快速命中，再用 JSON 內的 imagePath 欄位驗證圖片路徑是否吻合，
-    以應對不同目錄下出現相同檔名（如 frame_000000.jpg）的情況。
+    優先查影像同目錄同名 .json（module_012 的 X-AnyLabeling 輸出位置）。
+    workspace/annotations 僅保留為舊版相容 fallback。
     """
-    if not workspace_dir:
-        return None
-    ann_dir = Path(workspace_dir) / "annotations"
-    if not ann_dir.exists():
+    if not img_path:
         return None
 
     target = Path(img_path).resolve()
 
-    def _match(json_file: Path) -> bool:
-        """回傳 True 若 JSON 的 imagePath 解析後與 target 相同。"""
-        try:
-            stored = json.loads(json_file.read_text(encoding="utf-8")).get("imagePath", "")
-            if not stored:
-                return True  # 無 imagePath 欄位則接受（向後相容）
-            return (json_file.parent / stored).resolve() == target
-        except Exception:
-            return True
+    same_dir = Path(img_path).with_suffix(".json")
+    if same_dir.exists() and _json_matches_image(same_dir, target):
+        return str(same_dir)
 
-    # 快速路徑：basename 相符且 imagePath 吻合
+    if not workspace_dir:
+        return None
+
+    ann_dir = Path(workspace_dir) / "annotations"
+    if not ann_dir.exists():
+        return None
+
+    # 舊版相容：workspace/annotations basename 相符且 imagePath 吻合
     naive = ann_dir / Path(img_path).with_suffix(".json").name
-    if naive.exists() and _match(naive):
+    if naive.exists() and _json_matches_image(naive, target):
         return str(naive)
 
     # 全掃：其他 JSON 檔是否有 imagePath 指向 target
@@ -77,7 +90,10 @@ def _find_annotation(img_path: str, workspace_dir: str = "") -> str | None:
             continue
         try:
             stored = json.loads(jf.read_text(encoding="utf-8")).get("imagePath", "")
-            if stored and (jf.parent / stored).resolve() == target:
+            stored_path = Path(stored)
+            if stored and not stored_path.is_absolute():
+                stored_path = jf.parent / stored_path
+            if stored and stored_path.resolve() == target:
                 return str(jf)
         except Exception:
             continue
@@ -176,15 +192,18 @@ def execute_logic(params: dict) -> dict:
     _log.info("[012] workspace 路徑: %s  (來源: %s)",
               ws_for_scan, "params" if workspace_dir else "manifest_id 推算")
 
+    same_dir_ann_count = sum(
+        1
+        for it in all_db_items
+        if it.get("file_path", "") and Path(it.get("file_path", "")).with_suffix(".json").exists()
+    )
     ann_dir = Path(ws_for_scan) / "annotations"
     ann_dir_exists = ann_dir.exists()
-    existing_anns = sorted(ann_dir.glob("*.json")) if ann_dir_exists else []
-    _log.info("[012] annotations/ 目錄: exists=%s | 檔案數=%d",
-              ann_dir_exists, len(existing_anns))
-    if existing_anns:
-        _log.info("[012] 已有標注檔: %s", [f.name for f in existing_anns])
-    else:
-        _log.warning("[012] annotations/ 目錄為空或不存在 → 所有圖片將標示為「未標注」")
+    legacy_anns = sorted(ann_dir.glob("*.json")) if ann_dir_exists else []
+    _log.info("[012] 影像同目錄標注檔數=%d | legacy annotations/ exists=%s 檔案數=%d",
+              same_dir_ann_count, ann_dir_exists, len(legacy_anns))
+    if same_dir_ann_count == 0 and not legacy_anns:
+        _log.warning("[012] 未找到影像同目錄 .json 或 legacy annotations/ JSON → 所有圖片將標示為「未標注」")
 
     # ── 5. 掃描各圖片的標注狀態 ────────────────────────────────────────────────
     items: list[dict] = []

@@ -6,3 +6,5 @@ tabs:
     label: 📦 Data Feeder
   - plugin_id: module_012
     label: 🏷️ Annotation
+  - plugin_id: module_013
+    label: 🔄 Update

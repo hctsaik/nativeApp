@@ -518,7 +518,7 @@ class ToolProcessManager:
 
     def _get_sheet_tabs(self, sheet_id: str) -> list[dict]:
         db_path = ROOT_DIR / "config" / "tools.sqlite"
-        try:
+        def _query_tabs() -> list[dict]:
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
@@ -526,7 +526,21 @@ class ToolProcessManager:
                     (sheet_id,),
                 ).fetchall()
             return [{"plugin_id": r["plugin_id"], "label": r["label"]} for r in rows]
-        except Exception:
+
+        try:
+            tabs = _query_tabs()
+            if tabs:
+                return tabs
+        except Exception as exc:
+            logging.info("Sheet tabs not ready for %s; syncing sheets: %s", sheet_id, exc)
+
+        try:
+            from plugin_registry import PluginRegistry
+
+            PluginRegistry(db_path=db_path, scripts_dir=ROOT_DIR / "scripts").sync_sheets()
+            return _query_tabs()
+        except Exception as exc:
+            logging.warning("Unable to load sheet tabs for %s: %s", sheet_id, exc)
             return []
 
     def start(self, tool: ToolDefinition) -> ToolStartResponse:

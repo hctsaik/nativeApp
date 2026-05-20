@@ -208,15 +208,16 @@ def run_output() -> None:
             if "resolution" in data and isinstance(data["resolution"], list):
                 data["resolution"] = tuple(data["resolution"])
             output_mod.render_output(data)
-        except Exception:
+        except Exception as _exc:
+            # Re-raise Streamlit control-flow exceptions (RerunException, StopException)
+            # so that st.rerun() / st.stop() inside render_output() work correctly.
+            if type(_exc).__module__.startswith("streamlit"):
+                raise
             # Fallback: show raw serializable fields as table
             st.table({"欄位": list(data.keys()), "值": [str(v) for v in data.values()]})
     else:
         st.table({"欄位": list(data.keys()), "值": [str(v) for v in data.values()]})
 
-    # Poll for result file updates every 3 seconds
-    time.sleep(3)
-    st.rerun()
 
 
 def main() -> None:

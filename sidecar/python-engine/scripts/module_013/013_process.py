@@ -19,6 +19,7 @@ from pathlib import Path
 _LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(Path(__file__).resolve().parents[4] / "tmp" / "cim_log")))
 _LOG_FILE = _LOG_DIR / "module_013_process.log"
 
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
 _handler = logging.FileHandler(str(_LOG_FILE), encoding="utf-8")
 _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 _log = logging.getLogger("module_013")
@@ -68,8 +69,15 @@ def _infer_source_folder(manifest: dict, items: list[dict]) -> str:
     2. Fallback：取所有 items 的 file_path 的 common parent。
     """
     source_path = (manifest or {}).get("source_path", "")
+    if not source_path:
+        try:
+            source_config = json.loads((manifest or {}).get("source_config", "{}"))
+            source_path = source_config.get("folder_path", "") or source_config.get("source_path", "")
+        except Exception:
+            source_path = ""
     if source_path and Path(source_path).exists():
-        return source_path
+        p = Path(source_path)
+        return str(p if p.is_dir() else p.parent)
 
     # Fallback：從 items 推算
     parents = []
@@ -83,6 +91,14 @@ def _infer_source_folder(manifest: dict, items: list[dict]) -> str:
     from collections import Counter
     most_common = Counter(parents).most_common(1)[0][0]
     return most_common
+
+
+def _same_path(left: str, right: str) -> bool:
+    """Return True when two paths point to the same filesystem location."""
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except Exception:
+        return left == right
 
 
 # ─── 公開 API ─────────────────────────────────────────────────────────────────
@@ -245,12 +261,15 @@ def execute_logic(params: dict) -> dict:
             # B：複製標注 JSON
             if copy_annotations and b_action == "copy" and ann_src and ann_dst:
                 try:
-                    dst_path = Path(ann_dst)
-                    dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(ann_src, dst_path)
+                    if _same_path(ann_src, ann_dst):
+                        _log.info("[013][B] ✅ confirmed %s", ann_src)
+                    else:
+                        dst_path = Path(ann_dst)
+                        dst_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ann_src, dst_path)
+                        _log.info("[013][B] ✅ copy %s → %s", ann_src, ann_dst)
                     b_copied += 1
                     status = "ok"
-                    _log.info("[013][B] ✅ copy %s → %s", ann_src, ann_dst)
                 except Exception as e:
                     error_msg += f"[B] {e} "
                     errors += 1
@@ -313,7 +332,7 @@ def execute_logic(params: dict) -> dict:
     _log.info("[013] C(分類): copy=%d skip=%d n/a=%d", c_copy_cnt, c_skip_cnt, c_na_cnt)
 
     if b_copy_cnt == 0 and b_na_cnt == total:
-        _log.warning("[013] 全部 b_action=n/a → workspace annotations/ 沒有任何 JSON，確認按鈕將 disabled")
+        _log.warning("[013] 全部 b_action=n/a → 影像同目錄沒有任何同名 JSON，確認按鈕將 disabled")
     if b_skip_cnt > 0:
         _log.warning("[013] b_action=skip %d 筆 → 有標注但 file_path 為空，無法決定目標路徑", b_skip_cnt)
 
@@ -334,6 +353,8 @@ def execute_logic(params: dict) -> dict:
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_dir = Path(source_folder) if source_folder else workspace_dir
+            if out_dir.exists() and not out_dir.is_dir():
+                out_dir = out_dir.parent
             output_json_path = str(out_dir / f"update_result_{ts}.json")
             output_data = {
                 "manifest_id": manifest_id,

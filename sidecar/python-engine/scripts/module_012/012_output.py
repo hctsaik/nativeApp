@@ -16,12 +16,13 @@ import base64
 import importlib.util as _ilu
 import io
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from streamlit_autorefresh import st_autorefresh
 
 # ─── 動態載入 _config + _manifest_db ─────────────────────────────────────────
 
@@ -101,7 +102,147 @@ def _find_annotation(img_path: str, workspace_dir: str = "") -> tuple[bool, str,
     return True, str(ann_path), sc
 
 
+# ─── 標注狀態快取（session_state + mtime 增量更新） ──────────────────────────
+
+PAGE_SIZE = 50
+
+
+def _scan_items(db_items: list[dict], workspace_dir: str) -> tuple[list[dict], dict[str, float]]:
+    """Full scan — 首次載入或 manifest 換新時呼叫。"""
+    items: list[dict] = []
+    mtimes: dict[str, float] = {}
+    for it in db_items:
+        fp = it.get("file_path", "")
+        has_ann, ann_path, shape_count = _find_annotation(fp, workspace_dir)
+        items.append({**it, "has_ann": has_ann, "ann_path": ann_path, "shape_count": shape_count})
+        if ann_path:
+            try:
+                mtimes[ann_path] = Path(ann_path).stat().st_mtime
+            except Exception:
+                mtimes[ann_path] = 0.0
+    return items, mtimes
+
+
+def _incremental_refresh(
+    cached: list[dict], mtimes: dict[str, float], workspace_dir: str
+) -> tuple[list[dict], dict[str, float]]:
+    """每次 rerun 只做 stat() 比對，僅對變動的項目重讀 JSON。"""
+    new_mtimes = dict(mtimes)
+    for item in cached:
+        fp = item.get("file_path", "")
+        if not fp:
+            continue
+        ann_path = item.get("ann_path", "")
+        if ann_path:
+            try:
+                mtime = Path(ann_path).stat().st_mtime
+            except FileNotFoundError:
+                mtime = -1.0
+            except Exception:
+                mtime = new_mtimes.get(ann_path, 0.0)
+            if mtime != new_mtimes.get(ann_path, -999.0):
+                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                item["has_ann"] = has_ann
+                item["ann_path"] = new_ap
+                item["shape_count"] = sc
+                if ann_path != new_ap:
+                    new_mtimes.pop(ann_path, None)
+                if new_ap:
+                    try:
+                        new_mtimes[new_ap] = Path(new_ap).stat().st_mtime
+                    except Exception:
+                        new_mtimes[new_ap] = 0.0
+        else:
+            # 尚無標注：只做 exists()，不讀檔案內容
+            candidate = Path(fp).with_suffix(".json")
+            if candidate.exists():
+                has_ann, new_ap, sc = _find_annotation(fp, workspace_dir)
+                item["has_ann"] = has_ann
+                item["ann_path"] = new_ap
+                item["shape_count"] = sc
+                if new_ap:
+                    try:
+                        new_mtimes[new_ap] = Path(new_ap).stat().st_mtime
+                    except Exception:
+                        new_mtimes[new_ap] = 0.0
+    return cached, new_mtimes
+
+
+def _get_items(manifest_id: str, workspace_dir: str, db_items: list[dict]) -> list[dict]:
+    """session_state 快取入口：cache miss → full scan；hit → incremental refresh。"""
+    cached = st.session_state.get("m012_items")
+    if (
+        st.session_state.get("m012_cache_mid") != manifest_id
+        or cached is None
+        or len(cached) != len(db_items)
+    ):
+        items, mtimes = _scan_items(db_items, workspace_dir)
+        st.session_state["m012_items"]     = items
+        st.session_state["m012_mtimes"]    = mtimes
+        st.session_state["m012_cache_mid"] = manifest_id
+        return items
+
+    items, mtimes = _incremental_refresh(cached, st.session_state["m012_mtimes"], workspace_dir)
+    st.session_state["m012_items"]  = items
+    st.session_state["m012_mtimes"] = mtimes
+    return items
+
+
 # ─── X-AnyLabeling 啟動 ───────────────────────────────────────────────────────
+
+def _find_venv_python_cmd(xany_exe: str) -> list[str]:
+    """Return argv prefix [python, ...flags] for a WDAC-trusted Python matching the venv's ABI.
+
+    Reads the Python version from pyvenv.cfg (e.g. 3.11 or 3.12), then tries:
+      1. py.exe -3.X  (Windows Python Launcher — Microsoft-signed, always WDAC-trusted)
+      2. Common python.org install paths for that version (PSF-signed)
+      3. pyvenv.cfg home directory (uv-managed, may be WDAC-blocked)
+      4. venv python.exe fallback
+    """
+    import shutil
+
+    # Determine required version from pyvenv.cfg (e.g. "3.12" → ver="3.12", short="312")
+    pyvenv_cfg = Path(xany_exe).parents[1] / "pyvenv.cfg"
+    ver = ""
+    if pyvenv_cfg.exists():
+        for _line in pyvenv_cfg.read_text(encoding="utf-8").splitlines():
+            if _line.startswith("version_info"):
+                ver = ".".join(_line.split("=", 1)[1].strip().split(".")[:2])
+                break
+
+    # 1. py.exe launcher (Microsoft-signed, WDAC-trusted)
+    if ver:
+        py = shutil.which("py")
+        if py:
+            try:
+                r = subprocess.run([py, f"-{ver}", "--version"], capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    return [py, f"-{ver}"]
+            except Exception:
+                pass
+
+    # 2. Common python.org install paths (PSF-signed)
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    short = ver.replace(".", "") if ver else ""
+    for candidate in [
+        Path(localappdata) / "Programs" / "Python" / f"Python{short}" / "python.exe",
+        Path(localappdata) / "Python" / f"pythoncore-{ver}-64" / "python.exe",
+        Path(f"C:\\Program Files\\Python{short}\\python.exe"),
+        Path(f"C:\\Python{short}\\python.exe"),
+    ]:
+        if candidate.exists():
+            return [str(candidate)]
+
+    # 3. pyvenv.cfg home (uv-managed, may be WDAC-blocked — last resort before venv stub)
+    if pyvenv_cfg.exists():
+        for _line in pyvenv_cfg.read_text(encoding="utf-8").splitlines():
+            if _line.startswith("home"):
+                _cand = Path(_line.split("=", 1)[1].strip()) / "python.exe"
+                if _cand.exists():
+                    return [str(_cand)]
+
+    return [str(Path(xany_exe).parent / "python.exe")]
+
 
 def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
                  xany_exe: str, ann_path: str = "") -> str | None:
@@ -119,18 +260,40 @@ def _launch_xany(file_path: str, labels: list[str], workspace_dir: str,
     if classes_txt.exists():
         xany_args += ["--labels", str(classes_txt), "--validatelabel", "exact"]
 
-    # 優先以 python.exe 啟動（繞過 WDAC / Application Control 對 .exe 的封鎖）
-    python_exe = Path(xany_exe).parent / "python.exe"
-    if python_exe.exists():
-        cmd = [str(python_exe), "-c", "from anylabeling.app import main; main()"] + xany_args
-    else:
-        cmd = [xany_exe] + xany_args
+    # WDAC 繞過策略：
+    #   xanylabeling.exe 與 .venv-xanylabeling/Scripts/python.exe 均為 uv trampoline（未簽章），
+    #   uv 自動下載的 CPython 3.12 同樣未簽章 — 三者都被 WDAC 封鎖。
+    #   需使用 PSF-signed 的 Python 3.12（从 python.org 安裝）。
+    #   優先序：py.exe -3.12 launcher（Microsoft-signed）→ 常見 PSF 安裝路徑 → pyvenv.cfg home → fallback
+    venv_root = Path(xany_exe).parents[1]
+    venv_sp = str(venv_root / "Lib" / "site-packages")
+    launch_stmt = f"import sys; sys.path.insert(0, r'{venv_sp}'); from anylabeling.app import main; main()"
+    python_cmd = _find_venv_python_cmd(xany_exe)
+    cmd = python_cmd + ["-c", launch_stmt] + xany_args
 
     try:
         subprocess.Popen(cmd)
         return None
     except Exception as e:
+        if "4551" in str(e) or "policy" in str(e).lower() or "blocked" in str(e).lower():
+            return (
+                f"{e}\n\n"
+                "【解決方法】請安裝官方 Python 3.12：\n"
+                "  https://www.python.org/downloads/release/python-3128/\n"
+                "  安裝後重啟應用程式即可自動使用。"
+            )
         return str(e)
+
+
+def _show_img(fp: str, enhance: bool) -> None:
+    """Display image in right panel; apply contrast enhancement when enhance=True."""
+    if enhance:
+        try:
+            st.image(_draw_annotations(fp, {}, enhance=True), use_container_width=True)
+            return
+        except Exception:
+            pass
+    st.image(fp, use_container_width=True)
 
 
 # ─── PIL 畫標注框（直接移植自 006_output.py） ────────────────────────────────
@@ -420,24 +583,14 @@ def render_output(result: dict) -> None:
 .thumb-selected { border: 3px solid #1a73e8 !important; border-radius: 6px; padding: 2px; }
 </style>""", unsafe_allow_html=True)
 
-    # ── 每次 rerun 重新掃描最新標注狀態 ──────────────────────────────────────
+    # ── 標注狀態：session_state 快取 + mtime 增量更新 ─────────────────────────
     db_path = _cfg.get_manifest_db_path()
     try:
         db_items = _mdb.get_manifest_items(db_path, manifest_id)
     except Exception:
         db_items = result.get("items", [])
 
-    items: list[dict] = []
-    for it in db_items:
-        fp = it.get("file_path", "")
-        has_ann, ann_path, shape_count = _find_annotation(fp, workspace_dir)
-        items.append({
-            **it,
-            "has_ann":     has_ann,
-            "ann_path":    ann_path,
-            "shape_count": shape_count,
-        })
-
+    items     = _get_items(manifest_id, workspace_dir, db_items)
     annotated = sum(1 for it in items if it["has_ann"])
     total     = len(items)
 
@@ -493,20 +646,61 @@ def render_output(result: dict) -> None:
         else:
             visible = items
 
+        # 篩選切換時重設頁碼
+        if st.session_state.get("m012_prev_filter") != filter_opt:
+            st.session_state["m012_page"]        = 0
+            st.session_state["m012_prev_filter"] = filter_opt
+
         st.caption(f"顯示 {len(visible)} 張")
+
+        # O(1) 全域索引表（item_id → items 中的位置）
+        item_id_to_global = {it.get("item_id", ""): i for i, it in enumerate(items)}
+
+        # Pagination 計算
+        n_visible  = len(visible)
+        n_pages    = max(1, (n_visible + PAGE_SIZE - 1) // PAGE_SIZE)
+        page       = max(0, min(st.session_state.get("m012_page", 0), n_pages - 1))
+        sel_idx    = st.session_state.get("m012_selected_idx", 0)
+
+        # 選取項目所在頁自動跟隨（僅限鍵盤 ↑/↓ 導覽，避免覆蓋分頁按鈕的跳頁）
+        if st.session_state.pop("m012_kbd_nav", False):
+            for _vi, _it in enumerate(visible):
+                if item_id_to_global.get(_it.get("item_id", "")) == sel_idx:
+                    desired = _vi // PAGE_SIZE
+                    if desired != page:
+                        page = desired
+                        st.session_state["m012_page"] = page
+                    break
+
+        page_start = page * PAGE_SIZE
+        page_end   = min(page_start + PAGE_SIZE, n_visible)
+        page_items = visible[page_start:page_end]
 
         if not visible:
             st.info("目前篩選條件下沒有圖片。")
         else:
-            for vis_i, item in enumerate(visible):
+            # ─ 分頁控制列（上方）────────────────────────────────────
+            if n_pages > 1:
+                pg_prev, pg_info, pg_next = st.columns([1, 3, 1])
+                with pg_prev:
+                    if st.button("◀", key="m012_pg_prev_top", disabled=(page == 0),
+                                 use_container_width=True):
+                        st.session_state["m012_page"] = page - 1
+                with pg_info:
+                    st.caption(f"第 {page + 1} / {n_pages} 頁（共 {n_visible} 張）")
+                with pg_next:
+                    if st.button("▶", key="m012_pg_next_top", disabled=(page == n_pages - 1),
+                                 use_container_width=True):
+                        st.session_state["m012_page"] = page + 1
+
+            for vis_i, item in enumerate(page_items):
                 fp          = item.get("file_path", "")
                 fname       = Path(fp).name if fp else "（無路徑）"
                 has_ann     = item["has_ann"]
                 shape_count = item["shape_count"]
 
-                # 在 items 中的全域索引（用於 selected_idx）
-                global_idx = items.index(item)
-                is_selected = (global_idx == st.session_state["m012_selected_idx"])
+                global_idx  = item_id_to_global.get(item.get("item_id", ""), page_start + vis_i)
+                is_selected = (global_idx == sel_idx)
 
                 thumb_bytes = _make_thumb(fp) if fp else None
                 ann_thumb_bytes = (
@@ -578,11 +772,25 @@ def render_output(result: dict) -> None:
                             key=f"xany_{item['item_id']}",
                             use_container_width=True,
                         ):
-                            err = _launch_xany(fp, labels, workspace_dir, xany_exe, ann_path=ann_path)
+                            err = _launch_xany(fp, labels, workspace_dir, xany_exe, ann_path=item["ann_path"])
                             if err:
                                 st.error(f"啟動失敗：{err}")
                             else:
                                 st.toast(f"X-AnyLabeling 已開啟：{fname}", icon="🖊")
+
+            # ─ 分頁控制列 ────────────────────────────────────────────
+            if n_pages > 1:
+                pg_prev, pg_info, pg_next = st.columns([1, 3, 1])
+                with pg_prev:
+                    if st.button("◀", key="m012_pg_prev", disabled=(page == 0),
+                                 use_container_width=True):
+                        st.session_state["m012_page"] = page - 1
+                with pg_info:
+                    st.caption(f"第 {page + 1} / {n_pages} 頁（共 {n_visible} 張）")
+                with pg_next:
+                    if st.button("▶", key="m012_pg_next", disabled=(page == n_pages - 1),
+                                 use_container_width=True):
+                        st.session_state["m012_page"] = page + 1
 
         # 選取項目 scroll into view
         components.html("""<script>
@@ -633,10 +841,10 @@ setTimeout(function() {
             # ── 幽靈導覽按鈕（鍵盤 ↑/K ↓/J 用，JS 會隱形化） ─────────────────
             if st.button("← 上一張", key="m012_prev_btn"):
                 st.session_state["m012_selected_idx"] = (sel_idx - 1) % n_items
-                st.rerun()
+                st.session_state["m012_kbd_nav"] = True
             if st.button("→ 下一張", key="m012_next_btn"):
                 st.session_state["m012_selected_idx"] = (sel_idx + 1) % n_items
-                st.rerun()
+                st.session_state["m012_kbd_nav"] = True
 
             if classification_labels:
                 current_clf = classifications.get(item_id, "")
@@ -735,12 +943,10 @@ setTimeout(function() {
                         st.dataframe(rows, use_container_width=True, hide_index=True)
                 else:
                     # ann_path 存在但 shapes 為空
-                    st.image(fp, use_container_width=True)
+                    _show_img(fp, enhance)
                     st.info("標注檔存在但尚無 shape，請以「🖊 標注工具」繼續標注。")
             else:
                 # 無標注
-                st.image(fp, use_container_width=True)
+                _show_img(fp, enhance)
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
 
-    # ── auto-refresh（固定 30 秒）────────────────────────────────────────────
-    st_autorefresh(interval=30_000, key="m012_autorefresh")
