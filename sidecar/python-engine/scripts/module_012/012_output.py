@@ -602,18 +602,18 @@ def _keyboard_listener() -> None:
     window.parent._kb012_active = true;
     var d = window.parent.document;
 
-    // 將幽靈按鈕縮成 1×1px 隱形（pointer-events:none 不影響 JS .click()）
+    // 將幽靈按鈕及其 wrapper 縮到 0 高度（height:0+overflow:hidden 才能消除 layout space）
     function hideGhosts() {
         d.querySelectorAll('button').forEach(function(b) {
             var txt = b.textContent.trim();
             if (txt === '← 上一張' || txt === '→ 下一張' ||
                 /^[①②③④⑤⑥⑦⑧⑨]/.test(txt)) {
-                b.style.cssText += ';position:fixed!important;opacity:0!important;' +
-                    'pointer-events:none!important;width:1px!important;' +
-                    'height:1px!important;overflow:hidden!important;padding:0!important;border:0!important;';
+                b.style.cssText += ';opacity:0!important;pointer-events:none!important;' +
+                    'position:absolute!important;left:-9999px!important;';
                 var wrap = b.closest('[data-testid="stButton"]');
-                if (wrap) wrap.style.cssText += ';position:fixed!important;opacity:0!important;' +
-                    'pointer-events:none!important;width:1px!important;height:1px!important;overflow:hidden!important;';
+                if (wrap) wrap.style.cssText += ';height:0!important;min-height:0!important;' +
+                    'overflow:hidden!important;margin:0!important;padding:0!important;' +
+                    'border:0!important;line-height:0!important;';
             }
         });
     }
