@@ -1068,57 +1068,37 @@ setTimeout(function() {
             ann_path   = item["ann_path"]
             shape_count = item["shape_count"]
 
-            # 檔名 + 路徑合併 + 強化對比（同一列）
+            # ── 單列 header：檔名 | 分類下拉 | 對比 toggle ──────────────────
             parts = Path(fp).parts if fp else ()
             short = str(Path(*parts[-3:])) if len(parts) >= 3 else fp
-            fname_c, enhance_c = st.columns([4, 1])
+            item_id = item.get("item_id", "")
+            n_items = len(items)
+
+            if classification_labels:
+                fname_c, clf_c, enhance_c = st.columns([3, 3, 1.5])
+            else:
+                fname_c, enhance_c = st.columns([5, 1.5])
+                clf_c = None
+
             with fname_c:
                 st.markdown(f"**{fname}**  \n`{short}`")
+
             with enhance_c:
-                st.markdown("<div style='margin-top:8px'>", unsafe_allow_html=True)
                 enhance = st.toggle(
                     "🔆 對比",
                     key=f"enhance_{item['item_id']}",
                     help="強化對比度與飽和度（僅影響標注結果顯示）",
                 )
-                st.markdown("</div>", unsafe_allow_html=True)
 
-            st.divider()
-
-            # ── 分類 UI（只有在設定了分類類別時才顯示） ──────────────────────
-            item_id = item.get("item_id", "")
-            n_items = len(items)
-
-            # ── 幽靈導覽按鈕（鍵盤 ↑/K ↓/J 用，JS 會隱形化） ─────────────────
-            if st.button("← 上一張", key="m012_prev_btn"):
-                st.session_state["m012_selected_idx"] = (sel_idx - 1) % n_items
-                st.session_state["m012_kbd_nav"] = True
-            if st.button("→ 下一張", key="m012_next_btn"):
-                st.session_state["m012_selected_idx"] = (sel_idx + 1) % n_items
-                st.session_state["m012_kbd_nav"] = True
-
-            if classification_labels:
+            if clf_c is not None:
                 current_clf = classifications.get(item_id, "")
 
-                # ── 幽靈分類按鈕（鍵盤 1-9 用，JS 會隱形化） ─────────────────
-                _syms = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"]
-                for _qi, _lbl in enumerate(classification_labels[:9]):
-                    if st.button(f"{_syms[_qi]} {_lbl}", key=f"qc_{item_id}_{_qi}"):
-                        _save_clf(manifest_id, item_id, _lbl, classifications, file_path=fp)
-                        st.session_state["m012_selected_idx"] = _next_unclassified(
-                            items, sel_idx, classifications
-                        )
-                        st.rerun()
-
-                # selectbox（選即存）+ 重設
-                # 前 9 個加 [1]…[9] 快捷鍵提示
                 def _display(i: int, lbl: str) -> str:
                     return f"[{i+1}] {lbl}" if i < 9 else lbl
 
                 clf_display = ["請選擇分類"] + [
                     _display(i, lbl) for i, lbl in enumerate(classification_labels)
                 ]
-                # 把 raw label 對應到 display 選項的索引
                 clf_default = 0
                 if current_clf:
                     for _di, _dlbl in enumerate(clf_display):
@@ -1130,7 +1110,6 @@ setTimeout(function() {
                     chosen = st.session_state.get(f"clf_sel_{item_id}", "請選擇分類")
                     if chosen == "請選擇分類":
                         return
-                    # 從 "[1] 物件A" 還原為 "物件A"
                     import re as _re
                     raw = _re.sub(r"^\[\d+\] ", "", chosen)
                     _save_clf(manifest_id, item_id, raw, classifications, file_path=fp)
@@ -1138,24 +1117,25 @@ setTimeout(function() {
                         items, sel_idx, classifications
                     )
 
-                sel_c2, reset_c2 = st.columns([5, 1])
-                with sel_c2:
-                    st.selectbox(
-                        "分類", clf_display, index=clf_default,
-                        key=f"clf_sel_{item_id}",
-                        label_visibility="collapsed",
-                        on_change=_on_clf_change,
-                    )
-                with reset_c2:
-                    if current_clf and st.button(
-                        "✕", use_container_width=True,
-                        key=f"clf_reset_{item_id}",
-                        help="清除分類",
-                    ):
-                        _clear_clf(manifest_id, item_id, classifications, file_path=fp)
-                        st.rerun()
+                with clf_c:
+                    clf_sel_c, clf_rst_c = st.columns([5, 1])
+                    with clf_sel_c:
+                        st.selectbox(
+                            "分類", clf_display, index=clf_default,
+                            key=f"clf_sel_{item_id}",
+                            label_visibility="collapsed",
+                            on_change=_on_clf_change,
+                        )
+                    with clf_rst_c:
+                        if current_clf and st.button(
+                            "✕", use_container_width=True,
+                            key=f"clf_reset_{item_id}",
+                            help="清除分類",
+                        ):
+                            _clear_clf(manifest_id, item_id, classifications, file_path=fp)
+                            st.rerun()
 
-                st.divider()
+            st.divider()
 
             # 圖片顯示
             if not fp or not Path(fp).exists():
@@ -1204,3 +1184,20 @@ setTimeout(function() {
                 # 無標注
                 _right_panel_img(fp, enhance, item_id=item_id)
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
+
+            # ── 幽靈按鈕（最底部，JS 隱藏，鍵盤快捷鍵用） ───────────────────
+            if st.button("← 上一張", key="m012_prev_btn"):
+                st.session_state["m012_selected_idx"] = (sel_idx - 1) % n_items
+                st.session_state["m012_kbd_nav"] = True
+            if st.button("→ 下一張", key="m012_next_btn"):
+                st.session_state["m012_selected_idx"] = (sel_idx + 1) % n_items
+                st.session_state["m012_kbd_nav"] = True
+            if classification_labels:
+                _syms = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"]
+                for _qi, _lbl in enumerate(classification_labels[:9]):
+                    if st.button(f"{_syms[_qi]} {_lbl}", key=f"qc_{item_id}_{_qi}"):
+                        _save_clf(manifest_id, item_id, _lbl, classifications, file_path=fp)
+                        st.session_state["m012_selected_idx"] = _next_unclassified(
+                            items, sel_idx, classifications
+                        )
+                        st.rerun()
