@@ -355,20 +355,24 @@ def _show_img(fp: str, enhance: bool) -> None:
     st.image(fp, use_container_width=True)
 
 
-def _right_panel_img(fp: str, enhance: bool) -> None:
-    """右欄單張圖片顯示：支援 enhance 對比 + 點擊 lightbox 放大。"""
+def _right_panel_img(fp: str, enhance: bool, item_id: str = "") -> None:
+    """右欄單張圖片顯示：支援 enhance 對比 + 🔍 放大按鈕（Streamlit dialog）。"""
     if enhance:
         try:
             img_bytes = _draw_annotations(fp, {}, enhance=True)
-            st.markdown(_clickable_img_html(img_bytes, "png", "強化對比"), unsafe_allow_html=True)
+            st.image(img_bytes, use_container_width=True)
+            if item_id and st.button("🔍 放大", key=f"zoom_e_{item_id}", use_container_width=True):
+                st.session_state["_m012_zoom_data"] = (img_bytes, Path(fp).name)
+                _zoom_dialog()
             return
         except Exception:
             pass
+    st.image(fp, use_container_width=True)
     full = _make_full_jpeg(fp)
-    if full:
-        st.markdown(_clickable_img_html(full, "jpeg"), unsafe_allow_html=True)
-    else:
-        st.image(fp, use_container_width=True)
+    if full and item_id:
+        if st.button("🔍 放大", key=f"zoom_f_{item_id}", use_container_width=True):
+            st.session_state["_m012_zoom_data"] = (full, Path(fp).name)
+            _zoom_dialog()
 
 
 # ─── PIL 畫標注框（直接移植自 006_output.py） ────────────────────────────────
@@ -483,55 +487,14 @@ def _make_full_jpeg(file_path: str) -> bytes | None:
         return None
 
 
-def _inject_lightbox() -> None:
-    """在 parent document 注入全螢幕 lightbox overlay（幂等）。"""
-    components.html("""
-<script>
-(function() {
-    var d = window.parent.document;
-    if (d.getElementById('m012-lightbox')) return;
-    var sty = d.createElement('style');
-    sty.textContent =
-        '#m012-lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);' +
-        'z-index:2147483647;cursor:zoom-out;align-items:center;justify-content:center;}' +
-        '#m012-lightbox.open{display:flex;}' +
-        '#m012-lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;' +
-        'border-radius:4px;box-shadow:0 0 60px rgba(0,0,0,.6);}' +
-        '#m012-lightbox-close{position:absolute;top:16px;right:24px;color:#fff;' +
-        'font-size:36px;cursor:pointer;line-height:1;user-select:none;}';
-    d.head.appendChild(sty);
-    var lb = d.createElement('div');
-    lb.id = 'm012-lightbox';
-    lb.innerHTML = '<span id="m012-lightbox-close">&#x2715;</span><img id="m012-lightbox-img" />';
-    d.body.appendChild(lb);
-    lb.addEventListener('click', function(e) {
-        if (e.target === lb || e.target.id === 'm012-lightbox-close')
-            lb.classList.remove('open');
-    });
-    d.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') lb.classList.remove('open');
-    });
-    window.parent.m012OpenLightbox = function(src) {
-        d.getElementById('m012-lightbox-img').src = src;
-        lb.classList.add('open');
-    };
-})();
-</script>
-""", height=0)
-
-
-def _clickable_img_html(img_bytes: bytes, mime: str = "jpeg", label: str = "") -> str:
-    """可點擊放大的 <img> HTML（onclick 呼叫 parent lightbox）。"""
-    b64 = base64.b64encode(img_bytes).decode()
-    title = f"{label} — 點擊放大" if label else "點擊放大"
-    return (
-        f'<img src="data:image/{mime};base64,{b64}"'
-        f' style="width:100%;max-height:52vh;object-fit:contain;'
-        f'border-radius:4px;cursor:zoom-in;display:block;"'
-        f' title="{title}"'
-        f' onclick="if(window.parent.m012OpenLightbox)'
-        f'window.parent.m012OpenLightbox(this.src);" />'
-    )
+@st.dialog("🔍 放大圖片", width="large")
+def _zoom_dialog() -> None:
+    """原生 Streamlit modal —— 顯示右欄圖片的全尺寸版本。"""
+    data = st.session_state.get("_m012_zoom_data")
+    if not data:
+        return
+    img_bytes, caption = data
+    st.image(img_bytes, caption=caption, use_container_width=True)
 
 
 def _thumb_html(thumb_bytes: bytes | None, img_path: str, tag: str,
@@ -736,9 +699,8 @@ def render_output(result: dict) -> None:
     # file_path-based 分類（跨 manifest 存活），待 items 載入後 merge
     _fp_clf: dict[str, str] = _cfg.load_classifications_by_path()
 
-    # 注入鍵盤快捷鍵 + lightbox
+    # 注入鍵盤快捷鍵
     _keyboard_listener()
-    _inject_lightbox()
 
     # ── CSS ──────────────────────────────────────────────────────────────────
     st.markdown("""<style>
@@ -1140,24 +1102,23 @@ setTimeout(function() {
                 if shapes:
                     orig_c, ann_c = st.columns(2)
                     with orig_c:
-                        st.markdown("**原圖**（點擊放大）")
+                        st.markdown("**原圖**")
+                        st.image(fp, use_container_width=True)
                         orig_full = _make_full_jpeg(fp)
-                        if orig_full:
-                            st.markdown(_clickable_img_html(orig_full, "jpeg", "原圖"), unsafe_allow_html=True)
-                        else:
-                            st.image(fp, use_container_width=True)
+                        if orig_full and st.button("🔍 放大原圖", key=f"zoom_o_{item_id}", use_container_width=True):
+                            st.session_state["_m012_zoom_data"] = (orig_full, "原圖")
+                            _zoom_dialog()
                     with ann_c:
-                        st.markdown("**標注結果**（點擊放大）")
+                        st.markdown("**標注結果**")
                         try:
                             ann_bytes = _draw_annotations(fp, label_data, enhance=enhance)
-                            st.markdown(_clickable_img_html(ann_bytes, "png", "標注結果"), unsafe_allow_html=True)
+                            st.image(ann_bytes, use_container_width=True)
+                            if st.button("🔍 放大標注", key=f"zoom_a_{item_id}", use_container_width=True):
+                                st.session_state["_m012_zoom_data"] = (ann_bytes, "標注結果")
+                                _zoom_dialog()
                         except Exception as e:
                             st.warning(f"畫框失敗：{e}")
-                            orig_full2 = _make_full_jpeg(fp)
-                            if orig_full2:
-                                st.markdown(_clickable_img_html(orig_full2, "jpeg", "原圖"), unsafe_allow_html=True)
-                            else:
-                                st.image(fp, use_container_width=True)
+                            st.image(fp, use_container_width=True)
 
                     with st.expander(f"標注明細（{len(shapes)} 個物件）", expanded=False):
                         rows = [
@@ -1171,9 +1132,9 @@ setTimeout(function() {
                         st.dataframe(rows, use_container_width=True, hide_index=True)
                 else:
                     # ann_path 存在但 shapes 為空
-                    _right_panel_img(fp, enhance)
+                    _right_panel_img(fp, enhance, item_id=item_id)
                     st.info("標注檔存在但尚無 shape，請以「🖊 標注工具」繼續標注。")
             else:
                 # 無標注
-                _right_panel_img(fp, enhance)
+                _right_panel_img(fp, enhance, item_id=item_id)
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
