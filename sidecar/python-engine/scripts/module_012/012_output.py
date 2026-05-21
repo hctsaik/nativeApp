@@ -356,23 +356,19 @@ def _show_img(fp: str, enhance: bool) -> None:
 
 
 def _right_panel_img(fp: str, enhance: bool, item_id: str = "") -> None:
-    """右欄單張圖片顯示：支援 enhance 對比 + 🔍 放大按鈕（Streamlit dialog）。"""
+    """右欄單張圖片顯示：支援 enhance 對比 + 點擊放大（m012-zoomable）。"""
     if enhance:
         try:
             img_bytes = _draw_annotations(fp, {}, enhance=True)
-            st.image(img_bytes, use_container_width=True)
-            if item_id and st.button("🔍 放大", key=f"zoom_e_{item_id}", use_container_width=True):
-                st.session_state["_m012_zoom_data"] = (img_bytes, Path(fp).name)
-                _zoom_dialog()
+            st.markdown(_zoomable_img_html(img_bytes, "png"), unsafe_allow_html=True)
             return
         except Exception:
             pass
-    st.image(fp, use_container_width=True)
     full = _make_full_jpeg(fp)
-    if full and item_id:
-        if st.button("🔍 放大", key=f"zoom_f_{item_id}", use_container_width=True):
-            st.session_state["_m012_zoom_data"] = (full, Path(fp).name)
-            _zoom_dialog()
+    if full:
+        st.markdown(_zoomable_img_html(full, "jpeg"), unsafe_allow_html=True)
+    else:
+        st.image(fp, use_container_width=True)
 
 
 # ─── PIL 畫標注框（直接移植自 006_output.py） ────────────────────────────────
@@ -495,6 +491,78 @@ def _zoom_dialog() -> None:
         return
     img_bytes, caption = data
     st.image(img_bytes, caption=caption, use_container_width=True)
+
+
+def _inject_img_click_zoom() -> None:
+    """在 Streamlit doc 注入 MutationObserver：直接對 img.m012-zoomable 掛 click handler。
+
+    改用 MutationObserver + 直接 addEventListener 取代事件委派，
+    確保每次 Streamlit rerun 後的新圖片都能點擊放大。
+    """
+    components.html("""
+<script>
+(function() {
+    var d = window.parent.document;
+    if (d.getElementById('m012-lb')) return;
+
+    // ── lightbox DOM ──────────────────────────────────────────────────
+    var sty = d.createElement('style');
+    sty.id = 'm012-lb-sty';
+    sty.textContent =
+        '#m012-lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);' +
+        'z-index:999999;cursor:zoom-out;align-items:center;justify-content:center;}' +
+        '#m012-lb.on{display:flex;}' +
+        '#m012-lb>img{max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px;}' +
+        '#m012-lb-x{position:absolute;top:12px;right:20px;color:#fff;' +
+        'font-size:32px;line-height:1;cursor:pointer;user-select:none;}';
+    d.head.appendChild(sty);
+
+    var lb = d.createElement('div'); lb.id = 'm012-lb';
+    var lbX = d.createElement('span'); lbX.id = 'm012-lb-x'; lbX.textContent = '✕';
+    var lbImg = d.createElement('img'); lbImg.id = 'm012-lb-img';
+    lb.appendChild(lbX); lb.appendChild(lbImg);
+    d.body.appendChild(lb);
+
+    function open(src) { lbImg.src = src; lb.classList.add('on'); }
+    function close()   { lb.classList.remove('on'); }
+
+    lb.addEventListener('click', function(e) {
+        if (e.target === lb || e.target === lbX) close();
+    });
+    d.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') close();
+    });
+
+    // ── 直接掛 handler 到每個 img.m012-zoomable（含 rerun 後新產生的）──
+    function attach(img) {
+        if (img.dataset.m012lb) return;
+        img.dataset.m012lb = '1';
+        img.style.cursor = 'zoom-in';
+        img.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            open(img.src);
+        });
+    }
+    function scan() {
+        d.querySelectorAll('img.m012-zoomable').forEach(attach);
+    }
+    scan();
+    new MutationObserver(scan).observe(d.body, {childList:true, subtree:true});
+})();
+</script>
+""", height=0)
+
+
+def _zoomable_img_html(img_bytes: bytes, mime: str = "jpeg") -> str:
+    """回傳帶有 m012-zoomable class 的 <img>，點擊由 MutationObserver 附加的 handler 放大。"""
+    b64 = base64.b64encode(img_bytes).decode()
+    return (
+        f'<img src="data:image/{mime};base64,{b64}"'
+        f' class="m012-zoomable"'
+        f' style="width:100%;max-height:52vh;object-fit:contain;border-radius:4px;display:block;"'
+        f' title="點擊放大" />'
+    )
 
 
 def _thumb_html(thumb_bytes: bytes | None, img_path: str, tag: str,
@@ -699,8 +767,9 @@ def render_output(result: dict) -> None:
     # file_path-based 分類（跨 manifest 存活），待 items 載入後 merge
     _fp_clf: dict[str, str] = _cfg.load_classifications_by_path()
 
-    # 注入鍵盤快捷鍵
+    # 注入鍵盤快捷鍵 + 圖片點擊放大
     _keyboard_listener()
+    _inject_img_click_zoom()
 
     # ── CSS ──────────────────────────────────────────────────────────────────
     st.markdown("""<style>
@@ -1102,20 +1171,17 @@ setTimeout(function() {
                 if shapes:
                     orig_c, ann_c = st.columns(2)
                     with orig_c:
-                        st.markdown("**原圖**")
-                        st.image(fp, use_container_width=True)
+                        st.caption("**原圖**（點擊放大）")
                         orig_full = _make_full_jpeg(fp)
-                        if orig_full and st.button("🔍 放大原圖", key=f"zoom_o_{item_id}", use_container_width=True):
-                            st.session_state["_m012_zoom_data"] = (orig_full, "原圖")
-                            _zoom_dialog()
+                        if orig_full:
+                            st.markdown(_zoomable_img_html(orig_full, "jpeg"), unsafe_allow_html=True)
+                        else:
+                            st.image(fp, use_container_width=True)
                     with ann_c:
-                        st.markdown("**標注結果**")
+                        st.caption("**標注結果**（點擊放大）")
                         try:
                             ann_bytes = _draw_annotations(fp, label_data, enhance=enhance)
-                            st.image(ann_bytes, use_container_width=True)
-                            if st.button("🔍 放大標注", key=f"zoom_a_{item_id}", use_container_width=True):
-                                st.session_state["_m012_zoom_data"] = (ann_bytes, "標注結果")
-                                _zoom_dialog()
+                            st.markdown(_zoomable_img_html(ann_bytes, "png"), unsafe_allow_html=True)
                         except Exception as e:
                             st.warning(f"畫框失敗：{e}")
                             st.image(fp, use_container_width=True)
