@@ -296,15 +296,48 @@ def render_output(result: dict) -> None:
 
     st.divider()
 
-    # ── 資料表 ────────────────────────────────────────────────────────────────
+    # ── 資料表（分頁縮圖） ────────────────────────────────────────────────────
     if not all_items:
         st.info("此 Manifest 沒有圖片項目。")
         return
 
-    st.markdown(f"**影像資料表** — 共 {len(all_items):,} 筆")
+    PAGE_SIZE = 50
+    total_items = len(all_items)
+    n_pages = max(1, (total_items + PAGE_SIZE - 1) // PAGE_SIZE)
 
-    with st.spinner("載入縮圖中…"):
-        _render_html_table(all_items)
+    if "m010_thumb_page" not in st.session_state:
+        st.session_state["m010_thumb_page"] = 0
+    # 換 manifest 時重置頁碼
+    if st.session_state.get("m010_thumb_manifest") != manifest_id:
+        st.session_state["m010_thumb_page"] = 0
+        st.session_state["m010_thumb_manifest"] = manifest_id
+    page = max(0, min(st.session_state["m010_thumb_page"], n_pages - 1))
+
+    page_items = all_items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
+    start_no = page * PAGE_SIZE + 1
+    end_no = start_no + len(page_items) - 1
+
+    # 分頁導覽列
+    nav_left, nav_mid, nav_right = st.columns([1, 3, 1])
+    with nav_left:
+        if st.button("◀ 上一頁", disabled=(page == 0), key="m010_prev_page"):
+            st.session_state["m010_thumb_page"] = page - 1
+            st.rerun()
+    with nav_mid:
+        st.markdown(
+            f"<div style='text-align:center;padding-top:6px'>"
+            f"第 <b>{page + 1}</b> / {n_pages} 頁　"
+            f"（第 {start_no}–{end_no} 筆，共 {total_items:,} 張）"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with nav_right:
+        if st.button("下一頁 ▶", disabled=(page >= n_pages - 1), key="m010_next_page"):
+            st.session_state["m010_thumb_page"] = page + 1
+            st.rerun()
+
+    with st.spinner(f"載入縮圖 {start_no}–{end_no}…"):
+        _render_html_table(page_items)
 
     # ── 歷史 Manifest 清單 ────────────────────────────────────────────────────
     st.divider()

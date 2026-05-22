@@ -10,19 +10,22 @@ def _atomic_write(path: Path, text: str) -> None:
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
 
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]  # nativeApp
 _CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
 
 _DEFAULTS: dict = {
-    "last_source_type": "folder",
-    "last_folder_path": "",
-    "recursive_scan": True,
-    "image_extensions": [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"],
+    "default_export_formats": ["coco_json"],
+    "split_train": 70,
+    "split_val": 15,
+    "split_test": 15,
+    "stratified_split": True,
+    "default_export_dir": "",
 }
 
 
 def _config_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "module_010.json"
+    return _CIM_LOG_DIR / "config" / "module_014.json"
 
 
 def load_config() -> dict:
@@ -42,19 +45,40 @@ def save_config(config: dict) -> None:
 
 
 def get_manifest_db_path() -> Path:
-    """回傳 manifest SQLite 資料庫路徑。"""
     db_dir = _CIM_LOG_DIR / "db"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "manifest.sqlite"
 
 
-def write_shared_manifest_id(manifest_id: str) -> None:
-    """將最新建立的 manifest_id 寫入 shared.json，供 module_012 自動銜接。"""
+def get_shared_manifest_id() -> str:
     p = _CIM_LOG_DIR / "config" / "shared.json"
-    p.parent.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        return ""
     try:
-        existing = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
     except Exception:
-        existing = {}
-    existing["last_manifest_id"] = manifest_id
-    _atomic_write(p, json.dumps(existing, ensure_ascii=False, indent=2))
+        return ""
+
+
+def _manifest_key(manifest_id: str) -> str:
+    return manifest_id[:12] or "default"
+
+
+def get_classification_path(manifest_id: str) -> Path:
+    return _CIM_LOG_DIR / "config" / f"module_012_classifications_{_manifest_key(manifest_id)}.json"
+
+
+def load_classifications(manifest_id: str) -> dict[str, str]:
+    p = get_classification_path(manifest_id)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def get_default_export_dir(manifest_id: str) -> Path:
+    path = _CIM_LOG_DIR / "exports" / f"module_014_{_manifest_key(manifest_id)}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

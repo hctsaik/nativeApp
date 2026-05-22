@@ -2,6 +2,12 @@ from __future__ import annotations
 import json, os
 from pathlib import Path
 
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _CIM_LOG_DIR  = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
 
@@ -21,7 +27,7 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> None:
     p = _config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write(p, json.dumps(cfg, ensure_ascii=False, indent=2))
 
 def get_manifest_db_path() -> Path:
     d = _CIM_LOG_DIR / "db"; d.mkdir(parents=True, exist_ok=True)

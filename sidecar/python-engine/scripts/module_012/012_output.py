@@ -129,12 +129,14 @@ def _scan_items(db_items: list[dict]) -> tuple[list[dict], dict[str, float]]:
     for it in db_items:
         fp = it.get("file_path", "")
         has_ann, ann_path, shape_count = _find_annotation(fp)
-        items.append({**it, "has_ann": has_ann, "ann_path": ann_path, "shape_count": shape_count})
+        ann_mtime = 0.0
         if ann_path:
             try:
-                mtimes[ann_path] = Path(ann_path).stat().st_mtime
+                ann_mtime = Path(ann_path).stat().st_mtime
             except Exception:
-                mtimes[ann_path] = 0.0
+                ann_mtime = 0.0
+            mtimes[ann_path] = ann_mtime
+        items.append({**it, "has_ann": has_ann, "ann_path": ann_path, "shape_count": shape_count, "ann_mtime": ann_mtime})
     return items, mtimes
 
 
@@ -164,9 +166,13 @@ def _incremental_refresh(
                     new_mtimes.pop(ann_path, None)
                 if new_ap:
                     try:
-                        new_mtimes[new_ap] = Path(new_ap).stat().st_mtime
+                        new_mtime = Path(new_ap).stat().st_mtime
                     except Exception:
-                        new_mtimes[new_ap] = 0.0
+                        new_mtime = 0.0
+                    new_mtimes[new_ap] = new_mtime
+                    item["ann_mtime"] = new_mtime
+                else:
+                    item["ann_mtime"] = 0.0
         else:
             # 尚無標注：只檢查影像同目錄同名 JSON。
             candidate = Path(fp).with_suffix(".json")
@@ -177,9 +183,13 @@ def _incremental_refresh(
                 item["shape_count"] = sc
                 if new_ap:
                     try:
-                        new_mtimes[new_ap] = Path(new_ap).stat().st_mtime
+                        new_mtime = Path(new_ap).stat().st_mtime
                     except Exception:
-                        new_mtimes[new_ap] = 0.0
+                        new_mtime = 0.0
+                    new_mtimes[new_ap] = new_mtime
+                    item["ann_mtime"] = new_mtime
+                else:
+                    item["ann_mtime"] = 0.0
     return cached, new_mtimes
 
 
@@ -424,8 +434,8 @@ def _make_thumb(file_path: str) -> bytes | None:
 
 
 @st.cache_data(show_spinner=False, max_entries=500)
-def _make_ann_thumb(file_path: str, ann_path: str) -> bytes | None:
-    """標注結果縮圖（含框線），用於左欄列表。"""
+def _make_ann_thumb(file_path: str, ann_path: str, ann_mtime: float = 0.0) -> bytes | None:
+    """標注結果縮圖（含框線），用於左欄列表。ann_mtime 作為快取 key 確保標注更新後失效。"""
     try:
         label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
         ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
@@ -455,7 +465,8 @@ def _make_preview(file_path: str) -> bytes | None:
 
 
 @st.cache_data(show_spinner=False, max_entries=500)
-def _make_ann_preview(file_path: str, ann_path: str) -> bytes | None:
+def _make_ann_preview(file_path: str, ann_path: str, ann_mtime: float = 0.0) -> bytes | None:
+    """ann_mtime 作為快取 key 確保標注更新後失效。"""
     try:
         label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
         ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
@@ -861,23 +872,47 @@ def render_output(result: dict) -> None:
     with left_col:
         st.markdown("**圖片列表**")
 
-        filter_opt = st.selectbox(
-            "狀態篩選",
-            ["全部狀態", "⏳ 待標注", "✅ 已標注"],
+        search_col, filter_col = st.columns([3, 2])
+        with search_col:
+            search_q = st.text_input(
+                "搜尋檔名", value="", key="m012_search",
+                placeholder="搜尋…", label_visibility="collapsed",
+            ).strip().lower()
+        with filter_col:
+            filter_opt = st.selectbox(
+                "狀態篩選",
+                ["全部狀態", "⏳ 待標注", "✅ 已標注"],
+                label_visibility="collapsed",
+                key="m012_filter",
+            )
+
+        # 分類篩選（有 classification_labels 才顯示）
+        clf_filter_options = ["全部分類", "（未分類）"] + (classification_labels or [])
+        clf_filter = st.selectbox(
+            "分類篩選",
+            clf_filter_options,
             label_visibility="collapsed",
-            key="m012_filter",
+            key="m012_clf_filter",
         )
+
+        # 套用篩選
+        visible = items
         if filter_opt == "⏳ 待標注":
-            visible = [it for it in items if not it["has_ann"]]
+            visible = [it for it in visible if not it["has_ann"]]
         elif filter_opt == "✅ 已標注":
-            visible = [it for it in items if it["has_ann"]]
-        else:
-            visible = items
+            visible = [it for it in visible if it["has_ann"]]
+        if clf_filter == "（未分類）":
+            visible = [it for it in visible if not classifications.get(it.get("item_id", ""))]
+        elif clf_filter != "全部分類":
+            visible = [it for it in visible if classifications.get(it.get("item_id", "")) == clf_filter]
+        if search_q:
+            visible = [it for it in visible if search_q in Path(it.get("file_path", "")).name.lower()]
 
         # 篩選切換時重設頁碼
-        if st.session_state.get("m012_prev_filter") != filter_opt:
+        _filter_key = (filter_opt, clf_filter, search_q)
+        if st.session_state.get("m012_prev_filter") != _filter_key:
             st.session_state["m012_page"]        = 0
-            st.session_state["m012_prev_filter"] = filter_opt
+            st.session_state["m012_prev_filter"] = _filter_key
 
         st.caption(f"顯示 {len(visible)} 張")
 
@@ -933,11 +968,11 @@ def render_output(result: dict) -> None:
                 thumb_bytes = _make_thumb(fp) if fp else None
                 preview_bytes = _make_preview(fp) if fp else None
                 ann_thumb_bytes = (
-                    _make_ann_thumb(fp, item["ann_path"])
+                    _make_ann_thumb(fp, item["ann_path"], item.get("ann_mtime", 0.0))
                     if has_ann and item["ann_path"] else None
                 )
                 ann_preview_bytes = (
-                    _make_ann_preview(fp, item["ann_path"])
+                    _make_ann_preview(fp, item["ann_path"], item.get("ann_mtime", 0.0))
                     if has_ann and item["ann_path"] else None
                 )
 

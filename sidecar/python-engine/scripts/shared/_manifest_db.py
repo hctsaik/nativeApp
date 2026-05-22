@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS annotation_exports (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id        TEXT NOT NULL,
     manifest_id   TEXT NOT NULL,
-    export_format TEXT CHECK(export_format IN ('coco_json','yolo_txt','csv','raw_json')),
+    export_format TEXT,
     export_path   TEXT,
     item_count    INTEGER DEFAULT 0,
     schema_version TEXT DEFAULT '1.0',
@@ -91,11 +91,43 @@ def _rows_to_list(rows) -> list[dict]:
 
 # ─── 公開 API ──────────────────────────────────────────────────────────────────
 
+def _migrate_export_format_constraint(conn: sqlite3.Connection) -> None:
+    """移除 annotation_exports.export_format 的 CHECK 約束（允許新格式）。"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='annotation_exports'"
+    ).fetchone()
+    if row is None:
+        return
+    sql = (row[0] or "").upper()
+    if "CHECK" not in sql:
+        return
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS _annotation_exports_new (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id        TEXT NOT NULL,
+            manifest_id   TEXT NOT NULL,
+            export_format TEXT,
+            export_path   TEXT,
+            item_count    INTEGER DEFAULT 0,
+            schema_version TEXT DEFAULT '1.0',
+            created_at    TEXT DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO _annotation_exports_new
+            SELECT id, run_id, manifest_id, export_format, export_path,
+                   item_count, schema_version, created_at
+            FROM annotation_exports;
+        DROP TABLE annotation_exports;
+        ALTER TABLE _annotation_exports_new RENAME TO annotation_exports;
+    """)
+    conn.commit()
+
+
 def init_db(db_path: Path) -> None:
     """初始化資料庫，建立所有資料表。"""
     conn = _connect(db_path)
     try:
         conn.executescript(_DDL)
+        _migrate_export_format_constraint(conn)
         conn.commit()
     finally:
         conn.close()
@@ -318,6 +350,80 @@ def get_exports(db_path: Path, manifest_id: str) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM annotation_exports WHERE manifest_id=? ORDER BY created_at DESC",
             (manifest_id,),
+        ).fetchall()
+        return _rows_to_list(rows)
+    finally:
+        conn.close()
+
+
+def get_manifest_annotation_counts(db_path: Path, manifest_id: str) -> dict:
+    """
+    回傳指定 manifest 的標注統計：
+    {
+      "total_items": int,
+      "annotated_items": int,   # annotation_results 有記錄
+      "label_counts": {label: count},  # bbox label 分布（aggregate from all run_ids）
+      "classification_counts": {label: count},  # annotation_results.label 分布
+    }
+    """
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM manifest_items WHERE manifest_id=?", (manifest_id,)
+        ).fetchone()[0]
+
+        annotated = conn.execute(
+            "SELECT COUNT(DISTINCT item_id) FROM annotation_results WHERE manifest_id=?",
+            (manifest_id,),
+        ).fetchone()[0]
+
+        # classification label 分布
+        clf_rows = conn.execute(
+            """
+            SELECT label, COUNT(*) as cnt
+            FROM annotation_results
+            WHERE manifest_id=? AND label IS NOT NULL AND label != ''
+            GROUP BY label
+            ORDER BY cnt DESC
+            """,
+            (manifest_id,),
+        ).fetchall()
+        classification_counts = {r[0]: r[1] for r in clf_rows}
+
+        return {
+            "total_items": total,
+            "annotated_items": annotated,
+            "classification_counts": classification_counts,
+        }
+    finally:
+        conn.close()
+
+
+def get_all_manifests_stats(db_path: Path) -> list[dict]:
+    """
+    回傳所有 manifest 的統計摘要（用於 Dashboard）。
+    每筆包含：manifest_id, name, created_at, total_items, annotated_items, export_count
+    """
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                m.manifest_id,
+                m.name,
+                m.source_type,
+                m.created_at,
+                m.item_count AS total_items,
+                COUNT(DISTINCT ar.item_id) AS annotated_items,
+                (SELECT COUNT(*) FROM annotation_exports ae
+                 WHERE ae.manifest_id = m.manifest_id) AS export_count
+            FROM dataset_manifests m
+            LEFT JOIN annotation_results ar ON ar.manifest_id = m.manifest_id
+            GROUP BY m.manifest_id
+            ORDER BY m.id DESC
+            """
         ).fetchall()
         return _rows_to_list(rows)
     finally:

@@ -273,6 +273,20 @@ class SQLiteToolAdapter(ToolAdapter):
                 ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation_workflow",
                  "management-center", "labelme-dino"),
             )
+            # migration: add module_014/015/016 to annotation_workflow
+            for tab_order, plugin_id, label in [
+                (3, "module_014", "📤 Export"),
+                (4, "module_015", "📊 Dashboard"),
+                (5, "module_016", "🤖 AI Pre-labeling"),
+            ]:
+                try:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                        " VALUES (?, ?, ?, ?)",
+                        ("annotation_workflow", tab_order, plugin_id, label),
+                    )
+                except Exception:
+                    pass
 
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
@@ -465,6 +479,8 @@ def _terminate_process(process: subprocess.Popen, label: str) -> None:
 
 class ToolProcessManager:
     def __init__(self, log_dir: Path, selected_paths_file: Path) -> None:
+        import threading
+        self._lock = threading.RLock()
         self._log_dir = log_dir.resolve()
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._selected_paths_file = selected_paths_file.resolve()
@@ -544,12 +560,13 @@ class ToolProcessManager:
             return []
 
     def start(self, tool: ToolDefinition) -> ToolStartResponse:
-        self.stop()
-        if _derive_category(tool.tool_id) == "external":
-            return self._start_external(tool)
-        if _derive_category(tool.tool_id) == "sheet":
-            return self._start_sheet(tool)
-        return self._start_regular(tool)
+        with self._lock:
+            self.stop()
+            if _derive_category(tool.tool_id) == "external":
+                return self._start_external(tool)
+            if _derive_category(tool.tool_id) == "sheet":
+                return self._start_sheet(tool)
+            return self._start_regular(tool)
 
     def _labelme_dino_exe(self) -> Path:
         env_path = os.environ.get("LABELME_DINO_EXE", "").strip()
@@ -962,29 +979,30 @@ class ToolProcessManager:
         )
 
     def stop(self) -> None:
-        if self._external_process:
-            if self._external_process.poll() is None:
-                _terminate_process(self._external_process, f"{self._tool_id}-external")
-            self._external_process = None
-        if self._external_log_file:
-            self._external_log_file.close()
-            self._external_log_file = None
-        self._external_log_path = None
-        self._external_ready_file = None
-        self._external_run_id = None
-        self._external_started_at = None
-        if self._input_process:
-            _terminate_process(self._input_process, f"{self._tool_id}-input")
-            self._input_process = None
-        if self._output_process:
-            _terminate_process(self._output_process, f"{self._tool_id}-output")
-            self._output_process = None
-        for i, (in_p, out_p) in enumerate(self._sheet_processes):
-            _terminate_process(in_p, f"{self._tool_id}-sheet-{i}-input")
-            _terminate_process(out_p, f"{self._tool_id}-sheet-{i}-output")
-        self._sheet_processes = []
-        self._sheet_tab_info = []
-        self._tool_id = None
+        with self._lock:
+            if self._external_process:
+                if self._external_process.poll() is None:
+                    _terminate_process(self._external_process, f"{self._tool_id}-external")
+                self._external_process = None
+            if self._external_log_file:
+                self._external_log_file.close()
+                self._external_log_file = None
+            self._external_log_path = None
+            self._external_ready_file = None
+            self._external_run_id = None
+            self._external_started_at = None
+            if self._input_process:
+                _terminate_process(self._input_process, f"{self._tool_id}-input")
+                self._input_process = None
+            if self._output_process:
+                _terminate_process(self._output_process, f"{self._tool_id}-output")
+                self._output_process = None
+            for i, (in_p, out_p) in enumerate(self._sheet_processes):
+                _terminate_process(in_p, f"{self._tool_id}-sheet-{i}-input")
+                _terminate_process(out_p, f"{self._tool_id}-sheet-{i}-output")
+            self._sheet_processes = []
+            self._sheet_tab_info = []
+            self._tool_id = None
 
 
 class SelectedPathStore:

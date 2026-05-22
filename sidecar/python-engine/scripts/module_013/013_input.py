@@ -58,7 +58,6 @@ def render_input() -> dict:
 
     # ── 1. 整理圖片輸出資料夾（C）────────────────────────────────────────────
     st.subheader("1. 整理圖片輸出目錄")
-    st.caption("有分類標籤的圖片會依「輸出目錄/分類名稱/」結構複製，原始檔案不受影響。")
 
     default_export = str(_cfg.get_default_export_dir(manifest_id))
 
@@ -69,35 +68,9 @@ def render_input() -> dict:
         placeholder="例：C:/Users/user/export",
         help="有分類的圖片與同名 .json 會複製到此目錄的子資料夾。預設為 CIM log 目錄下的 exports/。",
     )
-    if export_dir:
-        st.info(f"輸出範例：`{export_dir}/分類A/frame_000001.jpg`")
-
-    st.divider()
-
-    # ── 2. 更新選項 ───────────────────────────────────────────────────────────
-    st.subheader("2. 執行選項")
-
-    cfg = _cfg.load_config()
-
-    organize_images = st.checkbox(
-        "依分類整理圖片並帶走標注 JSON",
-        value=cfg.get("organize_images", True),
-        key="m013_organize_images",
-        help="圖片與同名 .json 一起複製到「輸出目錄/分類名稱/」。原始檔案不受影響，衝突時以新檔覆蓋。",
-    )
-    if not organize_images:
-        st.caption("停用後不會複製任何檔案。")
-
-    # 儲存選項到 config（下次自動恢復）
-    try:
-        cfg["organize_images"] = organize_images
-        _cfg.save_config(cfg)
-    except Exception:
-        pass
-
     return {
         "manifest_id": manifest_id,
         "export_dir": export_dir,
-        "organize_images": organize_images,
+        "organize_images": True,
         "dry_run": True,
     }

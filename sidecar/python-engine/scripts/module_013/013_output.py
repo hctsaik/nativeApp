@@ -132,7 +132,7 @@ def _render_preview(result: dict) -> None:
                         _raw = {}
                     _raw["last_manifest_id"] = manifest_id
                     _cfg012_path.parent.mkdir(parents=True, exist_ok=True)
-                    _cfg012_path.write_text(_json012.dumps(_raw, ensure_ascii=False, indent=2), encoding="utf-8")
+                    _cfg012._atomic_write(_cfg012_path, _json012.dumps(_raw, ensure_ascii=False, indent=2))
                 except Exception:
                     pass
             st.session_state["m013_execute_result"] = result2
