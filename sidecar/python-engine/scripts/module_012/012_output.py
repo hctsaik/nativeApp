@@ -483,16 +483,6 @@ def _make_full_jpeg(file_path: str) -> bytes | None:
         return None
 
 
-@st.dialog("🔍 放大圖片", width="large")
-def _zoom_dialog() -> None:
-    """原生 Streamlit modal —— 顯示右欄圖片的全尺寸版本。"""
-    data = st.session_state.get("_m012_zoom_data")
-    if not data:
-        return
-    img_bytes, caption = data
-    st.image(img_bytes, caption=caption, use_container_width=True)
-
-
 def _inject_img_click_zoom() -> None:
     """在 Streamlit doc 注入 MutationObserver：直接對 img.m012-zoomable 掛 click handler。
 

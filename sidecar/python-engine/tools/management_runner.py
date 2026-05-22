@@ -529,6 +529,161 @@ def _page_permissions(reg: PluginRegistry) -> None:
         st.dataframe(table, use_container_width=True)
 
 
+# ── Page: Workflow Guide ─────────────────────────────────────────────────────
+
+
+def _load_workflow_status() -> dict:
+    """讀 shared.json + manifest DB + classification config，回傳工作流程現況。"""
+    import json as _json
+    import sqlite3 as _sq
+
+    result = {
+        "manifest_id": "",
+        "manifest_name": "",
+        "total": 0,
+        "annotated": 0,
+        "classified": 0,
+        "db_ok": False,
+        "clf_path": "",
+    }
+    shared_path = LOG_DIR / "config" / "shared.json"
+    if not shared_path.exists():
+        return result
+    try:
+        shared = _json.loads(shared_path.read_text(encoding="utf-8"))
+        mid = shared.get("last_manifest_id", "")
+    except Exception:
+        return result
+    if not mid:
+        return result
+    result["manifest_id"] = mid
+
+    # Manifest DB
+    db_path = LOG_DIR / "db" / "manifest.sqlite"
+    if db_path.exists():
+        try:
+            conn = _sq.connect(str(db_path))
+            row = conn.execute(
+                "SELECT name, item_count FROM dataset_manifests WHERE manifest_id=?", (mid,)
+            ).fetchone()
+            if row:
+                result["manifest_name"] = row[0]
+                result["total"] = row[1] or 0
+                result["db_ok"] = True
+
+            # 已標注（有同名 .json 的 items）：掃描 manifest_items file_path
+            items = conn.execute(
+                "SELECT file_path FROM manifest_items WHERE manifest_id=?", (mid,)
+            ).fetchall()
+            annotated = 0
+            from pathlib import Path as _Path
+            for (fp,) in items:
+                if fp and _Path(fp).with_suffix(".json").exists():
+                    annotated += 1
+            result["annotated"] = annotated
+            conn.close()
+        except Exception:
+            pass
+
+    # 已分類
+    clf_path = LOG_DIR / "config" / f"module_012_classifications_{mid[:12]}.json"
+    if clf_path.exists():
+        try:
+            clf = _json.loads(clf_path.read_text(encoding="utf-8"))
+            result["classified"] = sum(1 for v in clf.values() if v)
+            result["clf_path"] = str(clf_path)
+        except Exception:
+            pass
+
+    return result
+
+
+def _page_workflow() -> None:
+    st.header(":material/account_tree: 工作流程")
+    st.caption("標注工作流程的三個步驟，依序執行。")
+
+    status = _load_workflow_status()
+    mid = status["manifest_id"]
+    total = status["total"]
+    annotated = status["annotated"]
+    classified = status["classified"]
+
+    # ── 目前 Manifest 狀態 ───────────────────────────────────────────────────
+    if mid:
+        ann_pct = round(annotated / total * 100, 1) if total else 0
+        clf_pct = round(classified / total * 100, 1) if total else 0
+        st.info(
+            f"**目前 Manifest：** `{status['manifest_name'] or mid[:12]}`　"
+            f"共 **{total}** 張"
+        )
+        m1, m2, m3 = st.columns(3)
+        m1.metric("已標注", f"{annotated} 張", f"{ann_pct}%")
+        m2.metric("已分類", f"{classified} 張", f"{clf_pct}%")
+        m3.metric("待處理", f"{max(0, total - annotated)} 張")
+    else:
+        st.warning("尚未建立任何 Manifest，請先執行步驟一。")
+
+    st.divider()
+
+    # ── 步驟卡片 ─────────────────────────────────────────────────────────────
+    steps = [
+        {
+            "num": "①",
+            "name": "Data Feeder",
+            "tool_id": "module_010",
+            "desc": "選取圖片資料夾，建立 Manifest（圖片清單）。每次更換資料集都要重新執行。",
+            "done": status["db_ok"] and total > 0,
+            "done_label": f"已建立 Manifest，共 {total} 張" if total else "尚未建立",
+        },
+        {
+            "num": "②",
+            "name": "Annotation Session",
+            "tool_id": "module_012",
+            "desc": "以 X-AnyLabeling 標注圖片、輸入分類標籤。完成率即時顯示。",
+            "done": annotated > 0,
+            "done_label": f"已標注 {annotated} / {total} 張（{ann_pct if total else 0}%）" if total else "尚未標注",
+        },
+        {
+            "num": "③",
+            "name": "Update",
+            "tool_id": "module_013",
+            "desc": "將分類結果整理輸出：按分類名稱複製圖片與標注 JSON 到指定目錄。",
+            "done": classified > 0,
+            "done_label": f"已分類 {classified} 張，可執行整理輸出" if classified else "尚未分類",
+        },
+    ]
+
+    for step in steps:
+        status_icon = "✅" if step["done"] else "⏳"
+        with st.container(border=True):
+            col_icon, col_body, col_btn = st.columns([0.5, 5, 1.5])
+            with col_icon:
+                st.markdown(f"## {step['num']}")
+            with col_body:
+                st.markdown(f"**{status_icon} {step['name']}**")
+                st.caption(step["desc"])
+                st.caption(step["done_label"])
+            with col_btn:
+                if _CONTROL_PORT:
+                    if st.button(
+                        "啟動",
+                        key=f"wf_launch_{step['tool_id']}",
+                        use_container_width=True,
+                        type="primary" if not step["done"] else "secondary",
+                    ):
+                        try:
+                            _start_tool(step["tool_id"])
+                            st.toast(f"已啟動「{step['name']}」", icon=":material/rocket_launch:")
+                        except Exception as exc:
+                            st.error(f"啟動失敗：{exc}")
+
+    st.divider()
+    st.caption(
+        "**提示：** 每次更換圖片資料夾後，請從步驟一重新開始。"
+        "步驟二與三可多次執行（標注與分類可隨時補充修正）。"
+    )
+
+
 # ── Page: System / Backup ────────────────────────────────────────────────────
 
 
@@ -641,9 +796,12 @@ def main() -> None:
         st.stop()
         return
 
-    tab_tools, tab_sheets, tab_permissions, tab_system = st.tabs(
-        ["工具管理", "頁面（Sheet）", "權限設定", "系統"]
+    tab_workflow, tab_tools, tab_sheets, tab_permissions, tab_system = st.tabs(
+        ["工作流程", "工具管理", "頁面（Sheet）", "權限設定", "系統"]
     )
+
+    with tab_workflow:
+        _page_workflow()
 
     with tab_tools:
         _page_tools(reg)
