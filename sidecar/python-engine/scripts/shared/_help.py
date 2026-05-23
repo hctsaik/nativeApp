@@ -559,39 +559,46 @@ _HELP_CONTENT: dict[str, str] = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_help_button(module_id: str, side: str = "input") -> None:
-    """Inject fixed-position ? FAB + modal with user manual into Streamlit page."""
+    """Small inline ? badge next to module description; click opens user manual modal.
+
+    Uses a pure-CSS checkbox trick — no JavaScript needed, works inside Streamlit's
+    React renderer which strips onclick and <script> tags from st.markdown HTML.
+    """
 
     uid = f"cim-help-{module_id}-{side}"
     content_key = f"{module_id}_{side}"
     html_content = _HELP_CONTENT.get(content_key, "<p>（尚無使用說明）</p>")
 
-    # ── 只注入一次 CSS ────────────────────────────────────────────────────────
+    # ── Global CSS — injected once per page ───────────────────────────────────
     if "cim_help_css_injected" not in st.session_state:
         st.session_state["cim_help_css_injected"] = True
-        st.markdown("""
-<style>
-.cim-help-fab {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 44px;
-    height: 44px;
+        st.markdown("""<style>
+/* Hidden checkbox that drives the modal open/close */
+.cim-help-toggle { display: none; }
+
+/* Small inline ? badge */
+.cim-help-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     background: #1a73e8;
     color: #fff;
-    font-size: 22px;
+    font-size: 11px;
     font-weight: bold;
-    line-height: 44px;
-    text-align: center;
     cursor: pointer;
-    z-index: 99998;
-    box-shadow: 0 2px 8px rgba(0,0,0,.28);
     user-select: none;
-    border: none;
-    transition: background .15s;
+    opacity: 0.7;
+    transition: opacity .15s;
+    vertical-align: middle;
+    line-height: 1;
+    margin-left: 4px;
 }
-.cim-help-fab:hover { background: #1557b0; }
+.cim-help-badge:hover { opacity: 1; }
 
+/* Full-screen overlay — hidden by default */
 .cim-help-overlay {
     display: none;
     position: fixed;
@@ -601,9 +608,22 @@ def render_help_button(module_id: str, side: str = "input") -> None:
     align-items: center;
     justify-content: center;
 }
-.cim-help-overlay.open { display: flex; }
 
+/* Show overlay when sibling checkbox is checked */
+.cim-help-toggle:checked ~ .cim-help-overlay { display: flex; }
+
+/* Clickable backdrop (label for checkbox) */
+.cim-help-backdrop {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+    z-index: 0;
+}
+
+/* Modal card */
 .cim-help-card {
+    position: relative;
+    z-index: 1;
     background: #fff;
     border-radius: 12px;
     padding: 32px 36px;
@@ -611,7 +631,6 @@ def render_help_button(module_id: str, side: str = "input") -> None:
     width: 92vw;
     max-height: 80vh;
     overflow-y: auto;
-    position: relative;
     box-shadow: 0 8px 32px rgba(0,0,0,.22);
 }
 .cim-help-card h3 { margin-top: 0; color: #1a73e8; }
@@ -619,6 +638,7 @@ def render_help_button(module_id: str, side: str = "input") -> None:
 .cim-help-card ol, .cim-help-card ul { padding-left: 20px; line-height: 1.8; }
 .cim-help-card code { background: #f0f4ff; padding: 1px 5px; border-radius: 4px; }
 
+/* Close label (× button) */
 .cim-help-close {
     position: absolute;
     top: 14px;
@@ -626,37 +646,28 @@ def render_help_button(module_id: str, side: str = "input") -> None:
     font-size: 22px;
     cursor: pointer;
     color: #666;
-    background: none;
-    border: none;
     line-height: 1;
+    display: block;
 }
 .cim-help-close:hover { color: #111; }
-</style>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
-    # ── 注入此模組的 FAB + Modal ──────────────────────────────────────────────
-    st.markdown(f"""
-<button class="cim-help-fab" onclick="document.getElementById('{uid}-overlay').classList.add('open')"
-        title="使用說明">?</button>
-
-<div class="cim-help-overlay" id="{uid}-overlay"
-     onclick="if(event.target===this)this.classList.remove('open')">
-  <div class="cim-help-card">
-    <button class="cim-help-close"
-            onclick="document.getElementById('{uid}-overlay').classList.remove('open')"
-            title="關閉">✕</button>
-    {html_content}
-  </div>
-</div>
-
-<script>
-(function(){{
-  document.addEventListener('keydown', function(e){{
-    if(e.key==='Escape'){{
-      var el=document.getElementById('{uid}-overlay');
-      if(el) el.classList.remove('open');
-    }}
-  }});
-}})();
-</script>
-""", unsafe_allow_html=True)
+    # ── Badge + Modal in one block ────────────────────────────────────────────
+    # Structure: input(toggle) → label(badge) → div(overlay)
+    # CSS rule ".cim-help-toggle:checked ~ .cim-help-overlay" shows the overlay
+    # when the hidden checkbox is checked.  Labels toggle the checkbox on click.
+    # The wrapper div keeps the badge compact (22px) while overlay is position:fixed.
+    st.markdown(
+        f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
+        f'<input type="checkbox" class="cim-help-toggle" id="{uid}-toggle">'
+        f'<label for="{uid}-toggle" class="cim-help-badge" title="查看使用說明">?</label>'
+        f'<div class="cim-help-overlay">'
+        f'  <label for="{uid}-toggle" class="cim-help-backdrop"></label>'
+        f'  <div class="cim-help-card">'
+        f'    <label for="{uid}-toggle" class="cim-help-close" title="關閉">✕</label>'
+        f'    {html_content}'
+        f'  </div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
