@@ -334,6 +334,32 @@ class SQLiteToolAdapter(ToolAdapter):
             except Exception:
                 pass
 
+            # migration: insert module_020 (Upload Archive) at tab_order=4
+            try:
+                exists = connection.execute(
+                    "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
+                    ("annotation_workflow", "module_020"),
+                ).fetchone()
+                if not exists:
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order=-(tab_order+1)"
+                        " WHERE sheet_id=? AND tab_order>=4",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order=-tab_order"
+                        " WHERE sheet_id=? AND tab_order<0",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                        " VALUES (?,?,?,?)",
+                        ("annotation_workflow", 4, "module_020",
+                         "\U0001f5c2️ 我的上傳記錄"),
+                    )
+            except Exception:
+                pass
+
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
 
