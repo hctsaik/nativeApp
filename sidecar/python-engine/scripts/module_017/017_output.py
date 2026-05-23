@@ -189,8 +189,11 @@ def _render_last_sync(manifest_id: str) -> None:
         last.get("status", ""), last.get("status", "")
     )
     fmts = ", ".join(last.get("formats", [])) or "無"
+    sys_info = f"{last.get('system_name', '')} / {last.get('data_type', '')}" if last.get("system_name") else ""
     st.markdown(
-        f"**最近一次**：{started}　｜　scope: {last.get('scope', '')}　"
+        f"**最近一次**：{started}"
+        + (f"　｜　{sys_info}" if sys_info else "")
+        + f"　｜　scope: {last.get('scope', '')}　"
         f"｜　{last.get('ok_count', 0)} / {last.get('scope_count', 0)} 筆成功　"
         f"｜　格式: {fmts}　｜　{status_label}"
     )
@@ -201,6 +204,9 @@ def _render_last_sync(manifest_id: str) -> None:
             for e in reversed(entries):
                 rows.append({
                     "時間": (e.get("started_at") or "")[:19].replace("T", " "),
+                    "系統": e.get("system_name", ""),
+                    "資料類型": e.get("data_type", ""),
+                    "送出者": e.get("nt_account", ""),
                     "scope": e.get("scope", ""),
                     "成功/總計": f"{e.get('ok_count', 0)} / {e.get('scope_count', 0)}",
                     "格式": ", ".join(e.get("formats", [])) or "無",

@@ -49,7 +49,9 @@ def _render_history(manifest_id: str) -> None:
         started = e.get("started_at", "")[:19].replace("T", " ")
         rows.append({
             "時間": started,
-            "submit_id": e.get("submit_id", "")[:8] + "…",
+            "系統": e.get("system_name", ""),
+            "資料類型": e.get("data_type", ""),
+            "送出者": e.get("nt_account", ""),
             "scope": e.get("scope", ""),
             "成功/總計": f"{e.get('ok_count', 0)} / {e.get('scope_count', 0)}",
             "格式": ", ".join(e.get("formats", [])) or "無",

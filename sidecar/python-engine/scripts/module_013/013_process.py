@@ -278,16 +278,28 @@ def execute_logic(params: dict) -> dict:
     """
     params:
         manifest_id:   str
-        dataset_id:    str
+        dataset_id:    str   (auto-composed: system_data_type_YYYYMMDD)
         service_url:   str   (base URL)
         scope:         "full" | "partial"
         export_format: "coco_json" | "yolo_txt" | "none"
+        system_name:   str   (e.g. "iWISC", "SMM")
+        data_type:     str   (e.g. "Simulation", "Issue", "Retrain")
+        nt_account:    str
+        timestamp:     str   (YYYY-MM-DD HH:MM:SS)
+        description:   str
     """
     manifest_id: str = params.get("manifest_id", "")
     dataset_id: str = params.get("dataset_id", "")
     service_url: str = params.get("service_url", "").rstrip("/")
     scope: str = params.get("scope", "full")
     export_format: str = params.get("export_format", "none")
+    upload_meta: dict = {
+        "system_name": params.get("system_name", ""),
+        "data_type": params.get("data_type", ""),
+        "nt_account": params.get("nt_account", ""),
+        "timestamp": params.get("timestamp", ""),
+        "description": params.get("description", ""),
+    }
 
     _base: dict = {
         "manifest_id": manifest_id,
@@ -393,6 +405,7 @@ def execute_logic(params: dict) -> dict:
             "scope": scope,
             "chunk_index": ci,
             "total_chunks": total_chunks,
+            "metadata": upload_meta,
             "items": payload_items,
         }
 
@@ -471,6 +484,7 @@ def execute_logic(params: dict) -> dict:
             "started_at": _base["started_at"],
             "finished_at": finished_at,
             "status": hist_status,
+            **upload_meta,
         })
 
     # ── 7. 最終 mode ──────────────────────────────────────────────────────────

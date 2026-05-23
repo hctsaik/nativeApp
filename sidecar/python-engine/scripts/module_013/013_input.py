@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util as _ilu
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -27,9 +28,12 @@ _p14_spec = _ilu.spec_from_file_location(
 _p14 = _ilu.module_from_spec(_p14_spec)
 _p14_spec.loader.exec_module(_p14)
 
+_SYSTEM_OPTIONS = ["iWISC", "SMM"]
+_DATA_TYPE_OPTIONS = ["Simulation", "Issue", "Retrain"]
+_NT_ACCOUNT = "HCTSAIK"
+
 
 def _load_shapes_and_clf(manifest_id: str, items: list[dict]) -> tuple[dict, dict]:
-    """快取：只在 manifest_id 切換或首次時重算。"""
     cache_key = f"m013_shapes_{manifest_id}"
     if cache_key not in st.session_state:
         shapes_map: dict = {}
@@ -49,9 +53,16 @@ def render_input() -> dict:
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
 
+    _empty = {
+        "manifest_id": "", "dataset_id": "", "service_url": "",
+        "scope": "full", "export_format": "none",
+        "system_name": "", "data_type": "", "nt_account": _NT_ACCOUNT,
+        "timestamp": "", "description": "",
+    }
+
     if not manifests:
         st.warning("尚未建立任何 Manifest，請先執行 **010 - Data Feeder**。")
-        return {"manifest_id": "", "dataset_id": "", "service_url": "", "scope": "full", "export_format": "none"}
+        return _empty
 
     # ── Manifest 選擇 ─────────────────────────────────────────────────────────
     shared_id = _cfg.get_shared_manifest_id()
@@ -82,14 +93,55 @@ def render_input() -> dict:
         cfg["service_url"] = service_url
         _cfg.save_config(cfg)
 
-    default_dataset_id = _cfg.get_shared_dataset_id()
-    dataset_id = st.text_input(
-        "資料集 ID（dataset_id）",
-        value=st.session_state.get("m013_dataset_id_" + manifest_id, default_dataset_id),
-        key="m013_dataset_id_" + manifest_id,
-        placeholder="例：ds-20260523-001",
-        help="Service 端的資料集識別碼，由 Data Downloader 自動帶入或手動填寫。",
+    st.divider()
+
+    # ── Upload 詮釋資料 ───────────────────────────────────────────────────────
+    st.markdown("#### Upload 資訊")
+
+    col_sys, col_type = st.columns(2)
+    with col_sys:
+        system_name = st.selectbox(
+            "系統名稱",
+            options=_SYSTEM_OPTIONS,
+            key="m013_system_name",
+        )
+    with col_type:
+        data_type = st.selectbox(
+            "資料類型",
+            options=_DATA_TYPE_OPTIONS,
+            key="m013_data_type",
+        )
+
+    # 自動組合 dataset_id：system_data_type_YYYYMMDD
+    today_str = datetime.now().strftime("%Y%m%d")
+    dataset_id = f"{system_name}_{data_type}_{today_str}"
+
+    col_nt, col_ts = st.columns(2)
+    with col_nt:
+        st.text_input(
+            "NT Account",
+            value=_NT_ACCOUNT,
+            disabled=True,
+            key="m013_nt_account",
+        )
+    with col_ts:
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.text_input(
+            "Timestamp",
+            value=timestamp_str,
+            disabled=True,
+            key="m013_timestamp",
+        )
+
+    description = st.text_area(
+        "Data Description",
+        value=st.session_state.get("m013_description", ""),
+        key="m013_description",
+        placeholder="請說明此批資料的來源、用途、標注規範或其他注意事項…",
+        height=120,
     )
+
+    st.caption(f"📌 自動產生的 dataset_id：`{dataset_id}`")
 
     st.divider()
 
@@ -150,4 +202,9 @@ def render_input() -> dict:
         "service_url": service_url,
         "scope": scope,
         "export_format": export_format,
+        "system_name": system_name,
+        "data_type": data_type,
+        "nt_account": _NT_ACCOUNT,
+        "timestamp": timestamp_str,
+        "description": description,
     }
