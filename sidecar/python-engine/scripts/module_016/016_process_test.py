@@ -217,3 +217,245 @@ def test_run_yolo_writes_annotation(tmp_path, monkeypatch):
     assert len(data["shapes"]) == 1
     assert data["shapes"][0]["label"] == "cat"
     assert data["shapes"][0]["shape_type"] == "rectangle"
+
+
+def test_run_yolo_item_result_includes_max_conf(tmp_path, monkeypatch):
+    """item_results 應包含 max_conf 與 item_id（給 execute_logic 寫回 metadata 用）。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+    monkeypatch.setitem(sys.modules, "ultralytics", _fake_ultralytics(boxes=[
+        {"x1": 0.0, "y1": 0.0, "x2": 50.0, "y2": 50.0, "cls_id": 1, "conf": 0.75},
+    ]))
+    proc = _load(_HERE / "016_process.py", "_016_proc_yolo_maxconf")
+
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+
+    result = proc._run_yolo(
+        [{"item_id": "item-abc", "file_path": str(img)}],
+        model_path="fake.pt", conf=0.25, overwrite=True,
+    )
+    ir = result["item_results"][0]
+    assert ir["item_id"] == "item-abc"
+    assert ir["max_conf"] == pytest.approx(0.75, abs=1e-3)
+
+
+# ─── _run_classifier ──────────────────────────────────────────────────────────
+
+def _fake_torch_modules(top_label: str = "cat", top_conf: float = 0.92,
+                         num_classes: int = 2) -> dict:
+    """Build fake torch / torchvision modules for classifier tests."""
+    import types
+
+    # ── torch ──────────────────────────────────────────────────────────────────
+    torch_mod = types.ModuleType("torch")
+
+    class _FakeTensor:
+        def __init__(self, val):
+            self._val = val
+        def max(self, _dim):
+            return self, self
+        def __float__(self):
+            return float(self._val)
+        def __int__(self):
+            return int(self._val)
+        def unsqueeze(self, _dim):
+            return self
+
+    class _FakeModel:
+        def __init__(self):
+            self._called = False
+        def eval(self):
+            return self
+        def __call__(self, _x):
+            return _FakeTensor(top_conf)
+        def load_state_dict(self, _state, strict=True):
+            pass
+        @property
+        def fc(self):
+            return self._fc
+        @fc.setter
+        def fc(self, val):
+            self._fc = val
+
+    class _FakeLinear:
+        def __init__(self, _in, _out):
+            self.in_features = _in
+
+    torch_mod.nn = types.ModuleType("torch.nn")
+    torch_mod.nn.Linear = _FakeLinear
+    torch_mod.no_grad = lambda: _ctx()
+
+    class _ctx:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def _softmax(tensor, dim):
+        class _T:
+            def __getitem__(self, _i): return _FakeTensor(top_conf)
+        return _T()
+
+    torch_mod.softmax = _softmax
+
+    # state_dict stub
+    class _FakeStateDict(dict):
+        pass
+
+    def _load(path, map_location=None, weights_only=False):
+        sd = _FakeStateDict()
+        sd["layer.weight"] = _FakeTensor(0)
+        return sd
+
+    torch_mod.load = _load
+
+    # ── torchvision ────────────────────────────────────────────────────────────
+    tv_mod = types.ModuleType("torchvision")
+    tv_models = types.ModuleType("torchvision.models")
+
+    class _FakeResNet:
+        def __init__(self, weights=None):
+            self._fc = _FakeLinear(2048, num_classes)
+            self.fc = self._fc
+        def eval(self): return self
+        def __call__(self, _x): return _FakeTensor(top_conf)
+        def load_state_dict(self, _s, strict=False): pass
+
+    tv_models.resnet50 = lambda weights=None: _FakeResNet()
+    tv_mod.models = tv_models
+
+    tv_transforms = types.ModuleType("torchvision.transforms")
+
+    class _FakeTransform:
+        def __call__(self, img): return img
+    class _FakeCompose:
+        def __init__(self, *a): pass
+        def __call__(self, img): return _FakeTensor(0)
+
+    tv_transforms.Compose = _FakeCompose
+    tv_transforms.Resize = lambda *a, **kw: _FakeTransform()
+    tv_transforms.CenterCrop = lambda *a, **kw: _FakeTransform()
+    tv_transforms.ToTensor = lambda: _FakeTransform()
+    tv_transforms.Normalize = lambda *a, **kw: _FakeTransform()
+    tv_mod.transforms = tv_transforms
+
+    # ── PIL ────────────────────────────────────────────────────────────────────
+    pil_mod = types.ModuleType("PIL")
+    pil_image = types.ModuleType("PIL.Image")
+
+    class _FakeImg:
+        width = 640
+        height = 480
+        def convert(self, _mode): return self
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    pil_image.open = lambda _path: _FakeImg()
+    pil_mod.Image = pil_image
+
+    return {
+        "torch": torch_mod,
+        "torchvision": tv_mod,
+        "torchvision.models": tv_models,
+        "torchvision.transforms": tv_transforms,
+        "PIL": pil_mod,
+        "PIL.Image": pil_image,
+    }
+
+
+def test_run_classifier_writes_flags_json(tmp_path, monkeypatch):
+    """Classifier 高信心度時應寫 flags.classification 到 .json。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+
+    labels_file = tmp_path / "model.json"
+    labels_file.write_text(json.dumps(["cat", "dog"]), encoding="utf-8")
+    model_pt = tmp_path / "model.pt"
+    model_pt.write_bytes(b"fake")
+
+    for k, v in _fake_torch_modules("cat", top_conf=0.92).items():
+        monkeypatch.setitem(sys.modules, k, v)
+
+    proc = _load(_HERE / "016_process.py", "_016_proc_clf_ok")
+
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+
+    result = proc._run_classifier(
+        [{"item_id": "i1", "file_path": str(img)}],
+        model_path=str(model_pt), conf=0.5, overwrite=True, manifest_id="m1",
+    )
+    assert result["ok"] == 1
+    ann = img.with_suffix(".json")
+    assert ann.exists()
+    data = json.loads(ann.read_text("utf-8"))
+    assert data["flags"]["classification"] == "cat"
+
+
+def test_run_classifier_low_conf_skipped(tmp_path, monkeypatch):
+    """信心度低於門檻時 → 不寫 .json，status=low_conf。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+
+    labels_file = tmp_path / "model.json"
+    labels_file.write_text(json.dumps(["cat", "dog"]), encoding="utf-8")
+    model_pt = tmp_path / "model.pt"
+    model_pt.write_bytes(b"fake")
+
+    for k, v in _fake_torch_modules("cat", top_conf=0.3).items():
+        monkeypatch.setitem(sys.modules, k, v)
+
+    proc = _load(_HERE / "016_process.py", "_016_proc_clf_lowconf")
+
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+
+    result = proc._run_classifier(
+        [{"item_id": "i1", "file_path": str(img)}],
+        model_path=str(model_pt), conf=0.5, overwrite=False, manifest_id="m1",
+    )
+    assert result["ok"] == 0
+    assert result["skipped"] == 1
+    assert result["item_results"][0]["status"] == "low_conf"
+    assert not img.with_suffix(".json").exists()
+
+
+# ─── execute_logic pre-label snapshot ─────────────────────────────────────────
+
+def test_execute_logic_saves_pre_label_snapshots(tmp_path, monkeypatch):
+    """overwrite=True かつ既存 .json → execute_logic が snapshot を保存する。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+
+    mdb = _load(_SHARED, "_mdb_016_snap")
+    db_path = cim_log / "db" / "manifest.sqlite"
+    mdb.init_db(db_path)
+    mdb.create_manifest(db_path, "m_snap", "snap test", "folder", {})
+
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    ann = img.with_suffix(".json")
+    ann.write_text('{"shapes":[{"label":"old"}]}', encoding="utf-8")
+    mdb.add_manifest_items(db_path, "m_snap", [{"item_id": "i1", "file_path": str(img)}])
+
+    monkeypatch.setitem(sys.modules, "ultralytics", _fake_ultralytics(boxes=[
+        {"x1": 0, "y1": 0, "x2": 10, "y2": 10, "cls_id": 0, "conf": 0.9},
+    ]))
+
+    fake_model = tmp_path / "model.pt"
+    fake_model.write_bytes(b"fake")
+
+    proc = _load(_HERE / "016_process.py", "_016_proc_snap")
+    result = proc.execute_logic({
+        "manifest_id": "m_snap",
+        "model_type": "yolo",
+        "model_path": str(fake_model),
+        "conf_threshold": 0.25,
+        "overwrite_existing": True,
+    })
+    assert result["mode"] == "done"
+
+    snaps = mdb.get_snapshots(db_path, "m_snap", trigger="pre_label")
+    assert len(snaps) == 1
+    assert snaps[0]["item_id"] == "i1"
+    snap_data = json.loads(snaps[0]["label_json"])
+    assert snap_data["shapes"][0]["label"] == "old"

@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS sync_queue (
     created_at   TEXT DEFAULT (datetime('now')),
     synced_at    TEXT
 );
+
+CREATE TABLE IF NOT EXISTS annotation_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    manifest_id  TEXT NOT NULL,
+    item_id      TEXT NOT NULL,
+    trigger      TEXT NOT NULL,
+    model_path   TEXT,
+    annotator_id TEXT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    label_json   TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_manifest ON annotation_snapshots(manifest_id);
+CREATE INDEX IF NOT EXISTS idx_snapshots_item ON annotation_snapshots(manifest_id, item_id);
 """
 
 
@@ -516,5 +529,118 @@ def get_sync_stats(db_path: Path, manifest_id: str) -> dict:
             (manifest_id,),
         ).fetchall()
         return {r[0]: r[1] for r in rows}
+    finally:
+        conn.close()
+
+
+# ─── annotation_snapshots DAL ──────────────────────────────────────────────────
+
+def save_snapshot(
+    db_path: Path,
+    manifest_id: str,
+    item_id: str,
+    trigger: str,
+    label_json: str = "{}",
+    model_path: str | None = None,
+    annotator_id: str | None = None,
+) -> None:
+    """Save a pre-operation annotation snapshot for audit trail."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO annotation_snapshots "
+            "(manifest_id, item_id, trigger, model_path, annotator_id, label_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (manifest_id, item_id, trigger, model_path, annotator_id, label_json),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_snapshots_bulk(
+    db_path: Path,
+    manifest_id: str,
+    rows: list[dict],
+) -> None:
+    """Bulk-save snapshots. Each row: {item_id, trigger, label_json, model_path?, annotator_id?}."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO annotation_snapshots "
+            "(manifest_id, item_id, trigger, model_path, annotator_id, label_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    manifest_id,
+                    r["item_id"],
+                    r["trigger"],
+                    r.get("model_path"),
+                    r.get("annotator_id"),
+                    r.get("label_json", "{}"),
+                )
+                for r in rows
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_snapshots(
+    db_path: Path,
+    manifest_id: str,
+    item_id: str | None = None,
+    trigger: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Retrieve annotation snapshots, optionally filtered by item_id and trigger."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        clauses = ["manifest_id=?"]
+        params: list = [manifest_id]
+        if item_id:
+            clauses.append("item_id=?")
+            params.append(item_id)
+        if trigger:
+            clauses.append("trigger=?")
+            params.append(trigger)
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM annotation_snapshots WHERE {' AND '.join(clauses)} "
+            f"ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return _rows_to_list(rows)
+    finally:
+        conn.close()
+
+
+def update_item_metadata(
+    db_path: Path,
+    manifest_id: str,
+    item_id: str,
+    updates: dict,
+) -> None:
+    """Merge updates dict into the existing metadata JSON for a manifest item."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT metadata FROM manifest_items WHERE manifest_id=? AND item_id=?",
+            (manifest_id, item_id),
+        ).fetchone()
+        if row is None:
+            return
+        meta = json.loads(row[0] or "{}")
+        meta.update(updates)
+        conn.execute(
+            "UPDATE manifest_items SET metadata=? WHERE manifest_id=? AND item_id=?",
+            (json.dumps(meta, ensure_ascii=False), manifest_id, item_id),
+        )
+        conn.commit()
     finally:
         conn.close()

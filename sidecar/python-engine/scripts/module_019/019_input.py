@@ -15,10 +15,15 @@ _proc_spec = _ilu.spec_from_file_location("_019_process", _HERE / "019_process.p
 _proc = _ilu.module_from_spec(_proc_spec)
 _proc_spec.loader.exec_module(_proc)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def render_input() -> dict:
     st.subheader("🌐 Data Downloader — 從遠端服務取得資料集")
     st.caption("打 Service 下載資料包（ZIP），解壓後交由 Data Feeder 建立 Manifest。")
+    _help.render_help_button("module_019", "input")
 
     cfg = _cfg.load_config()
 

@@ -28,6 +28,10 @@ _p14_spec = _ilu.spec_from_file_location(
 _p14 = _ilu.module_from_spec(_p14_spec)
 _p14_spec.loader.exec_module(_p14)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _SYSTEM_OPTIONS = ["iWISC", "SMM"]
 _DATA_TYPE_OPTIONS = ["Simulation", "Issue", "Retrain"]
 _NT_ACCOUNT = "HCTSAIK"
@@ -49,6 +53,7 @@ def _load_shapes_and_clf(manifest_id: str, items: list[dict]) -> tuple[dict, dic
 def render_input() -> dict:
     st.subheader("🔄 Sync Back — 同步標注結果至 Service")
     st.caption("將目前 Manifest 的標注（bbox / 分類）批次推送至遠端 Service，並附帶訓練格式壓縮檔。")
+    _help.render_help_button("module_013", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
@@ -84,7 +89,7 @@ def render_input() -> dict:
     cfg = _cfg.load_config()
 
     service_url = st.text_input(
-        "Service URL",
+        "Service URL *",
         value=st.session_state.get("m013_service_url", cfg.get("service_url", "")),
         key="m013_service_url",
         placeholder="https://service.example.com",

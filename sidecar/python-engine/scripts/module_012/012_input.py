@@ -27,6 +27,10 @@ _ai_cfg_spec = _ilu.spec_from_file_location(
 _ai_cfg = _ilu.module_from_spec(_ai_cfg_spec)
 _ai_cfg_spec.loader.exec_module(_ai_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _DEFAULT_LABELS: list[str] = []
 _ANNOTATION_TOOLS = {
     "X-AnyLabeling": "x-anylabeling",
@@ -68,6 +72,7 @@ def _duplicate_labels(labels: list[str]) -> list[str]:
 
 def render_input() -> dict:
     st.subheader("🏷️ 開始標注前確認")
+    _help.render_help_button("module_012", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

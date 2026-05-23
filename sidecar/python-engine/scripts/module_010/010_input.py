@@ -16,6 +16,10 @@ _cfg_spec = _ilu.spec_from_file_location("_010_config", _HERE / "_config.py")
 _cfg = _ilu.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 # ─── 預設副檔名選項 ────────────────────────────────────────────────────────────
 
 _DEFAULT_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"]
@@ -26,6 +30,7 @@ _DEFAULT_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"]
 def render_input() -> dict:
     st.subheader("📦 Data Feeder — 資料來源設定")
     st.caption("從資料夾、資料庫或 API 建立標準化圖片清單（DatasetManifest）")
+    _help.render_help_button("module_010", "input")
 
     cfg = _cfg.load_config()
 

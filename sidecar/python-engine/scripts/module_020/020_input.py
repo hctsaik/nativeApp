@@ -12,11 +12,16 @@ _cfg_spec = _ilu.spec_from_file_location("_020_config", _HERE / "_config.py")
 _cfg = _ilu.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def render_input() -> dict:
     st.subheader("📥 Download")
     st.caption("查詢透過 Sync Back 上傳至 Service 的標注批次，選取後重新下載。")
     st.caption("標示 `*` 為必填，其餘為選填。")
+    _help.render_help_button("module_020", "input")
 
     cfg = _cfg.load_config()
 

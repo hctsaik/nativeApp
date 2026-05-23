@@ -17,12 +17,17 @@ _mdb_spec = _ilu.spec_from_file_location(
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _FILTER_OPTIONS = ["全部", "已標注 (有 BBox)", "未標注", "已分類", "未分類"]
 
 
 def render_input() -> dict:
     st.subheader("🖼️ Review Gallery — 標注審查")
     st.caption("以 Grid 縮略圖 + BBox overlay 快速瀏覽標注結果")
+    _help.render_help_button("module_018", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

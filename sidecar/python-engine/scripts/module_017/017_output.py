@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import importlib.util
 import importlib.util as _ilu
+import json
+import os
 from pathlib import Path
 
 import streamlit as st
 
 _HERE = Path(__file__).resolve().parent
 _PROCESS_FILE = _HERE / "017_process.py"
+
+_mdb_spec = _ilu.spec_from_file_location(
+    "_manifest_db_017", _HERE.parent / "shared" / "_manifest_db.py"
+)
+_mdb = _ilu.module_from_spec(_mdb_spec)
+_mdb_spec.loader.exec_module(_mdb)
+
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
+_CIM_LOG_DIR = Path(os.environ.get(
+    "CIM_LOG_DIR", str(Path(__file__).resolve().parents[4] / "tmp" / "cim_log")
+))
 
 
 def _load_process_mod():
@@ -161,10 +177,105 @@ def _render_dashboard(data: dict) -> None:
     else:
         st.caption("尚無匯出記錄")
 
+    # ── QA Review 統計 ────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🔍 QA Review 統計")
+    manifest_id: str = data.get("manifest_id", "")
+    _render_review_summary(manifest_id)
+
     # ── 最後同步記錄（module_013）─────────────────────────────────────────────
     st.divider()
     st.subheader("同步至 Service")
     _render_last_sync(manifest_id)
+
+
+def _render_review_summary(manifest_id: str) -> None:
+    """Read .review.json sidecars for all items and show QA stats."""
+    db_path = _CIM_LOG_DIR / "db" / "manifest.sqlite"
+    cache_key = f"m017_review_{manifest_id}"
+    cached = st.session_state.get(cache_key)
+
+    if cached is None:
+        try:
+            items = _mdb.get_manifest_items(db_path, manifest_id)
+        except Exception:
+            items = []
+
+        approved = rejected = pending = 0
+        reviewer_counts: dict[str, int] = {}
+        comments: list[dict] = []
+
+        for it in items:
+            fp = it.get("file_path", "")
+            if not fp:
+                pending += 1
+                continue
+            rev_path = Path(fp).parent / (Path(fp).name + ".review.json")
+            if rev_path.exists():
+                try:
+                    rev = json.loads(rev_path.read_text(encoding="utf-8"))
+                    rev_st = rev.get("status", "pending")
+                    if rev_st == "approved":
+                        approved += 1
+                    elif rev_st == "rejected":
+                        rejected += 1
+                    else:
+                        pending += 1
+                    rv = rev.get("reviewer", "")
+                    if rv:
+                        reviewer_counts[rv] = reviewer_counts.get(rv, 0) + 1
+                    if rev.get("comment") and rev_st == "rejected":
+                        comments.append({
+                            "file": Path(fp).name,
+                            "comment": rev["comment"],
+                            "timestamp": (rev.get("timestamp") or "")[:19],
+                        })
+                except Exception:
+                    pending += 1
+            else:
+                pending += 1
+
+        cached = {
+            "approved": approved,
+            "rejected": rejected,
+            "pending": pending,
+            "total": len(items),
+            "reviewer_counts": reviewer_counts,
+            "rejected_comments": comments,
+        }
+        st.session_state[cache_key] = cached
+
+    total = cached["total"]
+    approved = cached["approved"]
+    rejected = cached["rejected"]
+    pending = cached["pending"]
+
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("總計", total)
+    r2.metric("✅ 核准", approved)
+    r3.metric("❌ 退回", rejected)
+    r4.metric("⏳ 待審", pending)
+
+    if total > 0:
+        _, col_a, col_r, _ = st.columns(4)
+        with col_a:
+            st.progress(approved / total if total else 0)
+        with col_r:
+            st.progress(rejected / total if total else 0)
+
+    if cached["reviewer_counts"]:
+        st.caption("審核人：" + "　".join(
+            f"{rv}（{cnt}）" for rv, cnt in cached["reviewer_counts"].items()
+        ))
+
+    if cached["rejected_comments"]:
+        with st.expander(f"❌ 退回備註（{len(cached['rejected_comments'])} 筆）"):
+            for c in cached["rejected_comments"]:
+                st.markdown(f"**`{c['file']}`** — {c['comment']} `{c['timestamp']}`")
+
+    if st.button("🔄 重新統計 QA", key="m017_refresh_qa"):
+        st.session_state.pop(cache_key, None)
+        st.rerun()
 
 
 def _render_last_sync(manifest_id: str) -> None:
@@ -341,6 +452,7 @@ def _render_label_manager(manifest_id: str, data: dict) -> None:
 # ── 主進入點 ──────────────────────────────────────────────────────────────────
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_017", "output")
     if not result or result.get("error"):
         st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
         if result and result.get("error"):

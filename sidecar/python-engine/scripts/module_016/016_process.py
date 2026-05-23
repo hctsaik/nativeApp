@@ -17,6 +17,7 @@ Classifier 模式：
 
 import importlib.util as _ilu
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +36,16 @@ _mdb_spec.loader.exec_module(_mdb)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
+
+_logger = logging.getLogger("m016_process")
+if not _logger.handlers:
+    _LOG_FILE = _CIM_LOG_DIR / "module_016_process.log"
+    _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    _logger.addHandler(_fh)
+    _logger.setLevel(logging.DEBUG)
+    _logger.propagate = False
 
 
 # ─── X-AnyLabeling JSON helpers ───────────────────────────────────────────────
@@ -110,23 +121,35 @@ def _run_yolo(items: list[dict], model_path: str,
             r = results[0]
             img_w, img_h = int(r.orig_shape[1]), int(r.orig_shape[0])
             shapes: list[dict] = []
+            max_conf = 0.0
             for box in r.boxes:
                 x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
                 cls_id = int(box.cls[0])
                 label = model.names.get(cls_id, str(cls_id))
                 score = float(box.conf[0])
+                if score > max_conf:
+                    max_conf = score
                 shapes.append(_xany_rect(label, x1, y1, x2, y2, score))
 
             _write_xany_json(fp, shapes, img_w, img_h)
             ok += 1
             item_results.append({
                 "file": Path(fp).name,
+                "item_id": it.get("item_id", ""),
                 "status": "ok",
                 "detail": f"{len(shapes)} 個 bbox",
+                "max_conf": round(max_conf, 4),
             })
         except Exception as exc:
             errors += 1
-            item_results.append({"file": Path(fp).name, "status": "error", "detail": str(exc)})
+            item_results.append({
+                "file": Path(fp).name,
+                "item_id": it.get("item_id", ""),
+                "status": "error",
+                "detail": str(exc),
+                "max_conf": 0.0,
+            })
+            _logger.error("[016] YOLO error %s: %s", Path(fp).name, exc)
 
         if progress_cb:
             progress_cb(ok + skipped + errors, Path(fp).name, ok, skipped, errors)
@@ -308,6 +331,35 @@ def execute_logic(params: dict) -> dict:
     total = len(items)
     _base["total_items"] = total
 
+    _logger.info(
+        "[016] execute_logic 開始  manifest_id=%s  model=%s  type=%s  total=%d  overwrite=%s",
+        manifest_id, Path(model_path).name, model_type, total, overwrite,
+    )
+
+    # Pre-label snapshot：保存即將被覆寫的標注（overwrite=True 時）
+    if overwrite:
+        snap_rows: list[dict] = []
+        for it in items:
+            fp = it.get("file_path", "")
+            ann_p = Path(fp).with_suffix(".json") if fp else None
+            if ann_p and ann_p.exists():
+                try:
+                    label_json = ann_p.read_text(encoding="utf-8")
+                except Exception:
+                    label_json = "{}"
+                snap_rows.append({
+                    "item_id": it["item_id"],
+                    "trigger": "pre_label",
+                    "label_json": label_json,
+                    "model_path": model_path,
+                })
+        if snap_rows:
+            try:
+                _mdb.save_snapshots_bulk(db_path, manifest_id, snap_rows)
+                _logger.info("[016] 已儲存 %d 個 pre-label snapshots", len(snap_rows))
+            except Exception as exc:
+                _logger.warning("[016] snapshot 儲存失敗（不影響推論）: %s", exc)
+
     started_at = _base["started_at"]
 
     def _progress_cb(done: int, current: str, ok: int, skipped: int, errors: int) -> None:
@@ -324,12 +376,30 @@ def execute_logic(params: dict) -> dict:
 
     if "error_detail" in stats:
         _cfg.write_progress(0, total, "", 0, 0, 0, started_at, running=False)
+        _logger.error("[016] 推論初始化失敗: %s", stats["error_detail"])
         return {**_base, "mode": "error", "error": stats["error_detail"]}
+
+    # Write max_conf back to item metadata for low-confidence filter in module_012
+    if model_type == "yolo":
+        for ir in stats.get("item_results", []):
+            iid = ir.get("item_id", "")
+            if iid and ir.get("status") == "ok" and ir.get("max_conf", 0.0) > 0:
+                try:
+                    _mdb.update_item_metadata(
+                        db_path, manifest_id, iid,
+                        {"max_conf": ir["max_conf"], "ai_model": Path(model_path).name},
+                    )
+                except Exception as exc:
+                    _logger.warning("[016] metadata 更新失敗 %s: %s", iid, exc)
 
     _cfg.write_progress(
         stats["ok"] + stats["skipped"] + stats["errors"], total, "",
         stats["ok"], stats["skipped"], stats["errors"],
         started_at, running=False,
+    )
+    _logger.info(
+        "[016] 完成  ok=%d  skipped=%d  errors=%d",
+        stats["ok"], stats["skipped"], stats["errors"],
     )
     return {
         **_base,

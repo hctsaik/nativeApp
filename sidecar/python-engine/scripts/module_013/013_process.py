@@ -339,6 +339,28 @@ def execute_logic(params: dict) -> dict:
         ann = _p14._load_xany_annotation(it.get("file_path", ""))
         shapes_map[iid] = _p14._parse_shapes(ann.get("shapes", []))
 
+    # ── 1b. Pre-sync snapshot ─────────────────────────────────────────────────
+    try:
+        snap_rows: list[dict] = []
+        for it in items:
+            fp = it.get("file_path", "")
+            ann_p = Path(fp).with_suffix(".json") if fp else None
+            if ann_p and ann_p.exists():
+                try:
+                    label_json = ann_p.read_text(encoding="utf-8")
+                except Exception:
+                    label_json = "{}"
+                snap_rows.append({
+                    "item_id": it["item_id"],
+                    "trigger": "pre_sync",
+                    "label_json": label_json,
+                    "annotator_id": upload_meta.get("nt_account"),
+                })
+        if snap_rows:
+            _mdb.save_snapshots_bulk(db_path, manifest_id, snap_rows)
+    except Exception:
+        pass  # snapshot failure must not block sync
+
     # ── 2. 驗證 ───────────────────────────────────────────────────────────────
     validation_issues = validate_pre_sync(items, shapes_map, classifications)
     _base["validation_issues"] = [

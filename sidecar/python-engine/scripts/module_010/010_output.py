@@ -21,6 +21,10 @@ _cfg_spec = _ilu.spec_from_file_location("_010_config", _HERE / "_config.py")
 _cfg = _ilu.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
 
@@ -82,6 +86,7 @@ def _build_csv(items: list[dict]) -> bytes:
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_010", "output")
     mode = result.get("mode", "idle")
 
     if mode == "idle":

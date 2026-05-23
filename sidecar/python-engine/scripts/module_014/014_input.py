@@ -17,6 +17,10 @@ _mdb_spec = _ilu.spec_from_file_location(
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _FORMAT_MAP = {
     "COCO JSON（Detection）": "coco_json",
     "YOLO txt（Detection）": "yolo_txt",
@@ -44,6 +48,7 @@ def _browse_directory() -> str:
 def render_input() -> dict:
     st.subheader("📤 Export — 多格式標注匯出")
     st.caption("將標注結果匯出為各種 ML 訓練框架所需格式。")
+    _help.render_help_button("module_014", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

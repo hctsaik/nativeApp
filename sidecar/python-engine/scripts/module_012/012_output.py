@@ -56,6 +56,10 @@ _AI_CFG_SPEC = _ilu.spec_from_file_location(
 _ai_cfg = _ilu.module_from_spec(_AI_CFG_SPEC)
 _AI_CFG_SPEC.loader.exec_module(_ai_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 # 016_process 是 lazy-loaded，只在按鈕按下時才 import，避免每次 rerun 重載
 
 
@@ -919,6 +923,7 @@ def _check_pending_reload() -> bool:
 
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_012", "output")
     # 若 module_019 已下載新資料但 module_010 還沒重新載入，顯示警告並鎖定標注入口
     if _check_pending_reload():
         st.error(
@@ -1130,6 +1135,14 @@ def render_output(result: dict) -> None:
             key="m012_clf_filter",
         )
 
+        # AI 信心度篩選
+        ai_conf_filter = st.selectbox(
+            "AI 信心度",
+            ["全部", "🤖 低信心度 AI 標注"],
+            label_visibility="collapsed",
+            key="m012_ai_conf_filter",
+        )
+
         # 套用篩選
         visible = items
         if filter_opt == "⏳ 待標注":
@@ -1140,11 +1153,20 @@ def render_output(result: dict) -> None:
             visible = [it for it in visible if not classifications.get(it.get("item_id", ""))]
         elif clf_filter != "全部分類":
             visible = [it for it in visible if classifications.get(it.get("item_id", "")) == clf_filter]
+        if ai_conf_filter == "🤖 低信心度 AI 標注":
+            def _low_conf(it: dict) -> bool:
+                try:
+                    meta = json.loads(it.get("metadata") or "{}")
+                    mc = meta.get("max_conf", 0.0)
+                    return 0 < mc < 0.5
+                except Exception:
+                    return False
+            visible = [it for it in visible if _low_conf(it)]
         if search_q:
             visible = [it for it in visible if search_q in Path(it.get("file_path", "")).name.lower()]
 
         # 篩選切換時重設頁碼
-        _filter_key = (filter_opt, clf_filter, search_q)
+        _filter_key = (filter_opt, clf_filter, search_q, ai_conf_filter)
         if st.session_state.get("m012_prev_filter") != _filter_key:
             st.session_state["m012_page"]        = 0
             st.session_state["m012_prev_filter"] = _filter_key

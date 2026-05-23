@@ -10,6 +10,10 @@ _cfg_spec = importlib.util.spec_from_file_location("_016_config", _HERE / "_conf
 _cfg = importlib.util.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = importlib.util.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = importlib.util.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def _show_progress_panel() -> bool:
     """Read progress file and render live progress. Returns True if job is running."""
@@ -51,6 +55,7 @@ def _show_progress_panel() -> bool:
 
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_016", "output")
     mode = result.get("mode", "idle")
 
     # 優先顯示 live 進度（mode=idle 表示上一次 result 還沒更新）

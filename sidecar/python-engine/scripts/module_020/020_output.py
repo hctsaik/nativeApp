@@ -15,6 +15,10 @@ _proc_spec = _ilu.spec_from_file_location("_020_process", _HERE / "020_process.p
 _proc = _ilu.module_from_spec(_proc_spec)
 _proc_spec.loader.exec_module(_proc)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def _status_badge(status: str) -> str:
     return {"accepted": "✅ 已接受", "pending": "⏳ 處理中", "failed": "❌ 失敗"}.get(status, status)
@@ -34,6 +38,7 @@ def _do_query(params: dict, page: int) -> dict:
 
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_020", "output")
     mode = result.get("mode", "idle")
 
     # ── 下載完成結果（由 EXECUTE 觸發後寫入 session）────────────────────────────
