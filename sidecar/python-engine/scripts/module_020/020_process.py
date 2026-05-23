@@ -89,15 +89,15 @@ def list_submissions(params: dict) -> dict:
 
     if not service_url:
         return {"mode": "error", "error": "未填寫 Service URL", "total": 0, "items": []}
-    if not system_name:
-        return {"mode": "error", "error": "請選擇系統名稱", "total": 0, "items": []}
 
     qs: dict[str, str] = {
-        "nt_account": nt_account,
-        "system_name": system_name,
         "page": str(page),
         "page_size": str(page_size),
     }
+    if nt_account:
+        qs["nt_account"] = nt_account
+    if system_name:
+        qs["system_name"] = system_name
     if data_type:
         qs["data_type"] = data_type
     if date_from:

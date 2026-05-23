@@ -334,6 +334,15 @@ class SQLiteToolAdapter(ToolAdapter):
             except Exception:
                 pass
 
+            # migration: rename module_020 label to Download
+            try:
+                connection.execute(
+                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
+                    ("\U0001f4e5 Download", "annotation_workflow", "module_020"),
+                )
+            except Exception:
+                pass
+
             # migration: insert module_020 (Upload Archive) at tab_order=4
             try:
                 exists = connection.execute(
@@ -355,7 +364,7 @@ class SQLiteToolAdapter(ToolAdapter):
                         "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
                         " VALUES (?,?,?,?)",
                         ("annotation_workflow", 4, "module_020",
-                         "\U0001f5c2️ 我的上傳記錄"),
+                         "\U0001f4e5 Download"),
                     )
             except Exception:
                 pass

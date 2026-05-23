@@ -168,13 +168,4 @@ def render_input() -> dict:
         _u = params.get("api_url", "").strip()
         params["manifest_name"] = _urlparse(_u).hostname or "" if _u else ""
 
-    # ── 跳過預覽選項（預設 True；不存 config，session reset 自動回 True） ────
-    if "m010_skip_preview" not in st.session_state:
-        st.session_state["m010_skip_preview"] = True
-    skip_preview = st.checkbox(
-        "執行後直接前往 Annotation Session（跳過資料預覽）",
-        key="m010_skip_preview",
-    )
-    params["skip_preview"] = skip_preview
-
     return params

@@ -79,9 +79,37 @@ def test_list_submissions_error_on_missing_service_url(tmp_path, monkeypatch):
     monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path / "cim_log"))
     proc = _load(_HERE / "020_process.py", "_020_proc_no_url")
 
-    result = proc.list_submissions({"service_url": "", "nt_account": "X", "system_name": "iWISC"})
+    result = proc.list_submissions({"service_url": "", "nt_account": "X", "system_name": ""})
     assert result["mode"] == "error"
     assert result["total"] == 0
+
+
+def test_list_submissions_omits_nt_account_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path / "cim_log"))
+    proc = _load(_HERE / "020_process.py", "_020_proc_no_nt")
+
+    captured = []
+
+    def mock_get_json(url, timeout=15):
+        captured.append(url)
+        return {"total": 0, "page": 1, "page_size": 20, "items": []}
+
+    proc._get_json = mock_get_json
+
+    proc.list_submissions({
+        "service_url": "http://svc",
+        "nt_account": "",
+        "system_name": "",
+        "data_type": "",
+        "date_from": "2026-04-01",
+        "date_to": "2026-05-01",
+        "page": 1,
+        "page_size": 20,
+    })
+
+    url = captured[0]
+    assert "nt_account" not in url
+    assert "system_name" not in url
 
 
 def test_download_writes_zip_and_extracts(tmp_path, monkeypatch):
