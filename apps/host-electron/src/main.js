@@ -382,6 +382,10 @@ ipcMain.handle("stop-tool", async () => {
   return requestJson("POST", "/tools/stop");
 });
 
+ipcMain.handle("start-sheet-tab", async (_event, pluginId) => {
+  return requestJson("POST", `/tools/active/sheet-tab/${encodeURIComponent(pluginId)}/start`);
+});
+
 ipcMain.handle("get-tool-status", async () => {
   return requestJson("GET", "/tools/active/status");
 });

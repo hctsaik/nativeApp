@@ -80,7 +80,8 @@ def _get_image_size(file_path: str) -> tuple[int, int]:
 # ─── YOLO 推論 ────────────────────────────────────────────────────────────────
 
 def _run_yolo(items: list[dict], model_path: str,
-              conf: float, overwrite: bool) -> dict:
+              conf: float, overwrite: bool,
+              progress_cb=None) -> dict:
     try:
         from ultralytics import YOLO
     except ImportError:
@@ -127,6 +128,9 @@ def _run_yolo(items: list[dict], model_path: str,
             errors += 1
             item_results.append({"file": Path(fp).name, "status": "error", "detail": str(exc)})
 
+        if progress_cb:
+            progress_cb(ok + skipped + errors, Path(fp).name, ok, skipped, errors)
+
     return {"ok": ok, "skipped": skipped, "errors": errors, "item_results": item_results}
 
 
@@ -134,7 +138,7 @@ def _run_yolo(items: list[dict], model_path: str,
 
 def _run_classifier(items: list[dict], model_path: str,
                     conf: float, overwrite: bool,
-                    manifest_id: str) -> dict:
+                    manifest_id: str, progress_cb=None) -> dict:
     """
     torchvision / timm 分類模型推論。
     模型需為標準 state_dict（含 class_names 或 labels 屬性），或附帶同名 .json 標籤檔。
@@ -255,6 +259,9 @@ def _run_classifier(items: list[dict], model_path: str,
             errors += 1
             item_results.append({"file": Path(fp).name, "status": "error", "detail": str(exc)})
 
+        if progress_cb:
+            progress_cb(ok + skipped + errors, Path(fp).name, ok, skipped, errors)
+
     # 寫回分類結果
     if classifications:
         clf_path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,16 +305,32 @@ def execute_logic(params: dict) -> dict:
         return {**_base, "mode": "error", "error": f"找不到 Manifest：{manifest_id}"}
 
     items = _mdb.get_manifest_items(db_path, manifest_id)
-    _base["total_items"] = len(items)
+    total = len(items)
+    _base["total_items"] = total
+
+    started_at = _base["started_at"]
+
+    def _progress_cb(done: int, current: str, ok: int, skipped: int, errors: int) -> None:
+        _cfg.write_progress(done, total, current, ok, skipped, errors,
+                            started_at, running=True)
+
+    _cfg.write_progress(0, total, "", 0, 0, 0, started_at, running=True)
 
     if model_type == "yolo":
-        stats = _run_yolo(items, model_path, conf, overwrite)
+        stats = _run_yolo(items, model_path, conf, overwrite, progress_cb=_progress_cb)
     else:
-        stats = _run_classifier(items, model_path, conf, overwrite, manifest_id)
+        stats = _run_classifier(items, model_path, conf, overwrite, manifest_id,
+                                progress_cb=_progress_cb)
 
     if "error_detail" in stats:
+        _cfg.write_progress(0, total, "", 0, 0, 0, started_at, running=False)
         return {**_base, "mode": "error", "error": stats["error_detail"]}
 
+    _cfg.write_progress(
+        stats["ok"] + stats["skipped"] + stats["errors"], total, "",
+        stats["ok"], stats["skipped"], stats["errors"],
+        started_at, running=False,
+    )
     return {
         **_base,
         "mode": "done",

@@ -52,6 +52,7 @@ class SheetTabInfo(BaseModel):
     output_url: str
     input_port: int
     output_port: int
+    ready: bool = True
 
 
 class ToolStartResponse(BaseModel):
@@ -495,8 +496,12 @@ class ToolProcessManager:
         self._external_run_id: Optional[str] = None
         self._external_started_at: Optional[float] = None
         self._external_last_probe: Optional[dict] = None
-        self._sheet_processes: list[tuple[subprocess.Popen, subprocess.Popen]] = []
+        self._sheet_processes: dict[str, tuple[subprocess.Popen, subprocess.Popen]] = {}
         self._sheet_tab_info: list[dict] = []
+        # For lazy tab start: stores the ToolDefinition + scripts needed to spawn remaining tabs
+        self._sheet_tool_def: Optional["ToolDefinition"] = None
+        self._sheet_input_script: Optional[Path] = None
+        self._sheet_output_script: Optional[Path] = None
         self._tool_id: Optional[str] = None
 
     def _make_env(self, tool: ToolDefinition, plugin_id: str = "") -> dict[str, str]:
@@ -515,6 +520,12 @@ class ToolProcessManager:
         if plugin_id:
             env["CIM_PLUGIN_ID"] = plugin_id
         env["CIM_TOOLS_DB"] = str(ROOT_DIR / "config" / "tools.sqlite")
+        # Inject connector.yaml path so modules can call ConnectorFactory.build()
+        # without hard-coding paths.  Each plugin may optionally ship a connector.yaml
+        # in its script directory; if absent the factory falls back to LocalFileConnector.
+        if plugin_id:
+            connector_yaml = ROOT_DIR / "scripts" / plugin_id / "connector.yaml"
+            env["CIM_CONNECTOR_CONFIG"] = str(connector_yaml)
         # Inject connector credentials from secrets file (never stored in DB or YAML)
         secrets_path = self._log_dir / "secrets" / "connector_creds.json"
         if secrets_path.exists():
@@ -930,7 +941,66 @@ class ToolProcessManager:
             category=_derive_category(tool.tool_id),
         )
 
+    def _start_one_sheet_tab(self, plugin_id: str) -> dict:
+        """Spawn and wait for a single sheet tab's input+output processes.
+
+        Thread-safe and idempotent. If the tab is already ready or already being
+        spawned by another thread, waits for the ports and returns the info.
+        Raises RuntimeError if processes don't become ready in time.
+        """
+        with self._lock:
+            tab = next((t for t in self._sheet_tab_info if t["plugin_id"] == plugin_id), None)
+            if tab is None:
+                raise KeyError(f"Unknown sheet tab: {plugin_id}")
+            if tab.get("ready"):
+                return dict(tab)
+
+            in_port = tab["input_port"]
+            out_port = tab["output_port"]
+
+            # Only spawn if not already spawned by another thread
+            if plugin_id not in self._sheet_processes:
+                tool = self._sheet_tool_def
+                input_script = self._sheet_input_script
+                output_script = self._sheet_output_script
+                if tool is None or input_script is None or output_script is None:
+                    raise RuntimeError("Sheet tool definition not available for lazy start")
+                in_proc = self._spawn(input_script, tool, in_port, "input", plugin_id)
+                out_proc = self._spawn(output_script, tool, out_port, "output", plugin_id)
+                self._sheet_processes[plugin_id] = (in_proc, out_proc)
+
+        # Wait outside the lock so other threads are not blocked
+        if not wait_for_port(in_port):
+            raise RuntimeError(f"Sheet tab {plugin_id} input did not become ready in time")
+        if not wait_for_port(out_port):
+            raise RuntimeError(f"Sheet tab {plugin_id} output did not become ready in time")
+
+        with self._lock:
+            tab["input_url"] = f"http://127.0.0.1:{in_port}"
+            tab["output_url"] = f"http://127.0.0.1:{out_port}"
+            tab["ready"] = True
+            return dict(tab)
+
+    def _prewarm_remaining_tabs(self) -> None:
+        """Background thread: spawn remaining (not-ready) tabs one by one, 800ms apart."""
+        import threading as _threading
+        import time as _time
+
+        for tab in list(self._sheet_tab_info):
+            if tab.get("ready"):
+                continue
+            # Stop if manager has been reset (sheet stopped)
+            if self._tool_id is None:
+                return
+            try:
+                self._start_one_sheet_tab(tab["plugin_id"])
+            except Exception as exc:
+                logging.warning("Pre-warm tab %s failed: %s", tab["plugin_id"], exc)
+            _time.sleep(0.8)
+
     def _start_sheet(self, tool: ToolDefinition) -> ToolStartResponse:
+        import threading as _threading
+
         sheet_id = tool.tool_id[len("sheet-"):]
         tabs = self._get_sheet_tabs(sheet_id)
         if not tabs:
@@ -942,45 +1012,42 @@ class ToolProcessManager:
         if not output_script.exists():
             raise FileNotFoundError(output_script)
 
+        # Pre-allocate ports for all tabs up-front so we can return complete URL list.
         used_ports: set[int] = set()
         tab_info: list[dict] = []
-
         for tab in tabs:
             plugin_id = tab["plugin_id"]
-            # Clear stale result files per tab
             (self._log_dir / f"sheet_{sheet_id}_{plugin_id}_result.json").unlink(missing_ok=True)
-
             in_port = find_free_port(exclude=used_ports)
             used_ports.add(in_port)
             out_port = find_free_port(exclude=used_ports)
             used_ports.add(out_port)
-
-            in_proc = self._spawn(input_script, tool, in_port, "input", plugin_id)
-            out_proc = self._spawn(output_script, tool, out_port, "output", plugin_id)
-            self._sheet_processes.append((in_proc, out_proc))
-
             tab_info.append({
                 "plugin_id": plugin_id,
                 "label": tab["label"],
                 "input_port": in_port,
                 "output_port": out_port,
-                "input_url": f"http://127.0.0.1:{in_port}",
-                "output_url": f"http://127.0.0.1:{out_port}",
+                "input_url": "",   # filled in once that tab is started
+                "output_url": "",
+                "ready": False,
             })
 
-        # Wait for all processes
-        for t in tab_info:
-            if not wait_for_port(t["input_port"]):
-                self.stop()
-                raise RuntimeError(f"Sheet tab {t['plugin_id']} input did not become ready in time")
-            if not wait_for_port(t["output_port"]):
-                self.stop()
-                raise RuntimeError(f"Sheet tab {t['plugin_id']} output did not become ready in time")
-
+        # Persist tab definitions for lazy/pre-warm spawning
         self._sheet_tab_info = tab_info
+        self._sheet_tool_def = tool
+        self._sheet_input_script = input_script
+        self._sheet_output_script = output_script
         self._tool_id = tool.tool_id
 
-        first = tab_info[0]
+        # Start only the first tab now, wait for it
+        first_pid = tab_info[0]["plugin_id"]
+        first = self._start_one_sheet_tab(first_pid)
+
+        # Background-spawn remaining tabs (one every 800ms) without blocking
+        if len(tab_info) > 1:
+            t = _threading.Thread(target=self._prewarm_remaining_tabs, daemon=True)
+            t.start()
+
         return ToolStartResponse(
             tool_id=tool.tool_id,
             input_url=first["input_url"],
@@ -1010,11 +1077,14 @@ class ToolProcessManager:
             if self._output_process:
                 _terminate_process(self._output_process, f"{self._tool_id}-output")
                 self._output_process = None
-            for i, (in_p, out_p) in enumerate(self._sheet_processes):
-                _terminate_process(in_p, f"{self._tool_id}-sheet-{i}-input")
-                _terminate_process(out_p, f"{self._tool_id}-sheet-{i}-output")
-            self._sheet_processes = []
+            for pid, (in_p, out_p) in self._sheet_processes.items():
+                _terminate_process(in_p, f"{self._tool_id}-sheet-{pid}-input")
+                _terminate_process(out_p, f"{self._tool_id}-sheet-{pid}-output")
+            self._sheet_processes = {}
             self._sheet_tab_info = []
+            self._sheet_tool_def = None
+            self._sheet_input_script = None
+            self._sheet_output_script = None
             self._tool_id = None
 
 
@@ -1193,20 +1263,29 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
                 "ready_file": str(manager._external_ready_file) if manager._external_ready_file else None,
             }
 
-        # Sheet tool: report per-tab result mtimes
+        # Sheet tool: report per-tab result mtimes and ready state
         if manager._sheet_tab_info:
             sheet_id = tool_id[len("sheet-"):]
             tab_mtimes: dict[str, float] = {}
+            tab_ready: dict[str, bool] = {}
             all_alive = True
-            for i, (tab, (in_p, out_p)) in enumerate(zip(manager._sheet_tab_info, manager._sheet_processes)):
+            for tab in manager._sheet_tab_info:
                 pid = tab["plugin_id"]
+                tab_ready[pid] = bool(tab.get("ready", False))
                 rf = manager._log_dir / f"sheet_{sheet_id}_{pid}_result.json"
                 try:
                     tab_mtimes[pid] = rf.stat().st_mtime
                 except FileNotFoundError:
                     tab_mtimes[pid] = -1
-                if in_p.poll() is not None or out_p.poll() is not None:
-                    all_alive = False
+                procs = manager._sheet_processes.get(pid)
+                if procs is not None:
+                    in_p, out_p = procs
+                    if in_p.poll() is not None or out_p.poll() is not None:
+                        all_alive = False
+            tab_urls = {
+                t["plugin_id"]: {"input_url": t["input_url"], "output_url": t["output_url"]}
+                for t in manager._sheet_tab_info if t.get("ready")
+            }
             return {
                 "active": True,
                 "tool_id": tool_id,
@@ -1214,6 +1293,8 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
                 "output_alive": all_alive,
                 "result_mtime": -1,
                 "sheet_tab_mtimes": tab_mtimes,
+                "sheet_tab_ready": tab_ready,
+                "sheet_tab_urls": tab_urls,
             }
 
         # Regular tool
@@ -1237,6 +1318,26 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
             "output_alive": output_alive,
             "result_mtime": result_mtime,
         }
+
+    @app.post("/tools/active/sheet-tab/{plugin_id}/start")
+    def start_sheet_tab(plugin_id: str) -> dict:
+        """Start a single sheet tab on-demand (lazy / pre-warm fallback)."""
+        if not manager._sheet_tab_info:
+            raise HTTPException(status_code=409, detail="No sheet tool is currently active")
+        try:
+            tab = manager._start_one_sheet_tab(plugin_id)
+            return {
+                "plugin_id": tab["plugin_id"],
+                "input_url": tab["input_url"],
+                "output_url": tab["output_url"],
+                "input_port": tab["input_port"],
+                "output_port": tab["output_port"],
+                "ready": True,
+            }
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Tab '{plugin_id}' not found in active sheet")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @app.post("/tools/stop")
     def stop_tool() -> dict[str, str]:

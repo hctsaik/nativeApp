@@ -1,4 +1,7 @@
-# module_015 — Dashboard（標注進度統計）
+# module_015 — Dashboard（已合併至 module_017）
+
+> ⚠️ **已廢棄**：module_015 的所有功能已合併至 [module_017 — 管理中心](module_017.md)（2026-05-23）。
+> `sheet.yaml` 已移除此 tab；程式碼保留但不再被啟動。
 
 > 最後更新：2026-05-23
 

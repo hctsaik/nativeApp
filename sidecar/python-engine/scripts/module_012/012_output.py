@@ -16,10 +16,19 @@ import base64
 import importlib.util as _ilu
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stderr,
+)
+_log = logging.getLogger("m012_output")
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -38,6 +47,98 @@ _mdb_spec = _ilu.spec_from_file_location(
 )
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
+
+# ─── AI Pre-label helpers ─────────────────────────────────────────────────────
+
+_AI_CFG_SPEC = _ilu.spec_from_file_location(
+    "_016_config", _HERE.parent / "module_016" / "_config.py"
+)
+_ai_cfg = _ilu.module_from_spec(_AI_CFG_SPEC)
+_AI_CFG_SPEC.loader.exec_module(_ai_cfg)
+
+# 016_process 是 lazy-loaded，只在按鈕按下時才 import，避免每次 rerun 重載
+
+
+@st.cache_resource(
+    show_spinner="🤖 載入 YOLO 模型中…首次約需 10–30 秒，之後即時生效。請稍候。"
+)
+def _get_yolo_model(model_path: str):
+    """Cache YOLO model by path — loads once per session."""
+    from ultralytics import YOLO
+    return YOLO(model_path)
+
+
+def _run_ai_items(items: list[dict], model_path: str, model_type: str,
+                  conf: float, overwrite: bool,
+                  progress_placeholder=None) -> dict:
+    """Run YOLO on given items inline. YOLO model is cached after first load."""
+    total = len(items)
+    ok = skipped = errors = detected = 0
+    model_class_names: list[str] = []
+
+    if model_type == "yolo":
+        try:
+            if progress_placeholder is not None:
+                progress_placeholder.progress(0.0, text="🤖 載入 YOLO 模型中…首次約需 10–30 秒，請稍候。")
+            model = _get_yolo_model(model_path)
+            model_class_names = list(model.names.values()) if hasattr(model, "names") else []
+        except Exception as exc:
+            return {"ok": 0, "skipped": 0, "errors": total, "detected": 0,
+                    "error_detail": f"模型載入失敗：{exc}"}
+
+        for it in items:
+            fp = it.get("file_path", "")
+            if not fp or not Path(fp).exists():
+                errors += 1
+            else:
+                ann_path = Path(fp).with_suffix(".json")
+                if ann_path.exists() and not overwrite:
+                    skipped += 1
+                else:
+                    try:
+                        results = model(fp, conf=conf, verbose=False)
+                        r = results[0]
+                        img_w, img_h = int(r.orig_shape[1]), int(r.orig_shape[0])
+                        shapes = []
+                        for box in r.boxes:
+                            x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+                            cls_id = int(box.cls[0])
+                            label = model.names.get(cls_id, str(cls_id))
+                            shapes.append({
+                                "label": label,
+                                "score": round(float(box.conf[0]), 4),
+                                "points": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+                                "group_id": None, "description": "",
+                                "difficult": False, "shape_type": "rectangle", "flags": {},
+                            })
+                        detected += len(shapes)
+                        ann_data = {
+                            "version": "1.0.0", "flags": {}, "shapes": shapes,
+                            "imagePath": Path(fp).name, "imageData": None,
+                            "imageHeight": img_h, "imageWidth": img_w,
+                        }
+                        ann_path.write_text(
+                            json.dumps(ann_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        ok += 1
+                    except Exception:
+                        errors += 1
+
+            if progress_placeholder is not None:
+                done = ok + skipped + errors
+                ratio = done / total if total > 0 else 0
+                progress_placeholder.progress(
+                    ratio,
+                    text=f"{done}/{total}　✅{ok}　⏭️{skipped}　❌{errors}　— {Path(fp).name if fp else '?'}",
+                )
+    else:
+        return {"ok": 0, "skipped": 0, "errors": 0, "detected": 0,
+                "error_detail": "Classifier 模式請至 AI Pre-labeling 頁執行"}
+
+    return {"ok": ok, "skipped": skipped, "errors": errors,
+            "detected": detected, "model_class_names": model_class_names}
+
 
 def _post_message(msg_type: str, payload: dict) -> None:
     import json as _json
@@ -385,7 +486,10 @@ def _right_panel_img(fp: str, enhance: bool, item_id: str = "") -> None:
 
 def _draw_annotations(img_path: str, label_data: dict, enhance: bool = False) -> bytes:
     from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+    _t0 = time.perf_counter()
     img = ImageOps.exif_transpose(Image.open(img_path)).convert("RGB")
+    orig_w, orig_h = img.size
+    _t_open = time.perf_counter()
     if enhance:
         img = ImageEnhance.Contrast(img).enhance(2.2)
         img = ImageEnhance.Color(img).enhance(1.8)
@@ -413,9 +517,53 @@ def _draw_annotations(img_path: str, label_data: dict, enhance: bool = False) ->
             draw.polygon(flat, outline=c)
             draw.text((flat[0][0] + 2, flat[0][1] - fs - 2), label, fill=c, font=font)
 
+    _t_draw = time.perf_counter()
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    return buf.getvalue()
+    _t_enc = time.perf_counter()
+    result = buf.getvalue()
+    _log.info(
+        "[draw_annotations] %s  orig=%dx%d  open=%.0fms draw=%.0fms png_encode=%.0fms  output=%.1fKB",
+        Path(img_path).name, orig_w, orig_h,
+        (_t_open - _t0) * 1000,
+        (_t_draw - _t_open) * 1000,
+        (_t_enc - _t_draw) * 1000,
+        len(result) / 1024,
+    )
+    return result
+
+
+@st.cache_data(show_spinner=False, max_entries=200)
+def _cached_ann_image(img_path: str, ann_path: str, ann_mtime: float, enhance: bool) -> bytes | None:
+    """標注結果大圖，以 (img_path, ann_path, ann_mtime, enhance) 為 cache key。
+    輸出限制在 1920×1440 JPEG，避免全解析度 PNG 造成大 WebSocket payload。
+    """
+    try:
+        from PIL import Image
+        _t0 = time.perf_counter()
+        label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
+        _t_json = time.perf_counter()
+        png_bytes = _draw_annotations(img_path, label_data, enhance=enhance)
+        _t_draw = time.perf_counter()
+        # 縮圖 + 轉 JPEG，大幅減少 WebSocket payload（PNG 全圖可達 5MB，JPEG 約 200-400KB）
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        img.thumbnail((1920, 1440), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        result = buf.getvalue()
+        _t_done = time.perf_counter()
+        _log.info(
+            "[cached_ann_image] %s  json=%.0fms draw=%.0fms jpeg_resize=%.0fms  total=%.0fms  output=%.1fKB",
+            Path(img_path).name,
+            (_t_json - _t0) * 1000,
+            (_t_draw - _t_json) * 1000,
+            (_t_done - _t_draw) * 1000,
+            (_t_done - _t0) * 1000,
+            len(result) / 1024,
+        )
+        return result
+    except Exception:
+        return None
 
 
 # ─── 縮圖編碼 ─────────────────────────────────────────────────────────────────
@@ -435,13 +583,36 @@ def _make_thumb(file_path: str) -> bytes | None:
 
 @st.cache_data(show_spinner=False, max_entries=500)
 def _make_ann_thumb(file_path: str, ann_path: str, ann_mtime: float = 0.0) -> bytes | None:
-    """標注結果縮圖（含框線），用於左欄列表。ann_mtime 作為快取 key 確保標注更新後失效。"""
+    """標注結果縮圖（含框線），用於左欄列表。
+    先縮圖到 120×90，再把座標等比縮小後畫框，避免對全解析度大圖做 PIL 操作。
+    """
     try:
+        from PIL import Image, ImageDraw, ImageOps
         label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-        ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
-        from PIL import Image
-        img = Image.open(io.BytesIO(ann_bytes))
+        img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
+        orig_w, orig_h = img.size
         img.thumbnail((120, 90), Image.LANCZOS)
+        thumb_w, thumb_h = img.size
+        sx = thumb_w / orig_w
+        sy = thumb_h / orig_h
+
+        draw = ImageDraw.Draw(img)
+        colour_map: dict[str, tuple] = {}
+        for shape in label_data.get("shapes", []):
+            label      = shape.get("label", "?")
+            shape_type = shape.get("shape_type", "")
+            points     = shape.get("points", [])
+            if label not in colour_map:
+                colour_map[label] = _PALETTE[len(colour_map) % len(_PALETTE)]
+            c = colour_map[label]
+            if shape_type == "rectangle" and len(points) >= 2:
+                xs = [p[0] * sx for p in points]
+                ys = [p[1] * sy for p in points]
+                draw.rectangle([min(xs), min(ys), max(xs), max(ys)], outline=c, width=1)
+            elif shape_type == "polygon" and len(points) >= 3:
+                flat = [(p[0] * sx, p[1] * sy) for p in points]
+                draw.polygon(flat, outline=c)
+
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=75)
         return buf.getvalue()
@@ -456,9 +627,9 @@ def _make_preview(file_path: str) -> bytes | None:
     try:
         from PIL import Image, ImageOps
         img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
-        img.thumbnail((640, 480), Image.LANCZOS)
+        img.thumbnail((480, 360), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=88)
+        img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()
     except Exception:
         return None
@@ -466,30 +637,65 @@ def _make_preview(file_path: str) -> bytes | None:
 
 @st.cache_data(show_spinner=False, max_entries=500)
 def _make_ann_preview(file_path: str, ann_path: str, ann_mtime: float = 0.0) -> bytes | None:
-    """ann_mtime 作為快取 key 確保標注更新後失效。"""
+    """先縮圖到 480×360 再畫框，避免對全解析度大圖做 PIL 操作。"""
     try:
+        from PIL import Image, ImageDraw, ImageOps
         label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-        ann_bytes = _draw_annotations(file_path, label_data, enhance=False)
-        from PIL import Image
-        img = Image.open(io.BytesIO(ann_bytes)).convert("RGB")
-        img.thumbnail((640, 480), Image.LANCZOS)
+        img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
+        orig_w, orig_h = img.size
+        img.thumbnail((480, 360), Image.LANCZOS)
+        thumb_w, thumb_h = img.size
+        sx = thumb_w / orig_w
+        sy = thumb_h / orig_h
+
+        draw = ImageDraw.Draw(img)
+        colour_map: dict[str, tuple] = {}
+        for shape in label_data.get("shapes", []):
+            label      = shape.get("label", "?")
+            shape_type = shape.get("shape_type", "")
+            points     = shape.get("points", [])
+            if label not in colour_map:
+                colour_map[label] = _PALETTE[len(colour_map) % len(_PALETTE)]
+            c = colour_map[label]
+            if shape_type == "rectangle" and len(points) >= 2:
+                xs = [p[0] * sx for p in points]
+                ys = [p[1] * sy for p in points]
+                draw.rectangle([min(xs), min(ys), max(xs), max(ys)], outline=c, width=2)
+            elif shape_type == "polygon" and len(points) >= 3:
+                flat = [(p[0] * sx, p[1] * sy) for p in points]
+                draw.polygon(flat, outline=c)
+
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=88)
+        img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()
     except Exception:
         return None
 
 
-@st.cache_data(show_spinner=False, max_entries=100)
+@st.cache_data(show_spinner=False, max_entries=200)
 def _make_full_jpeg(file_path: str) -> bytes | None:
     """高解析度原圖（lightbox 用），上限 1920×1440，JPEG。"""
     try:
         from PIL import Image, ImageOps
+        _t0 = time.perf_counter()
         img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
+        orig_w, orig_h = img.size
+        _t_open = time.perf_counter()
         img.thumbnail((1920, 1440), Image.LANCZOS)
+        _t_thumb = time.perf_counter()
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=92)
-        return buf.getvalue()
+        _t_enc = time.perf_counter()
+        result = buf.getvalue()
+        _log.info(
+            "[make_full_jpeg] %s  orig=%dx%d  open=%.0fms thumb=%.0fms jpeg_encode=%.0fms  output=%.1fKB",
+            Path(file_path).name, orig_w, orig_h,
+            (_t_open - _t0) * 1000,
+            (_t_thumb - _t_open) * 1000,
+            (_t_enc - _t_thumb) * 1000,
+            len(result) / 1024,
+        )
+        return result
     except Exception:
         return None
 
@@ -571,17 +777,25 @@ def _thumb_html(thumb_bytes: bytes | None, img_path: str, tag: str,
     if not thumb_bytes:
         return '<span style="color:#94a3b8;font-size:10px">—</span>'
     b64 = base64.b64encode(thumb_bytes).decode()
-    p64 = base64.b64encode(preview_bytes or thumb_bytes).decode()
-    return (
-        f'<div class="m012-thumb" style="display:inline-block;text-align:center;position:relative;">'
+    img_tag = (
         f'<img src="data:image/jpeg;base64,{b64}"'
         f' style="max-height:80px;width:auto;border-radius:5px;'
         f'border:2px solid {border};display:block;cursor:zoom-in;" />'
-        f'<div class="m012-preview">'
-        f'<img src="data:image/jpeg;base64,{p64}" />'
-        f'<div style="margin-top:6px;font-size:12px;text-align:center;color:{color};'
-        f'font-family:sans-serif;">{tag}</div>'
-        f'</div>'
+    )
+    if preview_bytes:
+        p64 = base64.b64encode(preview_bytes).decode()
+        hover = (
+            f'<div class="m012-preview">'
+            f'<img src="data:image/jpeg;base64,{p64}" />'
+            f'<div style="margin-top:6px;font-size:12px;text-align:center;color:{color};'
+            f'font-family:sans-serif;">{tag}</div>'
+            f'</div>'
+        )
+    else:
+        hover = ""
+    return (
+        f'<div class="m012-thumb" style="display:inline-block;text-align:center;position:relative;">'
+        f'{img_tag}{hover}'
         f'</div>'
     )
 
@@ -736,7 +950,7 @@ def render_output(result: dict) -> None:
                 "labels": _fallback_cfg.get("annotation_labels", []),
                 "classification_labels": _fallback_cfg.get("classification_labels", []),
                 "autorefresh_enabled": _fallback_cfg.get("autorefresh_enabled", True),
-                "autorefresh_seconds": _fallback_cfg.get("autorefresh_seconds", 10),
+                "autorefresh_seconds": _fallback_cfg.get("autorefresh_seconds", 30),
             })
             mode = result.get("mode", "idle")
         if mode != "ready":
@@ -754,7 +968,7 @@ def render_output(result: dict) -> None:
     xany_work_dir          = result.get("xany_work_dir", "")
     cfg                    = _cfg.load_config()
     autorefresh_enabled    = bool(result.get("autorefresh_enabled", cfg.get("autorefresh_enabled", True)))
-    autorefresh_seconds    = int(result.get("autorefresh_seconds", cfg.get("autorefresh_seconds", 10)) or 10)
+    autorefresh_seconds    = int(result.get("autorefresh_seconds", cfg.get("autorefresh_seconds", 30)) or 30)
     autorefresh_seconds    = max(5, min(300, autorefresh_seconds))
 
     if autorefresh_enabled:
@@ -780,20 +994,20 @@ def render_output(result: dict) -> None:
     display: none;
     position: fixed;
     left: min(46vw, 760px);
-    top: 92px;
+    top: 80px;
     z-index: 2147483000;
-    max-width: min(46vw, 680px);
+    max-width: min(50vw, 820px);
     background: #fff;
     border: 1.5px solid #94a3b8;
     border-radius: 8px;
-    padding: 10px;
+    padding: 12px;
     box-shadow: 0 10px 36px rgba(15, 23, 42, .28);
     pointer-events: none;
 }
 .m012-preview img {
     display: block;
-    max-width: min(44vw, 640px);
-    max-height: 70vh;
+    max-width: min(48vw, 780px);
+    max-height: 75vh;
     width: auto;
     height: auto;
     border-radius: 4px;
@@ -955,6 +1169,47 @@ def render_output(result: dict) -> None:
                     if st.button("▶", key="m012_pg_next_top", disabled=(page == n_pages - 1),
                                  use_container_width=True):
                         st.session_state["m012_page"] = page + 1
+
+            # ─ 當頁 AI Pre-label ──────────────────────────────────
+            _ai_cfg_now = _ai_cfg.load_config()
+            _ai_model = _ai_cfg_now.get("model_path", "")
+            if _ai_model and Path(_ai_model).exists():
+                if st.button(
+                    f"⚡ AI label this page（{len(page_items)} 張）",
+                    key="m012_ai_page", use_container_width=True,
+                    help="對當頁所有圖片執行 AI 預標注",
+                ):
+                    _prog = st.progress(0.0, text="準備中…")
+                    _stats = _run_ai_items(
+                        list(page_items),
+                        _ai_model,
+                        _ai_cfg_now.get("model_type", "yolo"),
+                        float(_ai_cfg_now.get("conf_threshold", 0.25)),
+                        bool(_ai_cfg_now.get("overwrite_existing", False)),
+                        progress_placeholder=_prog,
+                    )
+                    _prog.empty()
+                    _det_b = _stats.get("detected", 0)
+                    _cls_b = _stats.get("model_class_names", [])
+                    if _det_b == 0 and _stats.get("ok", 0) > 0:
+                        st.warning(
+                            f"⚠️ 當頁 {_stats['ok']} 張圖均未偵測到任何物件。\n\n"
+                            f"此模型可偵測的類別：`{'、'.join(_cls_b[:10])}{'…' if len(_cls_b) > 10 else ''}`\n\n"
+                            "若您的圖片不屬於上述類別，請先手動標注再訓練專屬模型。"
+                            if _cls_b else
+                            f"⚠️ 當頁 {_stats['ok']} 張圖均未偵測到任何物件。"
+                            "此模型可能尚未針對您的資料集訓練。"
+                        )
+                    else:
+                        st.toast(
+                            f"完成 — 偵測 {_det_b} 個物件　✅{_stats['ok']} ⏭️{_stats['skipped']} ❌{_stats['errors']}",
+                            icon="⚡",
+                        )
+                    st.session_state.pop("items", None)
+                    st.session_state.pop("mtimes", None)
+                    st.rerun()
+            else:
+                st.caption("⚡ 請先在右欄 AI 設定選擇模型")
 
             for vis_i, item in enumerate(page_items):
                 fp          = item.get("file_path", "")
@@ -1162,12 +1417,113 @@ setTimeout(function() {
 
             st.divider()
 
+            # ── AI Pre-label 面板 ─────────────────────────────────────────
+            with st.expander("⚙️ AI 模型設定 / 單張預標注", expanded=False):
+                _ai_c = _ai_cfg.load_config()
+                _ai_type_key = _ai_c.get("model_type", "yolo")
+
+                # 模型路徑
+                if "_m012_ai_model_chosen" in st.session_state:
+                    st.session_state["m012_ai_model_path"] = st.session_state.pop("_m012_ai_model_chosen")
+                if "m012_ai_model_path" not in st.session_state:
+                    st.session_state["m012_ai_model_path"] = _ai_c.get("model_path", "")
+
+                _mp_col, _br_col = st.columns([5, 1])
+                with _mp_col:
+                    _ai_model_path = st.text_input(
+                        "模型路徑（.pt）", key="m012_ai_model_path",
+                        placeholder="C:/models/best.pt", label_visibility="collapsed",
+                    )
+                with _br_col:
+                    if st.button("📂", key="m012_ai_browse"):
+                        try:
+                            _chosen = subprocess.run(
+                                [sys.executable, "-c",
+                                 "import tkinter as tk; from tkinter import filedialog; "
+                                 "root=tk.Tk(); root.withdraw(); root.wm_attributes('-topmost',True); "
+                                 "p=filedialog.askopenfilename(title='選擇模型',filetypes=[('PyTorch model','*.pt'),('All','*.*')]); "
+                                 "root.destroy(); print(p or '',end='')"],
+                                capture_output=True, text=True, timeout=60,
+                            ).stdout.strip()
+                            if _chosen:
+                                st.session_state["_m012_ai_model_chosen"] = _chosen
+                                st.rerun()
+                        except Exception:
+                            pass
+
+                _ai_conf = st.slider(
+                    "Confidence", 0.01, 1.0,
+                    value=float(_ai_c.get("conf_threshold", 0.25)),
+                    step=0.05, format="%.2f", key="m012_ai_conf",
+                )
+                _ai_overwrite = st.checkbox(
+                    "覆蓋已有標注", value=bool(_ai_c.get("overwrite_existing", False)),
+                    key="m012_ai_overwrite",
+                )
+                st.caption(f"模式：{_ai_type_key.upper()}　｜　在 AI Pre-labeling 頁可切換 YOLO / Classifier")
+
+                # 只有在值有變動時才寫檔
+                _new_vals = {"model_path": _ai_model_path,
+                             "conf_threshold": _ai_conf,
+                             "overwrite_existing": _ai_overwrite}
+                if any(_ai_c.get(k) != v for k, v in _new_vals.items()):
+                    try:
+                        _ai_c.update(_new_vals)
+                        _ai_cfg.save_config(_ai_c)
+                    except Exception:
+                        pass
+
+                # 單張 AI 按鈕
+                if _ai_model_path and Path(_ai_model_path).exists() and fp and Path(fp).exists():
+                    if st.button("⚡ 對此圖執行 AI Pre-label", key="m012_ai_single",
+                                 use_container_width=True):
+                        _prog_s = st.progress(0.0, text="載入模型中…")
+                        _s = _run_ai_items(
+                            [item], _ai_model_path, _ai_type_key,
+                            _ai_conf, _ai_overwrite,
+                            progress_placeholder=_prog_s,
+                        )
+                        _prog_s.empty()
+                        if _s.get("error_detail"):
+                            st.error(_s["error_detail"])
+                        else:
+                            _det = _s.get("detected", 0)
+                            _cls = _s.get("model_class_names", [])
+                            if _det == 0 and _s.get("ok", 0) > 0:
+                                st.warning(
+                                    f"⚠️ 此圖未偵測到任何物件（confidence ≥ {_ai_conf:.2f}）。\n\n"
+                                    f"**可能原因：**\n"
+                                    f"- 此模型（`{Path(_ai_model_path).name}`）尚未針對您的資料集訓練，"
+                                    f"只能偵測它原本學過的類別。\n"
+                                    + (f"- 此模型可偵測的類別：`{'、'.join(_cls[:10])}{'…' if len(_cls) > 10 else ''}`\n" if _cls else "")
+                                    + f"- 若您的圖片內容不屬於上述類別，模型不會有輸出。\n\n"
+                                    f"**建議：** 使用「🖊 標注工具」手動標注幾張後，再透過 Training 頁訓練專屬模型。"
+                                )
+                            else:
+                                st.toast(
+                                    f"偵測到 {_det} 個物件　✅{_s.get('ok',0)} ⏭️{_s.get('skipped',0)} ❌{_s.get('errors',0)}",
+                                    icon="⚡",
+                                )
+                        st.session_state.pop("items", None)
+                        st.session_state.pop("mtimes", None)
+                        st.rerun()
+                else:
+                    st.caption("請選擇模型檔案後才能推論")
+
+            st.divider()
+
             # 圖片顯示
+            _rp_t0 = time.perf_counter()
+            _rp_timing: dict[str, float] = {}
+            _rp_sizes: dict[str, int] = {}
+
             if not fp or not Path(fp).exists():
                 st.warning(f"找不到影像：{fp}")
             elif has_ann and ann_path:
                 try:
+                    _t = time.perf_counter()
                     label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
+                    _rp_timing["json_read"] = (time.perf_counter() - _t) * 1000
                     shapes = label_data.get("shapes", [])
                 except Exception:
                     label_data = {}
@@ -1177,16 +1533,30 @@ setTimeout(function() {
                     orig_c, ann_c = st.columns(2)
                     with orig_c:
                         st.caption("**原圖**（點擊放大）")
+                        _t = time.perf_counter()
                         orig_full = _make_full_jpeg(fp)
+                        _rp_timing["make_full_jpeg"] = (time.perf_counter() - _t) * 1000
                         if orig_full:
+                            _rp_sizes["orig_jpeg"] = len(orig_full)
+                            _t = time.perf_counter()
                             st.markdown(_zoomable_img_html(orig_full, "jpeg"), unsafe_allow_html=True)
+                            _rp_timing["render_orig_html"] = (time.perf_counter() - _t) * 1000
                         else:
                             st.image(fp, use_container_width=True)
                     with ann_c:
                         st.caption("**標注結果**（點擊放大）")
                         try:
-                            ann_bytes = _draw_annotations(fp, label_data, enhance=enhance)
-                            st.markdown(_zoomable_img_html(ann_bytes, "png"), unsafe_allow_html=True)
+                            _ann_mtime = Path(ann_path).stat().st_mtime if ann_path else 0.0
+                            _t = time.perf_counter()
+                            ann_bytes = _cached_ann_image(fp, ann_path, _ann_mtime, enhance)
+                            _rp_timing["cached_ann_image"] = (time.perf_counter() - _t) * 1000
+                            if ann_bytes:
+                                _rp_sizes["ann_png"] = len(ann_bytes)
+                                _t = time.perf_counter()
+                                st.markdown(_zoomable_img_html(ann_bytes, "jpeg"), unsafe_allow_html=True)
+                                _rp_timing["render_ann_html"] = (time.perf_counter() - _t) * 1000
+                            else:
+                                st.image(fp, use_container_width=True)
                         except Exception as e:
                             st.warning(f"畫框失敗：{e}")
                             st.image(fp, use_container_width=True)
@@ -1202,13 +1572,63 @@ setTimeout(function() {
                         ]
                         st.dataframe(rows, use_container_width=True, hide_index=True)
                 else:
-                    # ann_path 存在但 shapes 為空
+                    # ann_path 存在但 shapes 為空（可能是 AI 推論後未偵測到物件）
+                    _t = time.perf_counter()
                     _right_panel_img(fp, enhance, item_id=item_id)
-                    st.info("標注檔存在但尚無 shape，請以「🖊 標注工具」繼續標注。")
+                    _rp_timing["right_panel_img"] = (time.perf_counter() - _t) * 1000
+                    st.info("此圖尚無標注框。若剛執行過 AI Pre-label，表示模型在此圖未偵測到物件（可嘗試降低 Confidence 門檻）。如需手動標注，請使用「🖊 標注工具」。")
             else:
                 # 無標注
+                _t = time.perf_counter()
                 _right_panel_img(fp, enhance, item_id=item_id)
+                _rp_timing["right_panel_img"] = (time.perf_counter() - _t) * 1000
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
+
+            _rp_total = (time.perf_counter() - _rp_t0) * 1000
+            _rp_timing["total"] = _rp_total
+
+            # ── 效能診斷面板 ─────────────────────────────────────────────
+            _orig_kb = _rp_sizes.get("orig_jpeg", 0) / 1024
+            _ann_kb  = _rp_sizes.get("ann_png", 0) / 1024
+            _b64_kb  = (_rp_sizes.get("orig_jpeg", 0) + _rp_sizes.get("ann_png", 0)) * 4 / 3 / 1024
+            _log.info(
+                "[right_panel] %s  timing=%s  orig=%.1fKB ann=%.1fKB b64_payload=%.1fKB",
+                Path(fp).name if fp else "?",
+                {k: f"{v:.0f}ms" for k, v in _rp_timing.items()},
+                _orig_kb, _ann_kb, _b64_kb,
+            )
+            with st.expander(f"📊 效能診斷（總計 {_rp_total:.0f} ms）", expanded=(_rp_total > 500)):
+                _diag_rows = []
+                label_map = {
+                    "json_read":        "① 讀取標注 JSON",
+                    "make_full_jpeg":   "② 生成原圖 JPEG",
+                    "cached_ann_image": "③ 生成標注大圖（含畫框）",
+                    "render_orig_html": "④ 嵌入原圖 HTML",
+                    "render_ann_html":  "⑤ 嵌入標注 HTML",
+                    "right_panel_img":  "② 載入圖片",
+                }
+                for k, label in label_map.items():
+                    if k in _rp_timing:
+                        _diag_rows.append({"步驟": label, "耗時 (ms)": f"{_rp_timing[k]:.0f}"})
+                _diag_rows.append({"步驟": "合計", "耗時 (ms)": f"{_rp_total:.0f}"})
+                st.dataframe(_diag_rows, use_container_width=True, hide_index=True)
+                if _rp_sizes:
+                    note_parts = []
+                    if "orig_jpeg" in _rp_sizes:
+                        note_parts.append(f"原圖 JPEG {_orig_kb:.0f} KB")
+                    if "ann_png" in _rp_sizes:
+                        note_parts.append(f"標注 JPEG {_ann_kb:.0f} KB")
+                    if _b64_kb > 0:
+                        note_parts.append(f"base64 WebSocket payload ≈ {_b64_kb:.0f} KB")
+                    st.caption("　".join(note_parts))
+                    if _b64_kb > 800:
+                        st.warning(
+                            f"⚠️ WebSocket payload {_b64_kb:.0f} KB — 主要耗時在瀏覽器收資料 + decode base64，"
+                            "Python 端即使 cache hit 也會感覺慢。"
+                        )
+                    if _rp_timing.get("make_full_jpeg", 0) < 5 and _rp_timing.get("cached_ann_image", 0) < 5:
+                        st.success("✅ 快取命中（cache hit）— Python 計算極快，"
+                                   "若 UI 仍有延遲，瓶頸在 WebSocket 傳輸 + 瀏覽器 decode。")
 
             # ── 幽靈按鈕（最底部，JS 隱藏，鍵盤快捷鍵用） ───────────────────
             if st.button("← 上一張", key="m012_prev_btn"):

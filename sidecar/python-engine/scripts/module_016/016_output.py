@@ -1,12 +1,62 @@
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import streamlit as st
+
+_HERE = Path(__file__).resolve().parent
+_cfg_spec = importlib.util.spec_from_file_location("_016_config", _HERE / "_config.py")
+_cfg = importlib.util.module_from_spec(_cfg_spec)
+_cfg_spec.loader.exec_module(_cfg)
+
+
+def _show_progress_panel() -> bool:
+    """Read progress file and render live progress. Returns True if job is running."""
+    prog = _cfg.read_progress()
+    if prog is None:
+        return False
+
+    running: bool = prog.get("running", False)
+    done: int = prog.get("done", 0)
+    total: int = prog.get("total", 0)
+    ok: int = prog.get("ok", 0)
+    skipped: int = prog.get("skipped", 0)
+    errors: int = prog.get("errors", 0)
+    current: str = prog.get("current", "")
+    started_at: str = prog.get("started_at", "")
+
+    if running:
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=2000, key="m016_live_refresh")
+        except ImportError:
+            pass
+
+        st.subheader("⚙️ 推論進行中…")
+        ratio = done / total if total > 0 else 0
+        st.progress(ratio, text=f"{done} / {total} 張　（{ratio:.1%}）")
+
+        if current:
+            st.caption(f"正在處理：`{current}`")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("✅ 成功", ok)
+        c2.metric("⏭️ 跳過", skipped)
+        c3.metric("❌ 錯誤", errors)
+        st.caption(f"開始時間：{started_at}")
+        return True
+
+    return False
 
 
 def render_output(result: dict) -> None:
     mode = result.get("mode", "idle")
 
+    # 優先顯示 live 進度（mode=idle 表示上一次 result 還沒更新）
     if mode == "idle":
+        if _show_progress_panel():
+            return
         st.info(
             "選擇模型與參數後按「▶ 執行」。\n\n"
             "推論結果會直接寫成 X-AnyLabeling `.json` 檔案，"
@@ -17,6 +67,9 @@ def render_output(result: dict) -> None:
     if mode == "error":
         st.error(f"執行失敗：{result.get('error', '未知錯誤')}")
         return
+
+    # mode == "done" — 先確認是否還有 running 進度（極少發生，防呆）
+    _show_progress_panel()
 
     # ── 摘要 ──────────────────────────────────────────────────────────────────
     st.success("推論完成！")
@@ -52,7 +105,6 @@ def render_output(result: dict) -> None:
     if not item_results:
         return
 
-    # 統計各狀態數量
     status_counts: dict[str, int] = {}
     for it in item_results:
         s = it.get("status", "")
@@ -76,7 +128,6 @@ def render_output(result: dict) -> None:
         r for r in item_results if r.get("status") == selected_filter
     ]
 
-    # 分頁
     PAGE = 100
     n_pages = max(1, (len(filtered) + PAGE - 1) // PAGE)
     if "m016_page" not in st.session_state:

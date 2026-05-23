@@ -56,3 +56,33 @@ def get_shared_manifest_id() -> str:
         return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
     except Exception:
         return ""
+
+
+def get_progress_path() -> Path:
+    p = _CIM_LOG_DIR / "progress"
+    p.mkdir(parents=True, exist_ok=True)
+    return p / "m016_progress.json"
+
+
+def write_progress(done: int, total: int, current: str,
+                   ok: int, skipped: int, errors: int,
+                   started_at: str, running: bool) -> None:
+    try:
+        data = {
+            "done": done, "total": total, "current": current,
+            "ok": ok, "skipped": skipped, "errors": errors,
+            "started_at": started_at, "running": running,
+        }
+        _atomic_write(get_progress_path(), json.dumps(data))
+    except Exception:
+        pass
+
+
+def read_progress() -> dict | None:
+    p = get_progress_path()
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None

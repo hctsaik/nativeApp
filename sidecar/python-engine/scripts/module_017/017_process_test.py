@@ -248,3 +248,130 @@ def test_do_delete_clears_classification(tmp_path, monkeypatch):
     assert n == 1
     data = _read_ann(img)
     assert data["flags"]["classification"] == ""
+
+
+# ─── Dashboard 統計（合併自 module_015）────────────────────────────────────────
+
+def test_execute_logic_dashboard_stats(tmp_path, monkeypatch):
+    """execute_logic 應同時回傳 Dashboard 所需的統計欄位。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+    mdb = _load(_SHARED, "_mdb_017_dash")
+    proc = _load(_HERE / "017_process.py", "_017_proc_dash")
+
+    img1 = tmp_path / "img1.jpg"
+    img2 = tmp_path / "img2.jpg"
+    img1.write_bytes(b"img")
+    img2.write_bytes(b"img")
+    _write_ann(img1, [_shape("cat"), _shape("cat")])
+    # img2: 無標注
+
+    mid = "m017_dash"
+    _make_manifest(cim_log, mdb, mid, [
+        {"item_id": "i1", "file_path": str(img1), "width": 640, "height": 480},
+        {"item_id": "i2", "file_path": str(img2), "width": 640, "height": 480},
+    ])
+
+    result = proc.execute_logic({"manifest_id": mid})
+
+    assert result["total_items"] == 2
+    assert result["annotated_xany"] == 1
+    assert result["no_json_count"] == 1
+    assert result["empty_json_count"] == 0
+    assert result["label_counts"] == {"cat": 2}
+    assert result["shapes_stats"]["min"] == 2
+    assert result["shapes_stats"]["max"] == 2
+    assert result["shapes_stats"]["mean"] == 2.0
+    assert result["source_path"] == str(tmp_path)
+    assert result["last_annotation_at"] != ""
+    assert result["manifest_name"] == f"Test {mid}"
+
+
+def test_execute_logic_dashboard_classifications(tmp_path, monkeypatch):
+    """classified_count 與 annotated_no_class 應正確計算。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+    mdb = _load(_SHARED, "_mdb_017_clf")
+    proc = _load(_HERE / "017_process.py", "_017_proc_clf")
+
+    img1 = tmp_path / "img1.jpg"
+    img2 = tmp_path / "img2.jpg"
+    img1.write_bytes(b"img")
+    img2.write_bytes(b"img")
+    _write_ann(img1, [_shape("dog")])  # bbox 有，但沒分類
+    _write_ann(img2, [_shape("cat")])  # bbox + 分類
+
+    mid = "m017_clf"
+    _make_manifest(cim_log, mdb, mid, [
+        {"item_id": "i1", "file_path": str(img1), "width": 640, "height": 480},
+        {"item_id": "i2", "file_path": str(img2), "width": 640, "height": 480},
+    ])
+
+    clf_path = cim_log / "config" / f"module_012_classifications_{mid[:12]}.json"
+    clf_path.parent.mkdir(parents=True, exist_ok=True)
+    clf_path.write_text(json.dumps({"i2": "cat"}), encoding="utf-8")
+
+    result = proc.execute_logic({"manifest_id": mid})
+
+    assert result["classified_count"] == 1
+    assert result["classification_counts"] == {"cat": 1}
+    assert result["annotated_no_class"] == 1   # i1: bbox 有，分類無
+
+
+def test_execute_logic_dashboard_export_history(tmp_path, monkeypatch):
+    """export_count 與 export_history 應反映 manifest DB 的匯出記錄。"""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+    mdb = _load(_SHARED, "_mdb_017_exp")
+    proc = _load(_HERE / "017_process.py", "_017_proc_exp")
+
+    mid = "m017_exp"
+    db_path = cim_log / "db" / "manifest.sqlite"
+    mdb.init_db(db_path)
+    mdb.create_manifest(db_path, mid, "Export Test", "folder", {})
+
+    # 寫入兩筆匯出記錄
+    for i, fmt in enumerate(("COCO", "YOLO")):
+        mdb.create_export_record(db_path, f"run_{i}", mid, fmt, "/tmp/out", 10)
+
+    result = proc.execute_logic({"manifest_id": mid})
+
+    assert result["export_count"] == 2
+    assert len(result["export_history"]) == 2
+    formats = {e["export_format"] for e in result["export_history"]}
+    assert formats == {"COCO", "YOLO"}
+
+
+def test_scan_annotations_no_json(tmp_path, monkeypatch):
+    """_scan_annotations 在無 JSON 時應正確計 no_json。"""
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path / "cim_log"))
+    proc = _load(_HERE / "017_process.py", "_017_scan_a")
+    items = [
+        {"item_id": "i1", "file_path": str(tmp_path / "a.jpg")},
+        {"item_id": "i2", "file_path": str(tmp_path / "b.jpg")},
+    ]
+    r = proc._scan_annotations(items)
+    assert r["annotated"] == 0
+    assert r["no_json"] == 2
+    assert r["label_counts"] == {}
+    assert r["shapes_stats"] == {}
+
+
+def test_scan_annotations_shapes_stats(tmp_path, monkeypatch):
+    """_scan_annotations 應正確計算 min/max/mean/median。"""
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path / "cim_log"))
+    proc = _load(_HERE / "017_process.py", "_017_scan_b")
+
+    items = []
+    for i, n in enumerate([1, 3, 5]):
+        img = tmp_path / f"img{i}.jpg"
+        img.with_suffix(".json").write_text(json.dumps({
+            "shapes": [_shape("x")] * n
+        }), encoding="utf-8")
+        items.append({"item_id": f"i{i}", "file_path": str(img)})
+
+    r = proc._scan_annotations(items)
+    assert r["annotated"] == 3
+    assert r["shapes_stats"]["min"] == 1
+    assert r["shapes_stats"]["max"] == 5
+    assert r["shapes_stats"]["mean"] == 3.0

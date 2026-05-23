@@ -10,7 +10,9 @@ tabs:
     label: 🔄 Update
   - plugin_id: module_014
     label: 📤 Export
-  - plugin_id: module_015
-    label: 📊 Dashboard
   - plugin_id: module_016
     label: 🤖 AI Pre-labeling
+  - plugin_id: module_017
+    label: 📊 管理中心
+  - plugin_id: module_018
+    label: 🖼️ Review Gallery

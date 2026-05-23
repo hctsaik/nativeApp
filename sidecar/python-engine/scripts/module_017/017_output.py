@@ -17,45 +17,162 @@ def _load_process_mod():
 
 
 def _refresh(result: dict) -> dict:
-    """Re-scan labels from disk and update session_state cache."""
     mod = _load_process_mod()
     fresh = mod.execute_logic({"manifest_id": result.get("manifest_id", "")})
     st.session_state["m017_label_data"] = fresh
     return fresh
 
 
-def _get_label_data(result: dict) -> dict:
+def _get_data(result: dict) -> dict:
     cached = st.session_state.get("m017_label_data")
     if cached and cached.get("manifest_id") == result.get("manifest_id"):
         return cached
     return _refresh(result)
 
 
-def render_output(result: dict) -> None:
-    if not result or result.get("error"):
-        st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
-        if result and result.get("error"):
-            st.error(result["error"])
-        return
+# ── Dashboard helpers ─────────────────────────────────────────────────────────
 
-    manifest_id = result.get("manifest_id", "")
-    if not manifest_id:
-        st.warning("未選擇 Manifest。")
-        return
+def _pct(a: int, b: int) -> float:
+    return a / b if b else 0.0
 
-    data = _get_label_data(result)
+
+def _pct_str(a: int, b: int) -> str:
+    return f"{_pct(a, b) * 100:.1f}%"
+
+
+def _render_dashboard(data: dict) -> None:
+    total: int = data.get("total_items", 0)
+    annotated: int = data.get("annotated_xany", 0)
+    classified: int = data.get("classified_count", 0)
+    export_count: int = data.get("export_count", 0)
+    no_json: int = data.get("no_json_count", 0)
+    empty_json: int = data.get("empty_json_count", 0)
+    annotated_no_class: int = data.get("annotated_no_class", 0)
+    label_counts: dict = data.get("label_counts", {})
+    clf_counts: dict = data.get("classification_counts", {})
+    shapes_stats: dict = data.get("shapes_stats", {})
+    last_annotation_at: str = data.get("last_annotation_at", "")
+    export_history: list = data.get("export_history", [])
+    source_path: str = data.get("source_path", "")
+
+    # Manifest 標頭
+    st.subheader(f"📦 {data.get('manifest_name', '—')}")
+    meta_parts = []
+    if source_path:
+        meta_parts.append(f"📁 `{source_path}`")
+    if data.get("manifest_created_at"):
+        meta_parts.append(f"建立：{data['manifest_created_at']}")
+    if meta_parts:
+        st.caption("　｜　".join(meta_parts))
+
+    st.divider()
+
+    # 進度摘要
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("總圖數", total)
+    c2.metric("BBox 已標注", annotated, _pct_str(annotated, total))
+    c3.metric("已分類", classified, _pct_str(classified, total))
+    c4.metric("匯出次數", export_count)
+
+    if total > 0:
+        _, col_ann, col_clf, _ = st.columns(4)
+        with col_ann:
+            st.progress(_pct(annotated, total))
+        with col_clf:
+            st.progress(_pct(classified, total))
+
+    st.divider()
+
+    # 標注健康度
+    h1, h2, h3, h4 = st.columns(4)
+    with h1:
+        st.markdown("**最後標注時間**")
+        st.markdown(last_annotation_at if last_annotation_at else "—")
+    with h2:
+        st.markdown("**每圖平均框數**")
+        st.markdown(str(shapes_stats["mean"]) if shapes_stats else "—")
+    with h3:
+        st.markdown("**框數範圍**")
+        st.markdown(f"{shapes_stats['min']} – {shapes_stats['max']}" if shapes_stats else "—")
+    with h4:
+        st.markdown("**尚未標注**")
+        unannotated = no_json + empty_json
+        color = "red" if unannotated > 0 else "green"
+        st.markdown(f":{color}[**{unannotated} 張**]")
+
+    if annotated_no_class > 0 and clf_counts:
+        st.warning(
+            f"⚠️ **{annotated_no_class}** 張圖片已有 BBox 標注但尚未分類，"
+            "匯出 ImageFolder / CSV 時分類欄位會留空。"
+        )
+    if no_json > 0 and annotated == 0:
+        st.info(f"尚有 **{total}** 張圖片未開始標注，請切換到 **🏷️ Annotation** 頁籤。")
+    elif no_json > 0:
+        st.info(f"還有 **{no_json}** 張圖片尚未標注。")
+
+    st.divider()
+
+    # 標籤分布
+    col_bbox, col_clf = st.columns(2)
+    with col_bbox:
+        st.subheader("BBox 標籤分布")
+        if label_counts:
+            st.bar_chart(
+                dict(sorted(label_counts.items(), key=lambda x: -x[1])),
+                x_label="標籤", y_label="框數",
+            )
+            st.caption(f"共 {len(label_counts)} 種標籤，{sum(label_counts.values())} 個框")
+        else:
+            st.caption("無 BBox 標注資料")
+    with col_clf:
+        st.subheader("分類標籤分布")
+        if clf_counts:
+            st.bar_chart(
+                dict(sorted(clf_counts.items(), key=lambda x: -x[1])),
+                x_label="分類", y_label="張數",
+            )
+            st.caption(f"共 {len(clf_counts)} 種分類")
+        else:
+            st.caption("無分類資料")
+
+    st.divider()
+
+    # 匯出記錄
+    st.subheader("匯出記錄")
+    if export_history:
+        sorted_exports = sorted(export_history, key=lambda x: x.get("created_at", ""), reverse=True)
+        latest = sorted_exports[0]
+        st.markdown(
+            f"**最近一次**：`{latest.get('export_format', '')}` 　"
+            f"｜　{latest.get('item_count', 0)} 張　"
+            f"｜　{(latest.get('created_at') or '')[:19]}"
+        )
+        if latest.get("export_path"):
+            st.caption(f"📁 `{latest['export_path']}`")
+        if len(sorted_exports) > 1:
+            with st.expander(f"查看全部 {len(sorted_exports)} 筆記錄"):
+                st.dataframe(
+                    [{"格式": ex.get("export_format", ""), "數量": ex.get("item_count", 0),
+                      "時間": (ex.get("created_at") or "")[:19], "路徑": ex.get("export_path", "")}
+                     for ex in sorted_exports],
+                    use_container_width=True, hide_index=True,
+                )
+    else:
+        st.caption("尚無匯出記錄")
+
+
+# ── Label Manager ─────────────────────────────────────────────────────────────
+
+def _render_label_manager(manifest_id: str, data: dict) -> None:
     label_map: dict[str, list[str]] = data.get("label_map", {})
     near_dupes: list[tuple] = data.get("near_dupes", [])
 
-    st.subheader("🏷️ Label Manager")
-
-    # ── 摘要列 ────────────────────────────────────────────────────────────────
+    # 摘要列
     m1, m2 = st.columns(2)
     m1.metric("標籤種類", len(label_map))
-    total_files = sum(len(v) for v in label_map.values())
-    m2.metric("涉及檔案（含重複計算）", total_files)
+    m2.metric("涉及檔案（含重複計算）", sum(len(v) for v in label_map.values()))
 
-    # ── 近似重複警告 ────────────────────────────────────────────────────────────
+    # 近似重複警告
     if near_dupes:
         with st.expander(f"⚠️ 發現 {len(near_dupes)} 組疑似重複標籤（可能為拼寫錯誤）", expanded=True):
             for a, b, ratio in near_dupes:
@@ -70,9 +187,8 @@ def render_output(result: dict) -> None:
 
     st.divider()
 
-    # ── 標籤列表 + 個別操作 ────────────────────────────────────────────────────
+    # 標籤列表 + 個別操作
     st.markdown("#### 標籤清單")
-
     labels_sorted = sorted(label_map.keys())
 
     for lbl in labels_sorted:
@@ -82,19 +198,17 @@ def render_output(result: dict) -> None:
             row_cols[0].markdown(f"**`{lbl}`**")
             row_cols[1].caption(f"{len(files)} 個檔案")
 
-            rename_key = f"m017_rename_new_{lbl}"
             if row_cols[2].button("✏️ 改名", key=f"m017_btn_rename_{lbl}"):
                 st.session_state[f"m017_show_rename_{lbl}"] = True
 
             if row_cols[3].button("🗑️ 刪除", key=f"m017_btn_delete_{lbl}", type="secondary"):
                 st.session_state[f"m017_confirm_delete_{lbl}"] = True
 
-            # Rename inline form
             if st.session_state.get(f"m017_show_rename_{lbl}"):
                 with st.form(key=f"m017_form_rename_{lbl}"):
                     new_name = st.text_input(
                         f"將 `{lbl}` 改名為：",
-                        key=rename_key,
+                        key=f"m017_rename_new_{lbl}",
                         placeholder="輸入新標籤名稱",
                     )
                     fc1, fc2 = st.columns(2)
@@ -112,7 +226,6 @@ def render_output(result: dict) -> None:
                     st.session_state.pop(f"m017_show_rename_{lbl}", None)
                     st.rerun()
 
-            # Delete confirmation
             if st.session_state.get(f"m017_confirm_delete_{lbl}"):
                 st.warning(
                     f"確認刪除標籤 **`{lbl}`**？\n\n"
@@ -130,7 +243,7 @@ def render_output(result: dict) -> None:
                     st.session_state.pop(f"m017_confirm_delete_{lbl}", None)
                     st.rerun()
 
-    # ── 合併操作 ────────────────────────────────────────────────────────────────
+    # 合併操作
     st.divider()
     st.markdown("#### 合併標籤")
     st.caption("將多個來源標籤統一改名為同一個目標標籤")
@@ -161,13 +274,36 @@ def render_output(result: dict) -> None:
                 mod = _load_process_mod()
                 n = mod.do_merge({"manifest_id": manifest_id}, real_sources, target)
                 st.session_state.pop("m017_label_data", None)
-                st.success(
-                    f"已合併 {len(real_sources)} 個標籤 → `{target}`，共修改 {n} 個檔案。"
-                )
+                st.success(f"已合併 {len(real_sources)} 個標籤 → `{target}`，共修改 {n} 個檔案。")
                 st.rerun()
 
-    # ── 重新掃描按鈕 ──────────────────────────────────────────────────────────
+    # 重新掃描
     st.divider()
-    if st.button("🔄 重新掃描標籤", key="m017_rescan"):
+    if st.button("🔄 重新掃描", key="m017_rescan"):
         st.session_state.pop("m017_label_data", None)
         st.rerun()
+
+
+# ── 主進入點 ──────────────────────────────────────────────────────────────────
+
+def render_output(result: dict) -> None:
+    if not result or result.get("error"):
+        st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
+        if result and result.get("error"):
+            st.error(result["error"])
+        return
+
+    manifest_id = result.get("manifest_id", "")
+    if not manifest_id:
+        st.warning("未選擇 Manifest。")
+        return
+
+    data = _get_data(result)
+
+    tab_dash, tab_labels = st.tabs(["📊 統計總覽", "🏷️ 標籤管理"])
+
+    with tab_dash:
+        _render_dashboard(data)
+
+    with tab_labels:
+        _render_label_manager(manifest_id, data)

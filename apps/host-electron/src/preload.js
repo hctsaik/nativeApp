@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("cimHost", {
   },
   restartSidecar: () => ipcRenderer.invoke("restart-sidecar"),
   getToolStatus: () => ipcRenderer.invoke("get-tool-status"),
+  startSheetTab: (pluginId) => ipcRenderer.invoke("start-sheet-tab", pluginId),
   getRuntimeStatus: () => ipcRenderer.invoke("get-runtime-status"),
   getDiagnostics: () => ipcRenderer.invoke("get-diagnostics"),
   log: (level, message) => ipcRenderer.send("renderer-log", level, message)

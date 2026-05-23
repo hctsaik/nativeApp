@@ -46,7 +46,7 @@ def render_input() -> dict:
         st.warning("尚未建立任何 Manifest，請先執行 **010 - Data Feeder**。")
         return {"manifest_id": ""}
 
-    # 自動用 shared manifest
+    # 自動用 Data Feeder 最後選取的 manifest
     shared_id = _cfg.get_shared_manifest_id()
     manifests_list = list(manifests)
     selected = next(
@@ -54,7 +54,8 @@ def render_input() -> dict:
         manifests_list[0],
     )
     manifest_id = selected["manifest_id"]
-    st.info(f"📦 **{selected['name']}**　{selected.get('item_count', 0)} 張　｜　若要切換請回 Data Feeder")
+    total_items: int = selected.get("item_count", 0)
+    st.info(f"📦 **{selected['name']}**　{total_items} 張　｜　若要切換請回 Data Feeder")
 
     st.divider()
     cfg = _cfg.load_config()
@@ -125,6 +126,9 @@ def render_input() -> dict:
         key="m016_overwrite",
         help="預設跳過已有 .json 標注的圖片，只對新圖片推論。",
     )
+
+    if total_items > 0:
+        st.info(f"將對全部 **{total_items}** 張圖片推論。推論進度可在右側 Output 查看。")
 
     # 儲存設定
     try:

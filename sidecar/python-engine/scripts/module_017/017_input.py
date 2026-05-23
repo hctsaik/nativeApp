@@ -19,8 +19,8 @@ _mdb_spec.loader.exec_module(_mdb)
 
 
 def render_input() -> dict:
-    st.subheader("🏷️ Label Manager — 全域標籤管理")
-    st.caption("掃描、重新命名、合併、刪除 Manifest 內所有 X-AnyLabeling JSON 的標籤")
+    st.subheader("📊 管理中心")
+    st.caption("標注進度統計、標籤管理（改名 / 合併 / 刪除）")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

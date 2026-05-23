@@ -22,3 +22,17 @@ def get_shared_manifest_id() -> str:
         return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
     except Exception:
         return ""
+
+
+def _manifest_key(manifest_id: str) -> str:
+    return manifest_id[:12] or "default"
+
+
+def load_classifications(manifest_id: str) -> dict[str, str]:
+    p = _CIM_LOG_DIR / "config" / f"module_012_classifications_{_manifest_key(manifest_id)}.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}

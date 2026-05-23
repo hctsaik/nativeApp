@@ -15,4 +15,5 @@ streamlit-autorefresh
 pyyaml
 psutil
 sqlalchemy
+ultralytics
 

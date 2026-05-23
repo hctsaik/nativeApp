@@ -410,6 +410,26 @@ select {
   background: rgba(255,255,255,0.1);
 }
 
+.sheet-module-tab.tab-pending {
+  opacity: 0.55;
+}
+
+.tab-loading-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #60a5fa;
+  margin-left: 6px;
+  vertical-align: middle;
+  animation: tab-dot-pulse 1s ease-in-out infinite;
+}
+
+@keyframes tab-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
 /* ── Loading Overlay ─────────────────────────────────── */
 
 .loading-overlay {

@@ -192,20 +192,37 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
 
-function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab, onTabChange, isExecuting, isStarting, sheetOutputNonces = {} }) {
+function SheetLayout({
+  sheetTabs, activeSheetTabIdx, onSheetTabChange,
+  activeTab, onTabChange,
+  isExecuting, isStarting,
+  sheetOutputNonces = {},
+  tabStartingSet = new Set(),
+  visitedTabIndices = new Set([0]),
+}) {
+  const activeTab_ = sheetTabs[activeSheetTabIdx];
+  const activeTabStarting = activeTab_ ? tabStartingSet.has(activeTab_.plugin_id) : false;
+
   return (
     <div className="left-panel">
       {/* Sheet module tabs */}
       <div className="sheet-module-bar">
-        {sheetTabs.map((tab, i) => (
-          <button
-            key={tab.plugin_id}
-            className={`sheet-module-tab${i === activeSheetTabIdx ? " active" : ""}`}
-            onClick={() => onSheetTabChange(i)}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {sheetTabs.map((tab, i) => {
+          const isActive = i === activeSheetTabIdx;
+          const isStartingTab = tabStartingSet.has(tab.plugin_id);
+          const isNotReady = !tab.ready && !isStartingTab;
+          return (
+            <button
+              key={tab.plugin_id}
+              className={`sheet-module-tab${isActive ? " active" : ""}${isNotReady ? " tab-pending" : ""}`}
+              onClick={() => onSheetTabChange(i)}
+              title={isStartingTab ? "啟動中…" : isNotReady ? "尚未啟動" : tab.label}
+            >
+              {tab.label}
+              {isStartingTab && <span className="tab-loading-dot" />}
+            </button>
+          );
+        })}
       </div>
 
       {/* Input / Output sub-tabs */}
@@ -218,22 +235,25 @@ function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab
         </button>
       </div>
 
-      {/* Iframes: all tabs rendered, only active shown */}
+      {/* Iframes: lazy-mounted (only when visited) and only when tab is ready */}
       <div className="tab-content">
         {sheetTabs.map((tab, i) => {
+          const isActive = i === activeSheetTabIdx;
+          const hasBeenVisited = visitedTabIndices.has(i);
           const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
           const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
+          if (!hasBeenVisited || !tab.ready) return null;
           return (
             <React.Fragment key={tab.plugin_id}>
               <iframe
                 title={`${tab.plugin_id}-input`}
                 src={tab.input_url}
-                style={{ display: i === activeSheetTabIdx && activeTab === "input" ? "block" : "none" }}
+                style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
               />
               <iframe
                 title={`${tab.plugin_id}-output`}
                 src={outputSrc}
-                style={{ display: i === activeSheetTabIdx && activeTab === "output" ? "block" : "none" }}
+                style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
               />
             </React.Fragment>
           );
@@ -246,7 +266,13 @@ function SheetLayout({ sheetTabs, activeSheetTabIdx, onSheetTabChange, activeTab
           <span>套件載入中，請稍候…</span>
         </div>
       )}
-      {!isStarting && isExecuting && (
+      {!isStarting && activeTabStarting && (
+        <div className="loading-overlay">
+          <div className="loading-spinner" />
+          <span>頁籤啟動中，請稍候…</span>
+        </div>
+      )}
+      {!isStarting && !activeTabStarting && isExecuting && (
         <div className="loading-overlay">
           <div className="loading-spinner" />
           <span>執行中…</span>
@@ -327,6 +353,10 @@ function App() {
   const [sheetTabs, setSheetTabs] = useState([]);
   const [activeSheetTabIdx, setActiveSheetTabIdx] = useState(0);
   const [sheetOutputNonces, setSheetOutputNonces] = useState({});
+  // Lazy tab loading: tracks which tabs are currently being started by the frontend
+  const [tabStartingSet, setTabStartingSet] = useState(new Set());
+  // Tracks which tab indices have ever been visited (to mount iframes lazily)
+  const [visitedTabIndices, setVisitedTabIndices] = useState(new Set([0]));
   // Ref so the polling closure always sees the latest sheetTabs without restarting the interval
   const sheetTabsRef = useRef([]);
   useEffect(() => { sheetTabsRef.current = sheetTabs; }, [sheetTabs]);
@@ -403,7 +433,28 @@ function App() {
         if (!s.active) return;
 
         if (s.sheet_tab_mtimes) {
-          // Sheet tool: per-tab mtime watch
+          // Sheet tool: reflect background pre-warm completions into sheetTabs state
+          if (s.sheet_tab_ready) {
+            setSheetTabs(prev => {
+              let changed = false;
+              const next = prev.map(t => {
+                if (t.ready) return t;
+                const nowReady = Boolean(s.sheet_tab_ready[t.plugin_id]);
+                if (!nowReady) return t;
+                const urls = s.sheet_tab_urls?.[t.plugin_id] ?? {};
+                changed = true;
+                return {
+                  ...t,
+                  ready: true,
+                  input_url: urls.input_url || t.input_url,
+                  output_url: urls.output_url || t.output_url,
+                };
+              });
+              return changed ? next : prev;
+            });
+          }
+
+          // Per-tab mtime watch → auto-switch to output when result file changes
           for (const [pluginId, mtime] of Object.entries(s.sheet_tab_mtimes)) {
             const prev = lastTabMtimes[pluginId] ?? -1;
             if (mtime > 0 && mtime !== prev) {
@@ -413,6 +464,7 @@ function App() {
                 cimLog("info", `sheet tab result changed plugin=${pluginId} → switching to tab ${idx} output`);
                 if (Date.now() > suppressPollerNavUntilRef.current) {
                   setActiveSheetTabIdx(idx);
+                  setVisitedTabIndices(prev => new Set(prev).add(idx));
                   setActiveTab("output");
                   setIsExecuting(false);
                 }
@@ -479,10 +531,14 @@ function App() {
           setIsExecuting(false);
           if (payload.success) {
             if (payload.plugin_id && sheetTabsRef.current.length > 0) {
-              // Sheet tool: switch to the right module tab's Output and reload its iframe
               const idx = sheetTabsRef.current.findIndex(t => t.plugin_id === payload.plugin_id);
-              if (idx >= 0) setActiveSheetTabIdx(idx);
-              setSheetOutputNonces(prev => ({ ...prev, [payload.plugin_id]: (prev[payload.plugin_id] ?? 0) + 1 }));
+              if (idx >= 0) {
+                setActiveSheetTabIdx(idx);
+                setVisitedTabIndices(prev => new Set(prev).add(idx));
+                setSheetOutputNonces(prev => ({ ...prev, [payload.plugin_id]: (prev[payload.plugin_id] ?? 0) + 1 }));
+                // Ensure the target tab's processes are started (lazy start edge case)
+                ensureTabStarted(payload.plugin_id);
+              }
             }
             setActiveTab("output");
           } else {
@@ -497,7 +553,9 @@ function App() {
             const switchIdx = tabs.findIndex(t => t.plugin_id === payload.plugin_id);
             if (switchIdx >= 0) {
               setActiveSheetTabIdx(switchIdx);
+              setVisitedTabIndices(prev => new Set(prev).add(switchIdx));
               setActiveTab(payload.tab === "output" ? "output" : "input");
+              ensureTabStarted(payload.plugin_id);
             }
           }
           break;
@@ -511,6 +569,36 @@ function App() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [config]);
+
+  // Ensures a sheet tab's processes are started. Idempotent: returns immediately if already ready.
+  async function ensureTabStarted(pluginId) {
+    const tab = sheetTabsRef.current.find(t => t.plugin_id === pluginId);
+    if (!tab || tab.ready) return;
+    setTabStartingSet(prev => new Set(prev).add(pluginId));
+    try {
+      const res = await nativeApi.startSheetTab(pluginId);
+      setSheetTabs(prev => prev.map(t =>
+        t.plugin_id === pluginId
+          ? { ...t, input_url: res.input_url, output_url: res.output_url, ready: true }
+          : t
+      ));
+    } catch (err) {
+      cimLog("error", `startSheetTab(${pluginId}) failed: ${err.message}`);
+    } finally {
+      setTabStartingSet(prev => { const s = new Set(prev); s.delete(pluginId); return s; });
+    }
+  }
+
+  async function handleSheetTabChange(i) {
+    const tab = sheetTabsRef.current[i];
+    if (!tab) return;
+    setActiveSheetTabIdx(i);
+    setActiveTab("input");
+    setVisitedTabIndices(prev => new Set(prev).add(i));
+    if (!tab.ready) {
+      await ensureTabStarted(tab.plugin_id);
+    }
+  }
 
   async function handleStart() {
     const tool = tools.find((t) => t.tool_id === selectedToolId);
@@ -543,9 +631,13 @@ function App() {
       if (res.sheet_tabs?.length > 0) {
         setSheetTabs(res.sheet_tabs);
         setActiveSheetTabIdx(0);
+        setVisitedTabIndices(new Set([0]));
+        setTabStartingSet(new Set());
       } else {
         setSheetTabs([]);
         setActiveSheetTabIdx(0);
+        setVisitedTabIndices(new Set([0]));
+        setTabStartingSet(new Set());
       }
     } catch (err) {
       cimLog("error", `startTool failed: ${err.message}`);
@@ -586,6 +678,8 @@ function App() {
     setToolError(null);
     setSheetTabs([]);
     setActiveSheetTabIdx(0);
+    setTabStartingSet(new Set());
+    setVisitedTabIndices(new Set([0]));
     setStatus("Tool stopped");
   }
 
@@ -620,12 +714,14 @@ function App() {
           <SheetLayout
             sheetTabs={sheetTabs}
             activeSheetTabIdx={activeSheetTabIdx}
-            onSheetTabChange={(i) => { setActiveSheetTabIdx(i); setActiveTab("input"); }}
+            onSheetTabChange={handleSheetTabChange}
             activeTab={activeTab}
             onTabChange={setActiveTab}
             isExecuting={isExecuting}
             isStarting={isStarting}
             sheetOutputNonces={sheetOutputNonces}
+            tabStartingSet={tabStartingSet}
+            visitedTabIndices={visitedTabIndices}
           />
         ) : (
           <LeftPanel
