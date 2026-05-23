@@ -274,3 +274,130 @@ def test_execute_logic_missing_manifest(tmp_path, monkeypatch):
 
     result = proc.execute_logic({"manifest_id": "nonexistent"})
     assert result["mode"] == "error"
+
+
+# ─── validate_pre_export ──────────────────────────────────────────────────────
+
+def test_validate_no_json_file(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_a")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    shapes_map: dict = {"i1": []}
+    issues = proc.validate_pre_export(items, shapes_map, {}, ["coco_json"])
+    codes = [v.code for v in issues]
+    assert "no_json_file" in codes
+
+
+def test_validate_empty_shapes(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_b")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [], "flags": {}}), encoding="utf-8"
+    )
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    shapes_map: dict = {"i1": []}
+    issues = proc.validate_pre_export(items, shapes_map, {}, ["coco_json"])
+    codes = [v.code for v in issues]
+    assert "empty_shapes" in codes
+    assert "no_json_file" not in codes
+
+
+def test_validate_invalid_bbox(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_c")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [{"label": "cat", "shape_type": "rectangle",
+                                "points": [[10, 10], [10, 50]]}]}),
+        encoding="utf-8",
+    )
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    bad_shape = {"label": "cat", "x1": 10.0, "y1": 10.0, "x2": 10.0, "y2": 50.0,
+                 "shape_type": "rectangle", "polygon_pts": []}
+    shapes_map = {"i1": [bad_shape]}
+    issues = proc.validate_pre_export(items, shapes_map, {}, ["coco_json"])
+    codes = [v.code for v in issues]
+    assert "invalid_bbox" in codes
+    assert any(v.severity == "error" for v in issues if v.code == "invalid_bbox")
+
+
+def test_validate_empty_label(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_d")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [{"label": "", "shape_type": "rectangle",
+                                "points": [[0, 0], [10, 10]]}]}),
+        encoding="utf-8",
+    )
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    shapes_map = {"i1": [{"label": "", "x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 10.0,
+                          "shape_type": "rectangle", "polygon_pts": []}]}
+    issues = proc.validate_pre_export(items, shapes_map, {}, ["coco_json"])
+    codes = [v.code for v in issues]
+    assert "empty_label" in codes
+
+
+def test_validate_no_classification_for_imagefolder(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_e")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [], "flags": {}}), encoding="utf-8"
+    )
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    shapes_map: dict = {"i1": []}
+    issues = proc.validate_pre_export(items, shapes_map, {}, ["imagefolder"])
+    codes = [v.code for v in issues]
+    assert "no_classification" in codes
+
+
+def test_validate_clean_item_has_no_issues(tmp_path):
+    proc = _load(_HERE / "014_process.py", "_014_proc_val_f")
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [{"label": "cat", "shape_type": "rectangle",
+                                "points": [[0, 0], [50, 50]]}]}),
+        encoding="utf-8",
+    )
+    items = [{"item_id": "i1", "file_path": str(img), "width": 100, "height": 100}]
+    shapes_map = {"i1": [{"label": "cat", "x1": 0.0, "y1": 0.0, "x2": 50.0, "y2": 50.0,
+                          "shape_type": "rectangle", "polygon_pts": []}]}
+    issues = proc.validate_pre_export(items, shapes_map, {"i1": "outdoor"}, ["coco_json"])
+    assert issues == []
+
+
+def test_execute_logic_blocked_on_error(tmp_path, monkeypatch):
+    """Invalid bbox causes execute_logic to return validation_error mode."""
+    cim_log = tmp_path / "cim_log"
+    monkeypatch.setenv("CIM_LOG_DIR", str(cim_log))
+    mdb = _load(_SHARED, "_mdb_014_blk")
+    proc = _load(_HERE / "014_process.py", "_014_proc_blk")
+
+    img = tmp_path / "img.jpg"
+    img.write_bytes(b"img")
+    # Zero-width box: x1==x2
+    img.with_suffix(".json").write_text(
+        json.dumps({"shapes": [{"label": "cat", "shape_type": "rectangle",
+                                "points": [[10, 10], [10, 50]]}]}),
+        encoding="utf-8",
+    )
+    db_path = cim_log / "db" / "manifest.sqlite"
+    mdb.init_db(db_path)
+    mid = "m014_blk"
+    mdb.create_manifest(db_path, mid, "Block Test", "folder", {})
+    mdb.add_manifest_items(db_path, mid, [
+        {"item_id": "i1", "file_path": str(img), "width": 100, "height": 100},
+    ])
+
+    result = proc.execute_logic({
+        "manifest_id": mid,
+        "export_formats": ["coco_json"],
+        "export_dir": str(tmp_path / "export"),
+        "split_train": 100, "split_val": 0, "split_test": 0,
+    })
+    assert result["mode"] == "validation_error"
+    assert any(v["code"] == "invalid_bbox" for v in result["validation_issues"])

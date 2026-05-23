@@ -21,6 +21,7 @@ import shutil
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import NamedTuple
 
 _HERE = Path(__file__).resolve().parent
 
@@ -36,6 +37,85 @@ _mdb_spec.loader.exec_module(_mdb)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
+
+
+# ─── 驗證 ─────────────────────────────────────────────────────────────────────
+
+class ValidationIssue(NamedTuple):
+    severity: str   # "error" | "warning" | "info"
+    code: str
+    item_id: str
+    message: str
+
+
+def validate_pre_export(
+    items: list[dict],
+    shapes_map: dict[str, list[dict]],
+    classifications: dict[str, str],
+    export_formats: list[str],
+) -> list[ValidationIssue]:
+    """
+    Run pre-export checks and return a list of ValidationIssues.
+
+    Checks:
+      - no_json_file: image has no annotation JSON at all (warning)
+      - empty_shapes: JSON exists but contains no shapes (info)
+      - invalid_bbox: shape has zero or negative area (error)
+      - empty_label: shape has an empty label string (warning)
+      - no_classification: imagefolder format requested but item has no classification (warning)
+    """
+    issues: list[ValidationIssue] = []
+    need_clf = "imagefolder" in export_formats
+
+    for it in items:
+        iid = it["item_id"]
+        fp = it.get("file_path", "")
+        fname = Path(fp).name if fp else iid
+
+        ann_path = Path(fp).with_suffix(".json") if fp else None
+        has_json = ann_path is not None and ann_path.exists()
+
+        if not has_json:
+            issues.append(ValidationIssue(
+                severity="warning",
+                code="no_json_file",
+                item_id=iid,
+                message=f"{fname} 無標注 JSON，將以空標注匯出",
+            ))
+        else:
+            shapes = shapes_map.get(iid, [])
+            if not shapes:
+                issues.append(ValidationIssue(
+                    severity="info",
+                    code="empty_shapes",
+                    item_id=iid,
+                    message=f"{fname} 的標注為空（無 shapes）",
+                ))
+            for s in shapes:
+                if s.get("x2", 0) <= s.get("x1", 0) or s.get("y2", 0) <= s.get("y1", 0):
+                    issues.append(ValidationIssue(
+                        severity="error",
+                        code="invalid_bbox",
+                        item_id=iid,
+                        message=f"{fname} 包含面積為零或負的 BBox（label={s.get('label', '')}）",
+                    ))
+                if not s.get("label", "").strip():
+                    issues.append(ValidationIssue(
+                        severity="warning",
+                        code="empty_label",
+                        item_id=iid,
+                        message=f"{fname} 包含空標籤的 shape",
+                    ))
+
+        if need_clf and not classifications.get(iid, "").strip():
+            issues.append(ValidationIssue(
+                severity="warning",
+                code="no_classification",
+                item_id=iid,
+                message=f"{fname} 匯出 imagefolder 格式時無分類標籤，將被略過",
+            ))
+
+    return issues
 
 
 # ─── 資料結構輔助 ──────────────────────────────────────────────────────────────
@@ -651,12 +731,24 @@ def execute_logic(params: dict) -> dict:
 
     _base["split_counts"] = {k: len(v) for k, v in split_groups.items()}
 
-    # ── 5. 匯出目錄 ─────────────────────────────────────────────────────────
+    # ── 5. 驗證 ─────────────────────────────────────────────────────────────
+    validation_issues = validate_pre_export(items, shapes_map, classifications, export_formats)
+    _base["validation_issues"] = [
+        {"severity": vi.severity, "code": vi.code, "item_id": vi.item_id, "message": vi.message}
+        for vi in validation_issues
+    ]
+    # Block export if any errors exist
+    has_errors = any(vi.severity == "error" for vi in validation_issues)
+    if has_errors:
+        return {**_base, "mode": "validation_error",
+                "error": f"發現 {sum(1 for v in validation_issues if v.severity == 'error')} 個錯誤，請修正後再匯出"}
+
+    # ── 7. 匯出目錄 ─────────────────────────────────────────────────────────
     export_base = Path(export_dir_str) if export_dir_str else _cfg.get_default_export_dir(manifest_id)
     export_base.mkdir(parents=True, exist_ok=True)
     _base["export_dir"] = str(export_base)
 
-    # ── 6. 各格式匯出 ───────────────────────────────────────────────────────
+    # ── 8. 各格式匯出 ───────────────────────────────────────────────────────
     export_paths: dict = {}
     try:
         for fmt in export_formats:

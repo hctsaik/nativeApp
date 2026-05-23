@@ -278,6 +278,8 @@ class SQLiteToolAdapter(ToolAdapter):
                 (3, "module_014", "📤 Export"),
                 (4, "module_015", "📊 Dashboard"),
                 (5, "module_016", "🤖 AI Pre-labeling"),
+                (6, "module_017", "🏷️ Label Manager"),
+                (7, "module_018", "🖼️ Review Gallery"),
             ]:
                 try:
                     connection.execute(
@@ -513,6 +515,17 @@ class ToolProcessManager:
         if plugin_id:
             env["CIM_PLUGIN_ID"] = plugin_id
         env["CIM_TOOLS_DB"] = str(ROOT_DIR / "config" / "tools.sqlite")
+        # Inject connector credentials from secrets file (never stored in DB or YAML)
+        secrets_path = self._log_dir / "secrets" / "connector_creds.json"
+        if secrets_path.exists():
+            try:
+                import json as _json
+                creds = _json.loads(secrets_path.read_text(encoding="utf-8"))
+                env["CIM_CONNECTOR_DSN"]      = creds.get("dsn", "")
+                env["CIM_CONNECTOR_TOKEN"]    = creds.get("token", "")
+                env["CIM_CONNECTOR_BASE_URL"] = creds.get("base_url", "")
+            except Exception:
+                pass
         return env
 
     def _spawn(self, script: Path, tool: ToolDefinition, port: int, label: str,

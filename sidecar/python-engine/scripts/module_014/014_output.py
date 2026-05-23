@@ -24,6 +24,25 @@ def _path_row(label: str, path_str: str, key: str) -> None:
             _open_folder(path_str)
 
 
+def _render_validation_issues(issues: list[dict]) -> None:
+    errors = [v for v in issues if v.get("severity") == "error"]
+    warnings = [v for v in issues if v.get("severity") == "warning"]
+    infos = [v for v in issues if v.get("severity") == "info"]
+
+    if errors:
+        with st.expander(f"🔴 {len(errors)} 個錯誤（必須修正）", expanded=True):
+            for v in errors:
+                st.error(v["message"])
+    if warnings:
+        with st.expander(f"🟡 {len(warnings)} 個警告", expanded=bool(errors)):
+            for v in warnings:
+                st.warning(v["message"])
+    if infos:
+        with st.expander(f"ℹ️ {len(infos)} 個提示", expanded=False):
+            for v in infos:
+                st.info(v["message"])
+
+
 def render_output(result: dict) -> None:
     mode = result.get("mode", "idle")
 
@@ -34,6 +53,17 @@ def render_output(result: dict) -> None:
     if mode == "error":
         st.error(f"匯出失敗：{result.get('error', '未知錯誤')}")
         return
+
+    if mode == "validation_error":
+        st.error(result.get("error", "驗證失敗"))
+        _render_validation_issues(result.get("validation_issues", []))
+        return
+
+    # 有警告但無錯誤 — 匯出已完成，顯示警告摘要
+    issues = result.get("validation_issues", [])
+    if issues:
+        _render_validation_issues(issues)
+        st.divider()
 
     # ── 摘要 Metrics ─────────────────────────────────────────────────────────
     st.success("匯出完成！")

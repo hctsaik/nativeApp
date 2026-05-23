@@ -1,0 +1,50 @@
+# connector.yaml.example
+#
+# Copy this file to connector.yaml in any module_0XX directory to override
+# the default LocalFileConnector.  Supported types: local_file | sql | rest | custom.
+#
+# The engine automatically injects CIM_CONNECTOR_DSN / CIM_CONNECTOR_TOKEN /
+# CIM_CONNECTOR_BASE_URL from <CIM_LOG_DIR>/secrets/connector_creds.json.
+
+# ── Local file (default — identical to no connector.yaml) ────────────────────
+connector:
+  type: local_file
+  local_file:
+    image_root: ""          # leave empty to use the manifest item file_path as-is
+
+# ── SQL database ─────────────────────────────────────────────────────────────
+# connector:
+#   type: sql
+#   sql:
+#     dsn_env: CIM_CONNECTOR_DSN   # or set dsn: "postgresql+psycopg2://..."
+#     pull_query: "SELECT id, file_path, width, height FROM images WHERE active=1"
+#     push_table: "annotations"
+#     push_id_column: "image_id"
+#     push_json_column: "xanylabeling_json"
+#     push_updated_at_column: "updated_at"
+#     version_query: "SELECT id, updated_at FROM annotations WHERE id IN :ids"
+
+# ── REST API ─────────────────────────────────────────────────────────────────
+# connector:
+#   type: rest
+#   rest:
+#     base_url: "https://api.example.com"   # or set base_url_env: CIM_CONNECTOR_BASE_URL
+#     token_env: CIM_CONNECTOR_TOKEN
+#     pull_path: "/images"
+#     pull_page_param: "offset"
+#     pull_limit_param: "limit"
+#     pull_items_key: "data"
+#     push_path: "/annotations/{item_id}"
+#     push_method: "POST"
+#     version_path: "/annotations/versions"
+#     timeout: 30
+
+# ── Custom connector ─────────────────────────────────────────────────────────
+# connector:
+#   type: custom
+#   custom:
+#     module: my_package.connectors
+#     class: MyConnector
+#     config:
+#       host: localhost
+#       port: 8080

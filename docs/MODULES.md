@@ -32,6 +32,8 @@ docs/
     ├── module_014.md
     ├── module_015.md
     ├── module_016.md
+    ├── module_017.md
+    ├── module_018.md
     ├── sheet-annotation_workflow.md
     ├── sheet_edge_analysis.md
     └── management_center.md
@@ -60,6 +62,8 @@ scripts/module_XXX/
 | Module 014 - Export | [module_014.md](modules/module_014.md) | — | — |
 | Module 015 - Dashboard | [module_015.md](modules/module_015.md) | — | — |
 | Module 016 - AI Pre-labeling | [module_016.md](modules/module_016.md) | — | — |
+| Module 017 - Label Manager | [module_017.md](modules/module_017.md) | — | — |
+| Module 018 - Review Gallery | [module_018.md](modules/module_018.md) | — | — |
 | Sheet - 標注作業流程 | [sheet-annotation_workflow.md](modules/sheet-annotation_workflow.md) | — | — |
 | Sheet - 邊緣品質分析 | [sheet_edge_analysis.md](modules/sheet_edge_analysis.md) | — | — |
 | 管理中心 | [management_center.md](modules/management_center.md) | — | — |

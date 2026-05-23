@@ -66,6 +66,19 @@ CREATE TABLE IF NOT EXISTS annotation_exports (
     schema_version TEXT DEFAULT '1.0',
     created_at    TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS sync_queue (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    manifest_id  TEXT NOT NULL,
+    item_id      TEXT NOT NULL,
+    remote_id    TEXT,
+    payload_json TEXT NOT NULL,
+    status       TEXT CHECK(status IN ('pending','synced','conflict','error')) DEFAULT 'pending',
+    attempts     INTEGER DEFAULT 0,
+    last_error   TEXT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    synced_at    TEXT
+);
 """
 
 
@@ -426,5 +439,82 @@ def get_all_manifests_stats(db_path: Path) -> list[dict]:
             """
         ).fetchall()
         return _rows_to_list(rows)
+    finally:
+        conn.close()
+
+
+# ─── sync_queue DAL ────────────────────────────────────────────────────────────
+
+def enqueue_sync(
+    db_path: Path,
+    manifest_id: str,
+    item_id: str,
+    remote_id: str | None,
+    payload_json: str,
+) -> None:
+    """Add an annotation to the sync queue with status='pending'."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sync_queue (manifest_id, item_id, remote_id, payload_json) "
+            "VALUES (?, ?, ?, ?)",
+            (manifest_id, item_id, remote_id, payload_json),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pending_sync(db_path: Path, manifest_id: str, limit: int = 50) -> list[dict]:
+    """Return pending sync_queue entries for a manifest."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sync_queue WHERE manifest_id=? AND status='pending' "
+            "ORDER BY id LIMIT ?",
+            (manifest_id, limit),
+        ).fetchall()
+        return _rows_to_list(rows)
+    finally:
+        conn.close()
+
+
+def mark_sync_result(
+    db_path: Path,
+    queue_id: int,
+    success: bool,
+    error: str | None = None,
+) -> None:
+    """Update a sync_queue row after a push attempt."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        if success:
+            conn.execute(
+                "UPDATE sync_queue SET status='synced', synced_at=datetime('now') WHERE id=?",
+                (queue_id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE sync_queue SET status='error', attempts=attempts+1, last_error=? WHERE id=?",
+                (error, queue_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_sync_stats(db_path: Path, manifest_id: str) -> dict:
+    """Return counts by status for the sync_queue."""
+    init_db(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS cnt FROM sync_queue WHERE manifest_id=? GROUP BY status",
+            (manifest_id,),
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
     finally:
         conn.close()
