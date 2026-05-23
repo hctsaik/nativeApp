@@ -905,7 +905,28 @@ def _next_unclassified(items: list, current_idx: int, clf: dict) -> int:
 
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
+def _check_pending_reload() -> bool:
+    """若 module_019 已下載新資料集但 module_010 尚未重新載入，回傳 True。"""
+    p = _cfg._CIM_LOG_DIR / "config" / "shared.json"
+    if not p.exists():
+        return False
+    try:
+        return bool(
+            __import__("json").loads(p.read_text(encoding="utf-8")).get("pending_reload", False)
+        )
+    except Exception:
+        return False
+
+
 def render_output(result: dict) -> None:
+    # 若 module_019 已下載新資料但 module_010 還沒重新載入，顯示警告並鎖定標注入口
+    if _check_pending_reload():
+        st.error(
+            "⚠️ **資料集已更新**，請先前往 **Data Feeder**（第 2 個 Tab）"
+            " 載入新資料後再繼續標注。",
+        )
+        st.stop()
+
     mode = result.get("mode", "idle")
 
     if mode == "error":

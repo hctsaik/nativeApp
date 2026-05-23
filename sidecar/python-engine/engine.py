@@ -291,6 +291,35 @@ class SQLiteToolAdapter(ToolAdapter):
                 except Exception:
                     pass
 
+            # migration: add module_019 (Data Downloader) as first tab
+            try:
+                exists = connection.execute(
+                    "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
+                    ("annotation_workflow", "module_019"),
+                ).fetchone()
+                if not exists:
+                    # Shift all existing annotation_workflow tabs up by 1
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order = tab_order + 1 WHERE sheet_id = ?",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                        " VALUES (?, ?, ?, ?)",
+                        ("annotation_workflow", 0, "module_019", "\U0001f310 Data Downloader"),
+                    )
+            except Exception:
+                pass
+
+            # migration: update module_017 label to 管理中心
+            try:
+                connection.execute(
+                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
+                    ("\U0001f4ca 管理中心", "annotation_workflow", "module_017"),
+                )
+            except Exception:
+                pass
+
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
 

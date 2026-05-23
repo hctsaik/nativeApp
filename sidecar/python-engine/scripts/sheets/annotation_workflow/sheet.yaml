@@ -2,6 +2,8 @@ id: annotation_workflow
 name: 標注工作流程
 description: 資料來源設定（Data Feeder）→ 標注作業管理 → 整理 → 多格式匯出 → 進度統計
 tabs:
+  - plugin_id: module_019
+    label: 🌐 Data Downloader
   - plugin_id: module_010
     label: 📦 Data Feeder
   - plugin_id: module_012

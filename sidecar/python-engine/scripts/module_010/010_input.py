@@ -50,7 +50,16 @@ def render_input() -> dict:
         if "_folder_chosen" in st.session_state:
             st.session_state["m010_folder_path"] = st.session_state.pop("_folder_chosen")
         if "m010_folder_path" not in st.session_state:
-            st.session_state["m010_folder_path"] = cfg.get("last_folder_path", "")
+            # 若 module_019 已下載並寫入 suggested_folder_path，自動填入
+            suggested = _cfg.read_shared_suggested_folder()
+            st.session_state["m010_folder_path"] = suggested or cfg.get("last_folder_path", "")
+
+        if _cfg.read_shared_suggested_folder() and not st.session_state.get("_m010_suggested_banner_dismissed"):
+            st.info(
+                "📥 **Data Downloader** 已下載新資料集，路徑已自動填入。"
+                " 確認後請按「執行」載入。",
+                icon="ℹ️",
+            )
 
         path_col, btn_col = st.columns([5, 1])
         with path_col:

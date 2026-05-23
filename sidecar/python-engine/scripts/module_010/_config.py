@@ -57,4 +57,18 @@ def write_shared_manifest_id(manifest_id: str) -> None:
     except Exception:
         existing = {}
     existing["last_manifest_id"] = manifest_id
+    # 010 執行完成，清除 module_019 留下的旗標
+    existing.pop("suggested_folder_path", None)
+    existing["pending_reload"] = False
     _atomic_write(p, json.dumps(existing, ensure_ascii=False, indent=2))
+
+
+def read_shared_suggested_folder() -> str:
+    """讀取 module_019 建議的資料夾路徑（若存在）。"""
+    p = _CIM_LOG_DIR / "config" / "shared.json"
+    if not p.exists():
+        return ""
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("suggested_folder_path", "")
+    except Exception:
+        return ""
