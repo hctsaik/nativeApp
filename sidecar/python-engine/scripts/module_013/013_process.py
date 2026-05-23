@@ -1,36 +1,28 @@
 from __future__ import annotations
 
 """
-013_process.py — Update 處理層。
+013_process.py — Sync Back to Service 核心邏輯
 無 Streamlit import。
 
-操作 C：依分類標籤將圖片（及旁邊的同名 .json）複製到 export_dir/{分類名稱}/。
-B 操作已移除——標注 JSON 由 X-AnyLabeling 直接存回影像同目錄，無需另行複製。
+流程：
+  1. 組裝 items + shapes_map + classifications
+  2. validation（block on error）
+  3. 依 scope 篩選送出項目
+  4. 切 chunk（每 100 筆）→ POST /datasets/{id}/submissions（逐 chunk）
+  5. 在記憶體產生格式 zip → POST /datasets/{id}/submissions/{submit_id}/exports
+  6. 寫入 sync_state + sync_history
 """
 
 import importlib.util as _ilu
+import io
 import json
-import logging
-import os
-import re
-import shutil
-from datetime import datetime
+import uuid
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
-
-# ─── Logger 設定 ──────────────────────────────────────────────────────────────
-
-_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(Path(__file__).resolve().parents[4] / "tmp" / "cim_log")))
-_LOG_FILE = _LOG_DIR / "module_013_process.log"
-
-_LOG_DIR.mkdir(parents=True, exist_ok=True)
-_handler = logging.FileHandler(str(_LOG_FILE), encoding="utf-8")
-_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-_log = logging.getLogger("module_013")
-if not _log.handlers:
-    _log.addHandler(_handler)
-_log.setLevel(logging.DEBUG)
-
-# ─── 動態載入 _config + _manifest_db ─────────────────────────────────────────
+from typing import NamedTuple
+import urllib.request
+import urllib.error
 
 _HERE = Path(__file__).resolve().parent
 
@@ -44,309 +36,449 @@ _mdb_spec = _ilu.spec_from_file_location(
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
 
+_p14_spec = _ilu.spec_from_file_location(
+    "_014_process", _HERE.parent / "module_014" / "014_process.py"
+)
+_p14 = _ilu.module_from_spec(_p14_spec)
+_p14_spec.loader.exec_module(_p14)
 
-# ─── 輔助函式 ─────────────────────────────────────────────────────────────────
-
-_INVALID_CHARS = re.compile(r'[/\\:*?"<>|]')
-
-
-def _safe_dirname(label: str) -> str:
-    """將分類 label 轉成合法的目錄名稱（去掉非法字元）。"""
-    cleaned = _INVALID_CHARS.sub("_", label).strip()
-    return cleaned or "unknown"
+CHUNK_SIZE = 100
 
 
-def _count_shapes(ann_path: str) -> int:
-    """計算標注檔中的 shape 數量。"""
-    try:
-        data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-        return len(data.get("shapes", []))
-    except Exception:
-        return 0
+# ─── 驗證 ─────────────────────────────────────────────────────────────────────
+
+class ValidationIssue(NamedTuple):
+    severity: str   # "error" | "warning" | "info"
+    code: str
+    item_id: str
+    message: str
 
 
-def _infer_source_folder(manifest: dict, items: list[dict]) -> str:
-    """
-    推算原始圖片資料夾。
-    1. 優先用 manifest 的 source_path 欄位。
-    2. Fallback：取所有 items 的 file_path 的 common parent。
-    """
-    source_path = (manifest or {}).get("source_path", "")
-    if not source_path:
-        try:
-            source_config = json.loads((manifest or {}).get("source_config", "{}"))
-            source_path = source_config.get("folder_path", "") or source_config.get("source_path", "")
-        except Exception:
-            source_path = ""
-    if source_path and Path(source_path).exists():
-        p = Path(source_path)
-        return str(p if p.is_dir() else p.parent)
-
-    # Fallback：從 items 推算
-    parents = []
+def validate_pre_sync(
+    items: list[dict],
+    shapes_map: dict[str, list[dict]],
+    classifications: dict[str, str],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
     for it in items:
+        iid = it["item_id"]
         fp = it.get("file_path", "")
-        if fp:
-            parents.append(str(Path(fp).parent))
-    if not parents:
-        return ""
+        fname = Path(fp).name if fp else iid
 
-    from collections import Counter
-    most_common = Counter(parents).most_common(1)[0][0]
-    return most_common
+        for s in shapes_map.get(iid, []):
+            if s.get("x2", 0) <= s.get("x1", 0) or s.get("y2", 0) <= s.get("y1", 0):
+                issues.append(ValidationIssue(
+                    severity="error",
+                    code="invalid_bbox",
+                    item_id=iid,
+                    message=f"{fname} 包含面積為零或負的 BBox（label={s.get('label', '')}）",
+                ))
+            if not s.get("label", "").strip():
+                issues.append(ValidationIssue(
+                    severity="error",
+                    code="empty_label",
+                    item_id=iid,
+                    message=f"{fname} 包含空標籤的 shape",
+                ))
+
+    empty_count = sum(
+        1 for it in items
+        if not shapes_map.get(it["item_id"]) and not classifications.get(it["item_id"], "")
+    )
+    if items and empty_count / len(items) > 0.30:
+        issues.append(ValidationIssue(
+            severity="warning",
+            code="high_empty_ratio",
+            item_id="",
+            message=f"{empty_count}/{len(items)} 張（{empty_count/len(items)*100:.0f}%）完全無標注也無分類",
+        ))
+
+    return issues
 
 
-# ─── 公開 API ─────────────────────────────────────────────────────────────────
+# ─── 格式 zip 產生（記憶體） ───────────────────────────────────────────────────
+
+def _build_coco_zip(
+    items: list[dict],
+    shapes_map: dict[str, list[dict]],
+) -> bytes:
+    all_labels: list[str] = sorted({
+        s["label"]
+        for shapes in shapes_map.values()
+        for s in shapes
+        if s["label"]
+    })
+    label_to_cat = {lbl: i + 1 for i, lbl in enumerate(all_labels)}
+    categories = [
+        {"id": i + 1, "name": lbl, "supercategory": "none"}
+        for i, lbl in enumerate(all_labels)
+    ]
+
+    item_map = {it["item_id"]: it for it in items}
+    images_list: list[dict] = []
+    annotations_list: list[dict] = []
+    ann_id = 1
+    for img_id, it in enumerate(items, start=1):
+        iid = it["item_id"]
+        fp = it.get("file_path", "")
+        images_list.append({
+            "id": img_id,
+            "file_name": Path(fp).name if fp else iid,
+            "width": it.get("width") or 0,
+            "height": it.get("height") or 0,
+        })
+        for shape in shapes_map.get(iid, []):
+            x1, y1, x2, y2 = shape["x1"], shape["y1"], shape["x2"], shape["y2"]
+            bw, bh = x2 - x1, y2 - y1
+            cat_id = label_to_cat.get(shape["label"], len(label_to_cat) + 1)
+            ann: dict = {
+                "id": ann_id,
+                "image_id": img_id,
+                "category_id": cat_id,
+                "bbox": [x1, y1, bw, bh],
+                "area": bw * bh,
+                "iscrowd": 0,
+            }
+            if shape["shape_type"] == "polygon" and shape.get("polygon_pts"):
+                ann["segmentation"] = [[c for pt in shape["polygon_pts"] for c in pt]]
+            annotations_list.append(ann)
+            ann_id += 1
+
+    coco_obj = {
+        "info": {"description": "CIM Sync Back"},
+        "images": images_list,
+        "annotations": annotations_list,
+        "categories": categories,
+    }
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("annotations.json", json.dumps(coco_obj, ensure_ascii=False, indent=2))
+    buf.seek(0)
+    return buf.read()
+
+
+def _build_yolo_zip(
+    items: list[dict],
+    shapes_map: dict[str, list[dict]],
+) -> bytes:
+    all_labels = sorted({
+        s["label"]
+        for shapes in shapes_map.values()
+        for s in shapes
+        if s["label"]
+    })
+    label_to_id = {lbl: i for i, lbl in enumerate(all_labels)}
+    nc = len(all_labels)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("classes.txt", "\n".join(all_labels))
+        zf.writestr(
+            "data.yaml",
+            f"nc: {nc}\nnames: {json.dumps(all_labels, ensure_ascii=False)}\n",
+        )
+        for it in items:
+            iid = it["item_id"]
+            fp = it.get("file_path", "")
+            iw = it.get("width") or 0
+            ih = it.get("height") or 0
+            stem = Path(fp).stem if fp else iid
+            shapes = shapes_map.get(iid, [])
+            if not shapes:
+                continue
+            lines: list[str] = []
+            for s in shapes:
+                cls_id = label_to_id.get(s["label"], nc)
+                if iw > 0 and ih > 0:
+                    cx = ((s["x1"] + s["x2"]) / 2) / iw
+                    cy = ((s["y1"] + s["y2"]) / 2) / ih
+                    bw = (s["x2"] - s["x1"]) / iw
+                    bh = (s["y2"] - s["y1"]) / ih
+                else:
+                    cx = (s["x1"] + s["x2"]) / 2
+                    cy = (s["y1"] + s["y2"]) / 2
+                    bw = s["x2"] - s["x1"]
+                    bh = s["y2"] - s["y1"]
+                lines.append(f"{cls_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+            zf.writestr(f"labels/{stem}.txt", "\n".join(lines))
+    buf.seek(0)
+    return buf.read()
+
+
+def _build_format_zip(
+    fmt: str,
+    items: list[dict],
+    shapes_map: dict[str, list[dict]],
+) -> bytes | None:
+    if fmt == "coco_json":
+        return _build_coco_zip(items, shapes_map)
+    if fmt == "yolo_txt":
+        return _build_yolo_zip(items, shapes_map)
+    return None
+
+
+# ─── HTTP 呼叫（無第三方依賴） ─────────────────────────────────────────────────
+
+def _post_json(url: str, payload: dict, timeout: int = 30) -> dict:
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {e.code}: {body}") from e
+
+
+def _post_multipart(
+    url: str,
+    form_fields: dict[str, str],
+    file_bytes: bytes,
+    file_field: str,
+    filename: str,
+    timeout: int = 60,
+) -> dict:
+    boundary = uuid.uuid4().hex
+    parts: list[bytes] = []
+    for key, val in form_fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{val}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\nContent-Type: application/zip\r\n\r\n".encode()
+        + file_bytes
+        + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(parts)
+
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body_r = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {e.code}: {body_r}") from e
+
+
+# ─── 主流程 ───────────────────────────────────────────────────────────────────
 
 def execute_logic(params: dict) -> dict:
     """
-    執行 Update 邏輯。
-
     params:
-        manifest_id: str
-        export_dir: str          # 整理輸出目錄（可為空，會用預設值）
-        organize_images: bool    # C：依分類整理圖片（同時帶走標注 JSON）
-        dry_run: bool            # True=只掃描不動檔案, False=實際執行
-
-    回傳:
-        mode: "preview" | "done" | "error"
-        manifest_id, manifest_name, source_folder: str
-        export_dir: str
-        organize_images: bool
-        dry_run: bool
-        items: list[dict]
-        summary: dict  — total, ann_count, c_organized, ann_exported, errors
-        output_json_path: str
-        error: str | None
+        manifest_id:   str
+        dataset_id:    str
+        service_url:   str   (base URL)
+        scope:         "full" | "partial"
+        export_format: "coco_json" | "yolo_txt" | "none"
     """
-    _log.info("=" * 60)
-    _log.info("[013] execute_logic 開始  dry_run=%s", params.get("dry_run", True))
-    _log.info("[013] params: manifest_id=%s | export_dir=%r | organize_images=%s | dry_run=%s",
-              params.get("manifest_id", ""),
-              params.get("export_dir", ""),
-              params.get("organize_images", True),
-              params.get("dry_run", True))
+    manifest_id: str = params.get("manifest_id", "")
+    dataset_id: str = params.get("dataset_id", "")
+    service_url: str = params.get("service_url", "").rstrip("/")
+    scope: str = params.get("scope", "full")
+    export_format: str = params.get("export_format", "none")
 
-    manifest_id: str  = params.get("manifest_id", "")
-    export_dir: str   = params.get("export_dir", "")
-    organize_images: bool = bool(params.get("organize_images", True))
-    dry_run: bool     = bool(params.get("dry_run", True))
-
-    _base_result = {
+    _base: dict = {
         "manifest_id": manifest_id,
-        "manifest_name": "",
-        "source_folder": "",
-        "export_dir": export_dir,
-        "organize_images": organize_images,
-        "dry_run": dry_run,
-        "items": [],
-        "summary": {"total": 0, "ann_count": 0, "c_organized": 0, "ann_exported": 0, "errors": 0},
-        "output_json_path": "",
-        "error": None,
+        "dataset_id": dataset_id,
+        "submit_id": "",
+        "scope": scope,
+        "scope_count": 0,
+        "ok_count": 0,
+        "failed_count": 0,
+        "chunk_results": [],
+        "export_format": export_format,
+        "export_upload_status": "",
+        "validation_issues": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": "",
     }
 
-    # ── 1. 驗證 manifest_id ────────────────────────────────────────────────────
     if not manifest_id:
-        _log.error("[013] manifest_id 為空，返回 error")
-        return {**_base_result, "mode": "error", "error": "未選擇 Manifest"}
+        return {**_base, "mode": "error", "error": "未選擇 Manifest"}
+    if not dataset_id:
+        return {**_base, "mode": "error", "error": "未填寫資料集 ID"}
+    if not service_url:
+        return {**_base, "mode": "error", "error": "未填寫 Service URL"}
 
-    # ── 2. 讀取 manifest 基本資訊 ──────────────────────────────────────────────
     db_path = _cfg.get_manifest_db_path()
     manifest = _mdb.get_manifest(db_path, manifest_id)
     if manifest is None:
-        _log.error("[013] 找不到 manifest_id=%s", manifest_id)
-        return {**_base_result, "mode": "error", "error": f"找不到 Manifest：{manifest_id}"}
+        return {**_base, "mode": "error", "error": f"找不到 Manifest：{manifest_id}"}
 
-    manifest_name: str = manifest.get("name", manifest_id)
-    _log.info("[013] manifest: name=%s", manifest_name)
+    # ── 1. 組裝資料 ───────────────────────────────────────────────────────────
+    items = _mdb.get_manifest_items(db_path, manifest_id)
+    classifications = _cfg.load_classifications(manifest_id)
 
-    # ── 3. 讀取所有圖片項目 ────────────────────────────────────────────────────
-    all_db_items = _mdb.get_manifest_items(db_path, manifest_id)
-    _log.info("[013] 圖片數: %d", len(all_db_items))
+    shapes_map: dict[str, list[dict]] = {}
+    for it in items:
+        iid = it["item_id"]
+        ann = _p14._load_xany_annotation(it.get("file_path", ""))
+        shapes_map[iid] = _p14._parse_shapes(ann.get("shapes", []))
 
-    # ── 4. 讀取分類結果 ────────────────────────────────────────────────────────
-    classifications_path = _cfg.get_classification_path(manifest_id)
-    classifications: dict[str, str] = {}
-    if classifications_path.exists():
+    # ── 2. 驗證 ───────────────────────────────────────────────────────────────
+    validation_issues = validate_pre_sync(items, shapes_map, classifications)
+    _base["validation_issues"] = [
+        {"severity": vi.severity, "code": vi.code, "item_id": vi.item_id, "message": vi.message}
+        for vi in validation_issues
+    ]
+    if any(vi.severity == "error" for vi in validation_issues):
+        err_n = sum(1 for vi in validation_issues if vi.severity == "error")
+        return {**_base, "mode": "validation_error",
+                "error": f"發現 {err_n} 個錯誤，請修正後再送出"}
+
+    # ── 3. scope 篩選 ─────────────────────────────────────────────────────────
+    if scope == "partial":
+        send_items = [
+            it for it in items
+            if shapes_map.get(it["item_id"]) or classifications.get(it["item_id"], "")
+        ]
+    else:
+        send_items = list(items)
+
+    if not send_items:
+        return {**_base, "mode": "error", "error": "沒有可送出的項目（scope=partial 但無已標注項）"}
+
+    _base["scope_count"] = len(send_items)
+
+    # ── 4. 送出 (chunks) ──────────────────────────────────────────────────────
+    submit_id = str(uuid.uuid4())
+    _base["submit_id"] = submit_id
+
+    chunks = [send_items[i:i + CHUNK_SIZE] for i in range(0, len(send_items), CHUNK_SIZE)]
+    total_chunks = len(chunks)
+    chunk_results: list[dict] = []
+    ok_count = 0
+    failed_count = 0
+
+    sync_state = _cfg.load_sync_state(manifest_id)
+    item_states: dict = sync_state.get("items", {})
+
+    submit_url = f"{service_url}/api/v1/datasets/{dataset_id}/submissions"
+
+    for ci, chunk in enumerate(chunks):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload_items = []
+        for it in chunk:
+            iid = it["item_id"]
+            payload_items.append({
+                "item_id": iid,
+                "file_name": Path(it.get("file_path", iid)).name,
+                "classification": classifications.get(iid, ""),
+                "shapes": [
+                    {
+                        "label": s["label"],
+                        "shape_type": s["shape_type"],
+                        "x1": s["x1"], "y1": s["y1"],
+                        "x2": s["x2"], "y2": s["y2"],
+                        "polygon_pts": s.get("polygon_pts", []),
+                    }
+                    for s in shapes_map.get(iid, [])
+                ],
+            })
+
+        payload = {
+            "submit_id": submit_id,
+            "scope": scope,
+            "chunk_index": ci,
+            "total_chunks": total_chunks,
+            "items": payload_items,
+        }
+
         try:
-            classifications = json.loads(classifications_path.read_text(encoding="utf-8"))
-            _log.info("[013] 分類結果: %d 筆", len(classifications))
+            _post_json(submit_url, payload)
+            for it in chunk:
+                item_states[it["item_id"]] = {
+                    "status": "ok",
+                    "submit_id": submit_id,
+                    "synced_at": now_iso,
+                }
+            chunk_results.append({"chunk": ci, "status": "ok", "count": len(chunk)})
+            ok_count += len(chunk)
         except Exception as exc:
-            _log.error("[013] 分類結果讀取失敗: %s", exc)
-    else:
-        _log.info("[013] 無分類結果")
+            err_msg = str(exc)
+            for it in chunk:
+                item_states[it["item_id"]] = {
+                    "status": "failed",
+                    "submit_id": submit_id,
+                    "error": err_msg,
+                }
+            chunk_results.append({"chunk": ci, "status": "failed", "count": len(chunk), "error": err_msg})
+            failed_count += len(chunk)
 
-    # ── 5. source_folder（顯示用）+ export_dir ─────────────────────────────────
-    source_folder = _infer_source_folder(manifest, all_db_items)
-    _log.info("[013] source_folder (顯示用): %r", source_folder)
+    sync_state["items"] = item_states
+    _cfg.save_sync_state(manifest_id, sync_state)
 
-    if export_dir and export_dir.strip():
-        img_export_dir = export_dir.strip()
-    else:
-        img_export_dir = str(_cfg.get_default_export_dir(manifest_id))
-    _log.info("[013] img_export_dir: %r", img_export_dir)
+    _base["ok_count"] = ok_count
+    _base["failed_count"] = failed_count
+    _base["chunk_results"] = chunk_results
 
-    # ── 6. 建立 items 清單 ─────────────────────────────────────────────────────
-    items: list[dict] = []
-    c_organized = 0
-    ann_exported = 0
-    errors = 0
+    # ── 5. 格式包上傳 ─────────────────────────────────────────────────────────
+    export_upload_status = "skipped"
+    if export_format != "none" and ok_count > 0:
+        try:
+            zip_bytes = _build_format_zip(export_format, send_items, shapes_map)
+            if zip_bytes:
+                export_url = (
+                    f"{service_url}/api/v1/datasets/{dataset_id}"
+                    f"/submissions/{submit_id}/exports"
+                )
+                _post_multipart(
+                    export_url,
+                    {"format": export_format},
+                    zip_bytes,
+                    file_field="file",
+                    filename=f"{export_format}.zip",
+                )
+                export_upload_status = "ok"
+        except Exception as exc:
+            export_upload_status = f"failed: {exc}"
 
-    for it in all_db_items:
-        fp       = it.get("file_path", "")
-        item_id  = it.get("item_id", "")
-        filename = Path(fp).name if fp else ""
-        stem     = Path(fp).stem if fp else ""
+    _base["export_upload_status"] = export_upload_status
 
-        # 標注資訊：X-AnyLabeling 存在影像同目錄同名 .json
-        ann_src_path = Path(fp).with_suffix(".json") if fp else None
-        ann_src = str(ann_src_path) if (ann_src_path and ann_src_path.exists()) else ""
-        has_annotation = bool(ann_src)
-        shape_count = _count_shapes(ann_src) if has_annotation else 0
+    # ── 6. 歷史記錄 ───────────────────────────────────────────────────────────
+    finished_at = datetime.now(timezone.utc).isoformat()
+    _base["finished_at"] = finished_at
 
-        # 分類資訊
-        classification = classifications.get(item_id, "") or classifications.get(filename, "")
-
-        # C：複製圖片（+ 旁邊的 .json）到 export_dir/{分類名稱}/
-        if img_export_dir and classification and filename:
-            safe_label     = _safe_dirname(classification)
-            organized_dst  = str(Path(img_export_dir) / safe_label / filename)
-            ann_export_dst = str(Path(img_export_dir) / safe_label / f"{stem}.json") if has_annotation else ""
-            c_action = "copy"
-        elif classification and not img_export_dir:
-            organized_dst  = ""
-            ann_export_dst = ""
-            c_action = "skip"
-        elif not classification:
-            organized_dst  = ""
-            ann_export_dst = ""
-            c_action = "n/a"
+    if ok_count > 0 or failed_count > 0:
+        if failed_count == 0:
+            hist_status = "ok"
+        elif ok_count == 0:
+            hist_status = "fail"
         else:
-            organized_dst  = ""
-            ann_export_dst = ""
-            c_action = "skip"
+            hist_status = "partial_fail"
 
-        status    = "pending"
-        error_msg = ""
-
-        # ── 實際執行（dry_run=False）────────────────────────────────────────────
-        if not dry_run:
-            if organize_images and c_action == "copy" and fp and organized_dst:
-                # 複製圖片
-                try:
-                    src_path = Path(fp)
-                    dst_path = Path(organized_dst)
-                    if src_path.exists():
-                        dst_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(src_path, dst_path)
-                        c_organized += 1
-                        status = "ok"
-                        _log.info("[013][C] ✅ img  %s → %s", fp, organized_dst)
-                    else:
-                        error_msg += f"[C] 來源不存在：{fp} "
-                        errors += 1
-                        status = "error"
-                        _log.error("[013][C] ❌ 來源不存在: %s", fp)
-                except Exception as e:
-                    error_msg += f"[C] {e} "
-                    errors += 1
-                    status = "error"
-                    _log.error("[013][C] ❌ img copy 失敗 %s → %s | err=%s", fp, organized_dst, e)
-
-                # 複製標注 JSON（與圖片同目錄）
-                if ann_src and ann_export_dst:
-                    try:
-                        ann_dst_path = Path(ann_export_dst)
-                        ann_dst_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(ann_src, ann_dst_path)
-                        ann_exported += 1
-                        _log.info("[013][C] ✅ json %s → %s", ann_src, ann_export_dst)
-                    except Exception as e:
-                        error_msg += f"[C-json] {e} "
-                        errors += 1
-                        status = "error"
-                        _log.error("[013][C] ❌ json copy 失敗 %s → %s | err=%s", ann_src, ann_export_dst, e)
-
-            if status == "pending":
-                status = "ok"
-
-        items.append({
-            "file_path":      fp,
-            "filename":       filename,
-            "classification": classification,
-            "has_annotation": has_annotation,
-            "shape_count":    shape_count,
-            "annotation_src": ann_src,
-            "ann_export_dst": ann_export_dst,
-            "organized_dst":  organized_dst,
-            "c_action":       c_action if organize_images else "n/a",
-            "status":         status,
-            "error_msg":      error_msg.strip(),
+        _cfg.append_sync_history(manifest_id, {
+            "submit_id": submit_id,
+            "dataset_id": dataset_id,
+            "scope": scope,
+            "scope_count": len(send_items),
+            "ok_count": ok_count,
+            "failed_count": failed_count,
+            "formats": [export_format] if export_format != "none" else [],
+            "export_upload_status": export_upload_status,
+            "started_at": _base["started_at"],
+            "finished_at": finished_at,
+            "status": hist_status,
         })
 
-    # ── 7. 統計摘要 ────────────────────────────────────────────────────────────
-    total     = len(items)
-    ann_count = sum(1 for it in items if it["has_annotation"])
-    c_cnt     = sum(1 for it in items if it["c_action"] == "copy")
-    c_skip    = sum(1 for it in items if it["c_action"] == "skip")
-    c_na      = sum(1 for it in items if it["c_action"] == "n/a")
+    # ── 7. 最終 mode ──────────────────────────────────────────────────────────
+    if failed_count == 0:
+        mode = "done"
+    elif ok_count == 0:
+        mode = "fail"
+    else:
+        mode = "partial_fail"
 
-    _log.info("[013] total=%d has_annotation=%d", total, ann_count)
-    _log.info("[013] C: copy=%d skip=%d n/a=%d", c_cnt, c_skip, c_na)
-    if c_cnt == 0:
-        _log.warning("[013] c_action=copy 為 0 → 無分類記錄或無 export_dir，確認按鈕將 disabled")
-    if not dry_run:
-        _log.info("[013] 執行結果: c_organized=%d ann_exported=%d errors=%d",
-                  c_organized, ann_exported, errors)
-
-    summary = {
-        "total":        total,
-        "ann_count":    ann_count,
-        "c_organized":  c_organized,
-        "ann_exported": ann_exported,
-        "errors":       errors,
-    }
-
-    # ── 8. 寫入 output JSON（dry_run=False 才寫，存在 export_dir）───────────────
-    output_json_path = ""
-    if not dry_run:
-        try:
-            ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_dir = Path(img_export_dir) if img_export_dir else _cfg.get_default_export_dir(manifest_id)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            output_json_path = str(out_dir / f"update_result_{ts}.json")
-            output_data = {
-                "manifest_id":    manifest_id,
-                "manifest_name":  manifest_name,
-                "source_folder":  source_folder,
-                "export_dir":     img_export_dir,
-                "organize_images": organize_images,
-                "summary":        summary,
-                "items":          items,
-            }
-            Path(output_json_path).write_text(
-                json.dumps(output_data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            _log.info("[013] output JSON: %s", output_json_path)
-        except Exception as e:
-            output_json_path = f"[寫入失敗] {e}"
-            _log.error("[013] output JSON 寫入失敗: %s", e)
-
-    mode = "preview" if dry_run else "done"
-    _log.info("[013] execute_logic 完成 ✔  mode=%s", mode)
-    _log.info("=" * 60)
-
-    return {
-        "mode":           mode,
-        "manifest_id":    manifest_id,
-        "manifest_name":  manifest_name,
-        "source_folder":  source_folder,
-        "export_dir":     img_export_dir,
-        "organize_images": organize_images,
-        "dry_run":        dry_run,
-        "items":          items,
-        "summary":        summary,
-        "output_json_path": output_json_path,
-        "error":          None,
-    }
+    return {**_base, "mode": mode, "error": None}

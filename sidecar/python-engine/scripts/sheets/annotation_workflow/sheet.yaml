@@ -9,7 +9,7 @@ tabs:
   - plugin_id: module_012
     label: 🏷️ Annotation
   - plugin_id: module_013
-    label: 🔄 Update
+    label: 🔄 Sync Back
   - plugin_id: module_014
     label: 📤 Export
   - plugin_id: module_016

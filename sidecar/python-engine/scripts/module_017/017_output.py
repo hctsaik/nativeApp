@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import importlib.util as _ilu
 from pathlib import Path
 
 import streamlit as st
@@ -159,6 +160,53 @@ def _render_dashboard(data: dict) -> None:
                 )
     else:
         st.caption("尚無匯出記錄")
+
+    # ── 最後同步記錄（module_013）─────────────────────────────────────────────
+    st.divider()
+    st.subheader("同步至 Service")
+    _render_last_sync(manifest_id)
+
+
+def _render_last_sync(manifest_id: str) -> None:
+    try:
+        _cfg013_spec = _ilu.spec_from_file_location(
+            "_013_config",
+            Path(__file__).resolve().parents[1] / "module_013" / "_config.py",
+        )
+        _cfg013 = _ilu.module_from_spec(_cfg013_spec)
+        _cfg013_spec.loader.exec_module(_cfg013)
+        entries = _cfg013.read_sync_history(manifest_id, limit=10)
+    except Exception:
+        entries = []
+
+    if not entries:
+        st.caption("尚無同步記錄。完成標注後請至 **🔄 Sync Back** 頁籤送出。")
+        return
+
+    last = entries[-1]
+    started = last.get("started_at", "")[:19].replace("T", " ")
+    status_label = {"ok": "✅ 完全成功", "partial_fail": "⚠️ 部分失敗", "fail": "❌ 全部失敗"}.get(
+        last.get("status", ""), last.get("status", "")
+    )
+    fmts = ", ".join(last.get("formats", [])) or "無"
+    st.markdown(
+        f"**最近一次**：{started}　｜　scope: {last.get('scope', '')}　"
+        f"｜　{last.get('ok_count', 0)} / {last.get('scope_count', 0)} 筆成功　"
+        f"｜　格式: {fmts}　｜　{status_label}"
+    )
+
+    if len(entries) > 1:
+        with st.expander(f"查看全部 {len(entries)} 筆記錄"):
+            rows = []
+            for e in reversed(entries):
+                rows.append({
+                    "時間": (e.get("started_at") or "")[:19].replace("T", " "),
+                    "scope": e.get("scope", ""),
+                    "成功/總計": f"{e.get('ok_count', 0)} / {e.get('scope_count', 0)}",
+                    "格式": ", ".join(e.get("formats", [])) or "無",
+                    "狀態": {"ok": "✅", "partial_fail": "⚠️", "fail": "❌"}.get(e.get("status", ""), ""),
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 # ── Label Manager ─────────────────────────────────────────────────────────────

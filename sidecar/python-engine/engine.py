@@ -325,6 +325,15 @@ class SQLiteToolAdapter(ToolAdapter):
             except Exception:
                 pass
 
+            # migration: update module_013 label to Sync Back
+            try:
+                connection.execute(
+                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
+                    ("\U0001f504 Sync Back", "annotation_workflow", "module_013"),
+                )
+            except Exception:
+                pass
+
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
 
