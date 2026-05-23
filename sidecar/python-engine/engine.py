@@ -299,8 +299,13 @@ class SQLiteToolAdapter(ToolAdapter):
                 ).fetchone()
                 if not exists:
                     # Shift all existing annotation_workflow tabs up by 1
+                    # Two-step to avoid UNIQUE(sheet_id, tab_order) conflict
                     connection.execute(
-                        "UPDATE sheet_tabs SET tab_order = tab_order + 1 WHERE sheet_id = ?",
+                        "UPDATE sheet_tabs SET tab_order = -(tab_order + 1) WHERE sheet_id = ?",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order = -tab_order WHERE sheet_id = ?",
                         ("annotation_workflow",),
                     )
                     connection.execute(
