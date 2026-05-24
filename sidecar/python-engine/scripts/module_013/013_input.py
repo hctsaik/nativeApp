@@ -51,9 +51,8 @@ def _load_shapes_and_clf(manifest_id: str, items: list[dict]) -> tuple[dict, dic
 
 
 def render_input() -> dict:
-    st.subheader("🔄 Sync Back — 同步標注結果至 Service")
+    _help.render_help_button("module_013", "input", "🔄 Sync Back — 同步標注結果至 Service")
     st.caption("將目前 Manifest 的標注（bbox / 分類）批次推送至遠端 Service，並附帶訓練格式壓縮檔。")
-    _help.render_help_button("module_013", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

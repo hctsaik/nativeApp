@@ -558,8 +558,13 @@ _HELP_CONTENT: dict[str, str] = {
 # 主函式
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_help_button(module_id: str, side: str = "input") -> None:
-    """Small inline ? badge next to module description; click opens user manual modal.
+def render_help_button(module_id: str, side: str = "input", title: str = "") -> None:
+    """Inline ? badge; click opens user manual modal.
+
+    Args:
+        title: When provided, renders an <h3> heading with the badge inline —
+               replaces the caller's st.subheader() call.  When empty, renders
+               only a compact 22-px badge row (backward-compat).
 
     Uses a pure-CSS checkbox trick — no JavaScript needed, works inside Streamlit's
     React renderer which strips onclick and <script> tags from st.markdown HTML.
@@ -650,24 +655,49 @@ def render_help_button(module_id: str, side: str = "input") -> None:
     display: block;
 }
 .cim-help-close:hover { color: #111; }
+
+/* Page-level heading rendered with inline badge */
+.cim-help-heading {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: rgb(49, 51, 63);
+    margin: 0.25rem 0 0.15rem 0;
+    padding: 0;
+    line-height: 1.4;
+    display: block;
+}
 </style>""", unsafe_allow_html=True)
 
-    # ── Badge + Modal in one block ────────────────────────────────────────────
-    # Structure: input(toggle) → label(badge) → div(overlay)
-    # CSS rule ".cim-help-toggle:checked ~ .cim-help-overlay" shows the overlay
-    # when the hidden checkbox is checked.  Labels toggle the checkbox on click.
-    # The wrapper div keeps the badge compact (22px) while overlay is position:fixed.
-    st.markdown(
-        f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
-        f'<input type="checkbox" class="cim-help-toggle" id="{uid}-toggle">'
-        f'<label for="{uid}-toggle" class="cim-help-badge" title="查看使用說明">?</label>'
+    # ── Badge + Modal in one block ─────────────────────────────────────────────
+    # DOM order inside wrapper: input(toggle) → content(badge) → div(overlay)
+    # CSS rule ".cim-help-toggle:checked ~ .cim-help-overlay" makes them siblings,
+    # so checking the toggle shows the overlay. Labels toggle the checkbox on click.
+    _toggle = f'<input type="checkbox" class="cim-help-toggle" id="{uid}-toggle">'
+    _badge  = f'<label for="{uid}-toggle" class="cim-help-badge" title="查看使用說明">?</label>'
+    _overlay = (
         f'<div class="cim-help-overlay">'
-        f'  <label for="{uid}-toggle" class="cim-help-backdrop"></label>'
-        f'  <div class="cim-help-card">'
-        f'    <label for="{uid}-toggle" class="cim-help-close" title="關閉">✕</label>'
-        f'    {html_content}'
-        f'  </div>'
-        f'</div>'
-        f'</div>',
-        unsafe_allow_html=True,
+        f'<label for="{uid}-toggle" class="cim-help-backdrop"></label>'
+        f'<div class="cim-help-card">'
+        f'<label for="{uid}-toggle" class="cim-help-close" title="關閉">✕</label>'
+        f'{html_content}'
+        f'</div></div>'
     )
+
+    if title:
+        # Render heading with badge inline — replaces the caller's st.subheader()
+        st.markdown(
+            f'<div style="overflow:visible;margin:0 0 4px 0;">'
+            f'{_toggle}'
+            f'<span class="cim-help-heading">{title} {_badge}</span>'
+            f'{_overlay}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        # Compact 22-px badge row for output pages that have no page-level title
+        st.markdown(
+            f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
+            f'{_toggle}{_badge}{_overlay}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )

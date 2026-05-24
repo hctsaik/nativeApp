@@ -25,9 +25,8 @@ _FILTER_OPTIONS = ["全部", "已標注 (有 BBox)", "未標注", "已分類", "
 
 
 def render_input() -> dict:
-    st.subheader("🖼️ Review Gallery — 標注審查")
+    _help.render_help_button("module_018", "input", "🖼️ Review Gallery — 標注審查")
     st.caption("以 Grid 縮略圖 + BBox overlay 快速瀏覽標注結果")
-    _help.render_help_button("module_018", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

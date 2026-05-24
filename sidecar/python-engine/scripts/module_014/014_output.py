@@ -51,7 +51,7 @@ def _render_validation_issues(issues: list[dict]) -> None:
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_014", "output")
+    _help.render_help_button("module_014", "output", "📤 Export — 匯出結果")
     mode = result.get("mode", "idle")
 
     if mode == "idle":

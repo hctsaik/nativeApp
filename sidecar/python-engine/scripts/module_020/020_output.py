@@ -38,7 +38,7 @@ def _do_query(params: dict, page: int) -> dict:
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_020", "output")
+    _help.render_help_button("module_020", "output", "📥 Download — 查詢結果")
     mode = result.get("mode", "idle")
 
     # ── 下載完成結果（由 EXECUTE 觸發後寫入 session）────────────────────────────

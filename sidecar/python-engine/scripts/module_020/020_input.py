@@ -18,10 +18,9 @@ _help_spec.loader.exec_module(_help)
 
 
 def render_input() -> dict:
-    st.subheader("📥 Download")
+    _help.render_help_button("module_020", "input", "📥 Download")
     st.caption("查詢透過 Sync Back 上傳至 Service 的標注批次，選取後重新下載。")
     st.caption("標示 `*` 為必填，其餘為選填。")
-    _help.render_help_button("module_020", "input")
 
     cfg = _cfg.load_config()
 

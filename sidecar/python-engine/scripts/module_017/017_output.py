@@ -452,7 +452,7 @@ def _render_label_manager(manifest_id: str, data: dict) -> None:
 # ── 主進入點 ──────────────────────────────────────────────────────────────────
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_017", "output")
+    _help.render_help_button("module_017", "output", "📊 管理中心 — 統計")
     if not result or result.get("error"):
         st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
         if result and result.get("error"):

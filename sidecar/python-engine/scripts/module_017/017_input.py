@@ -23,9 +23,8 @@ _help_spec.loader.exec_module(_help)
 
 
 def render_input() -> dict:
-    st.subheader("📊 管理中心")
+    _help.render_help_button("module_017", "input", "📊 管理中心")
     st.caption("標注進度統計、標籤管理（改名 / 合併 / 刪除）")
-    _help.render_help_button("module_017", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

@@ -21,9 +21,8 @@ _help_spec.loader.exec_module(_help)
 
 
 def render_input() -> dict:
-    st.subheader("🌐 Data Downloader — 從遠端服務取得資料集")
+    _help.render_help_button("module_019", "input", "🌐 Data Downloader — 從遠端服務取得資料集")
     st.caption("打 Service 下載資料包（ZIP），解壓後交由 Data Feeder 建立 Manifest。")
-    _help.render_help_button("module_019", "input")
 
     cfg = _cfg.load_config()
 

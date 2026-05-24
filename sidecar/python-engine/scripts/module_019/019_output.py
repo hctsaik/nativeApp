@@ -29,7 +29,7 @@ _STATUS_LABEL = {
 
 
 def render_output(result: dict = None) -> None:
-    _help.render_help_button("module_019", "output")
+    _help.render_help_button("module_019", "output", "🌐 Data Downloader — 下載結果")
     result: dict = st.session_state.get("last_result", {})
     mode = result.get("mode", "idle")
 

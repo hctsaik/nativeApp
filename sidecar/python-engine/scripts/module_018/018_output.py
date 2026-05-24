@@ -256,7 +256,7 @@ PAGE_SIZE = 30
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_018", "output")
+    _help.render_help_button("module_018", "output", "🖼️ Review Gallery")
     if not result or result.get("error"):
         st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
         if result and result.get("error"):

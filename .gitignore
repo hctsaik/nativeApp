@@ -23,6 +23,7 @@ venv/
 # 大型二進位 / 測試資料
 external_exe/
 testData/
+*.pt
 
 # PyInstaller
 sidecar/python-engine/dist/

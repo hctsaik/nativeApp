@@ -55,7 +55,7 @@ def _show_progress_panel() -> bool:
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_016", "output")
+    _help.render_help_button("module_016", "output", "🤖 AI Pre-labeling — 推論結果")
     mode = result.get("mode", "idle")
 
     # 優先顯示 live 進度（mode=idle 表示上一次 result 還沒更新）

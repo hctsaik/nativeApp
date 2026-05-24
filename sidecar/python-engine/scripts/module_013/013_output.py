@@ -65,7 +65,7 @@ def _render_history(manifest_id: str) -> None:
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_013", "output")
+    _help.render_help_button("module_013", "output", "🔄 Sync Back — 同步結果")
     mode = result.get("mode", "idle")
     manifest_id = result.get("manifest_id", "")
 

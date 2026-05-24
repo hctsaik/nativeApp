@@ -28,9 +28,8 @@ _DEFAULT_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"]
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
 def render_input() -> dict:
-    st.subheader("📦 Data Feeder — 資料來源設定")
+    _help.render_help_button("module_010", "input", "📦 Data Feeder — 資料來源設定")
     st.caption("從資料夾、資料庫或 API 建立標準化圖片清單（DatasetManifest）")
-    _help.render_help_button("module_010", "input")
 
     cfg = _cfg.load_config()
 

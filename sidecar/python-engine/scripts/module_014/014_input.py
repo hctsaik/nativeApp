@@ -46,9 +46,8 @@ def _browse_directory() -> str:
 
 
 def render_input() -> dict:
-    st.subheader("📤 Export — 多格式標注匯出")
+    _help.render_help_button("module_014", "input", "📤 Export — 多格式標注匯出")
     st.caption("將標注結果匯出為各種 ML 訓練框架所需格式。")
-    _help.render_help_button("module_014", "input")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
