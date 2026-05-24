@@ -551,6 +551,82 @@ _HELP_CONTENT: dict[str, str] = {
   <li>Rejected 的圖片可回到 Annotation 模組重新標注，修正後可再次 Approve。</li>
 </ul>
 """,
+
+    # ── module_021 ────────────────────────────────────────────────────────────
+    "module_021_input": """
+<h3>🔭 Vision DIY — 使用說明</h3>
+<p><strong>功能說明：</strong>將部署在 k8s（或任何 HTTPS 位址）的 React Web App 嵌入平台，並讓它能直接觸發本地標注工具。</p>
+
+<h4>📋 操作步驟</h4>
+<ol>
+  <li>在 <strong>Web App URL</strong> 欄位填入你的 HTTPS 網址，例如 <code>https://your-k8s-app.example.com</code>。</li>
+  <li>按下「執行」按鈕，Output 頁面就會以 iframe 顯示該應用程式。</li>
+  <li>之後只要切換到 Output 頁籤即可使用，不須每次重新執行（URL 已儲存在本機）。</li>
+</ol>
+
+<h4>⚠️ URL 規範</h4>
+<ul>
+  <li>必須以 <code>https://</code> 開頭，HTTP 不被支援。</li>
+  <li>你的 k8s / nginx 服務需允許被 iframe 嵌入（見下方設定）。</li>
+</ul>
+
+<h4>🔧 k8s / nginx 必要設定</h4>
+<p>若 iframe 顯示空白，代表伺服器阻擋了嵌入。請在 nginx server block 或 ingress 加入：</p>
+<pre style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;">
+add_header X-Frame-Options "ALLOWALL" always;
+add_header Content-Security-Policy "frame-ancestors *" always;
+</pre>
+<p>若使用 <strong>k8s ingress-nginx</strong>，在 Ingress manifest 的 annotation 加入：</p>
+<pre style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;">
+nginx.ingress.kubernetes.io/configuration-snippet: |
+  add_header X-Frame-Options "ALLOWALL" always;
+  add_header Content-Security-Policy "frame-ancestors *" always;
+</pre>
+<p><code>always</code> 確保錯誤頁面也套用，避免 Chromium 在某些狀況仍然拒絕渲染。</p>
+""",
+
+    "module_021_output": """
+<h3>🔭 Vision DIY — 輸出說明</h3>
+<p><strong>功能說明：</strong>全版顯示外部 Web App，並橋接 postMessage 讓它能呼叫本地標注工具。</p>
+
+<h4>📡 postMessage 橋接協定</h4>
+<p>在你的 React App 裡，用以下程式碼觸發本地動作：</p>
+<pre style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;">
+// ① 直接開啟 X-AnyLabeling 標記指定圖片（圖片會從 URL 下載到本機）
+window.parent.postMessage({
+  cim: "v1",
+  action: "open_xanylabeling",
+  imageUrl: "https://your-server.com/image.jpg"
+}, "*");
+
+// ② 將圖片加入標注佇列（TopBar 顯示計數）
+window.parent.postMessage({
+  cim: "v1",
+  action: "queue_image",
+  imageUrl: "https://your-server.com/image.jpg",
+  metadata: { label: "defect" }  // 選填
+}, "*");
+</pre>
+
+<h4>🔧 k8s / nginx 必要設定</h4>
+<p>若 iframe 顯示空白，請在 nginx 加入以下 header（<code>always</code> 確保錯誤頁也套用）：</p>
+<pre style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;">
+add_header X-Frame-Options "ALLOWALL" always;
+add_header Content-Security-Policy "frame-ancestors *" always;
+</pre>
+<p>k8s ingress-nginx 的 Ingress manifest annotation：</p>
+<pre style="background:#1e293b;color:#e2e8f0;padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;">
+nginx.ingress.kubernetes.io/configuration-snippet: |
+  add_header X-Frame-Options "ALLOWALL" always;
+  add_header Content-Security-Policy "frame-ancestors *" always;
+</pre>
+
+<h4>📂 本機存放路徑</h4>
+<ul>
+  <li>下載的圖片：<code>{CIM_LOG_DIR}/external-queue/</code></li>
+  <li>xanylabeling GUI 狀態：<code>{CIM_LOG_DIR}/xanylabeling_state/external/</code></li>
+</ul>
+""",
 }
 
 

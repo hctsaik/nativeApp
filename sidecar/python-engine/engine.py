@@ -311,6 +311,7 @@ class SQLiteToolAdapter(ToolAdapter):
             (7, "module_016", "\U0001f916 AI Pre-labeling"),
             (8, "module_017", "\U0001f3f7\ufe0f Label Manager"),
             (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
+            (10, "module_021", "\U0001f52d Vision DIY"),
         ]
         plugin_ids = [plugin_id for _, plugin_id, _ in desired_tabs]
         placeholders = ",".join("?" for _ in plugin_ids)

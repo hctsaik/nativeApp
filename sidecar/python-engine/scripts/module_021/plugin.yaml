@@ -1,0 +1,15 @@
+id: module_021
+vendor: cimcore
+domain: pipeline
+name: Vision DIY
+version: "1.0.0"
+category: module
+description: 將外部 Web App 透過 iframe 嵌入平台，支援 postMessage 觸發 xanylabeling 或標注佇列
+author: system
+enabled: true
+tags: [vision, external, iframe, annotation]
+runner: cv_framework
+input_file: 021_input.py
+output_file: 021_output.py
+process_file: 021_process.py
+aliases: []
