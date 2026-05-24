@@ -558,6 +558,45 @@ _HELP_CONTENT: dict[str, str] = {
 # 主函式
 # ─────────────────────────────────────────────────────────────────────────────
 
+_CSS = """<style>
+.cim-help-toggle { display: none; }
+.cim-help-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #1a73e8; color: #fff; font-size: 11px; font-weight: bold;
+    cursor: pointer; user-select: none; opacity: 0.7; transition: opacity .15s;
+    vertical-align: middle; line-height: 1; margin-left: 4px;
+}
+.cim-help-badge:hover { opacity: 1; }
+.cim-help-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 99999;
+    align-items: center; justify-content: center;
+}
+.cim-help-toggle:checked ~ .cim-help-overlay { display: flex; }
+.cim-help-backdrop { position: absolute; inset: 0; cursor: pointer; z-index: 0; }
+.cim-help-card {
+    position: relative; z-index: 1; background: #fff;
+    border-radius: 12px; padding: 32px 36px;
+    max-width: 720px; width: 92vw; max-height: 80vh;
+    overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,.22);
+}
+.cim-help-card h3 { margin-top: 0; color: #1a73e8; }
+.cim-help-card h4 { color: #333; margin-top: 20px; }
+.cim-help-card ol, .cim-help-card ul { padding-left: 20px; line-height: 1.8; }
+.cim-help-card code { background: #f0f4ff; padding: 1px 5px; border-radius: 4px; }
+.cim-help-close {
+    position: absolute; top: 14px; right: 18px;
+    font-size: 22px; cursor: pointer; color: #666; line-height: 1; display: block;
+}
+.cim-help-close:hover { color: #111; }
+.cim-help-heading {
+    font-size: 1.25rem; font-weight: 600; color: rgb(49, 51, 63);
+    margin: 0.25rem 0 0.15rem 0; padding: 0; line-height: 1.4; display: block;
+}
+</style>"""
+
+
 def render_help_button(module_id: str, side: str = "input", title: str = "") -> None:
     """Inline ? badge; click opens user manual modal.
 
@@ -568,110 +607,21 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
 
     Uses a pure-CSS checkbox trick — no JavaScript needed, works inside Streamlit's
     React renderer which strips onclick and <script> tags from st.markdown HTML.
+
+    CSS is inlined into every call (not session_state-guarded) so the render tree
+    always has exactly one st.markdown element. A guard would cause the tree to
+    shrink on reruns ([CSS, badge] → [badge]), making React move elements and
+    produce a visible layout shift.
     """
 
     uid = f"cim-help-{module_id}-{side}"
     content_key = f"{module_id}_{side}"
     html_content = _HELP_CONTENT.get(content_key, "<p>（尚無使用說明）</p>")
 
-    # ── Global CSS — injected once per page ───────────────────────────────────
-    if "cim_help_css_injected" not in st.session_state:
-        st.session_state["cim_help_css_injected"] = True
-        st.markdown("""<style>
-/* Hidden checkbox that drives the modal open/close */
-.cim-help-toggle { display: none; }
-
-/* Small inline ? badge */
-.cim-help-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #1a73e8;
-    color: #fff;
-    font-size: 11px;
-    font-weight: bold;
-    cursor: pointer;
-    user-select: none;
-    opacity: 0.7;
-    transition: opacity .15s;
-    vertical-align: middle;
-    line-height: 1;
-    margin-left: 4px;
-}
-.cim-help-badge:hover { opacity: 1; }
-
-/* Full-screen overlay — hidden by default */
-.cim-help-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.45);
-    z-index: 99999;
-    align-items: center;
-    justify-content: center;
-}
-
-/* Show overlay when sibling checkbox is checked */
-.cim-help-toggle:checked ~ .cim-help-overlay { display: flex; }
-
-/* Clickable backdrop (label for checkbox) */
-.cim-help-backdrop {
-    position: absolute;
-    inset: 0;
-    cursor: pointer;
-    z-index: 0;
-}
-
-/* Modal card */
-.cim-help-card {
-    position: relative;
-    z-index: 1;
-    background: #fff;
-    border-radius: 12px;
-    padding: 32px 36px;
-    max-width: 720px;
-    width: 92vw;
-    max-height: 80vh;
-    overflow-y: auto;
-    box-shadow: 0 8px 32px rgba(0,0,0,.22);
-}
-.cim-help-card h3 { margin-top: 0; color: #1a73e8; }
-.cim-help-card h4 { color: #333; margin-top: 20px; }
-.cim-help-card ol, .cim-help-card ul { padding-left: 20px; line-height: 1.8; }
-.cim-help-card code { background: #f0f4ff; padding: 1px 5px; border-radius: 4px; }
-
-/* Close label (× button) */
-.cim-help-close {
-    position: absolute;
-    top: 14px;
-    right: 18px;
-    font-size: 22px;
-    cursor: pointer;
-    color: #666;
-    line-height: 1;
-    display: block;
-}
-.cim-help-close:hover { color: #111; }
-
-/* Page-level heading rendered with inline badge */
-.cim-help-heading {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: rgb(49, 51, 63);
-    margin: 0.25rem 0 0.15rem 0;
-    padding: 0;
-    line-height: 1.4;
-    display: block;
-}
-</style>""", unsafe_allow_html=True)
-
-    # ── Badge + Modal in one block ─────────────────────────────────────────────
-    # DOM order inside wrapper: input(toggle) → content(badge) → div(overlay)
-    # CSS rule ".cim-help-toggle:checked ~ .cim-help-overlay" makes them siblings,
-    # so checking the toggle shows the overlay. Labels toggle the checkbox on click.
+    # ── Badge + Modal — always one st.markdown call, structure never changes ──
+    # DOM order: input(toggle) → content → div(overlay)
+    # CSS rule ".cim-help-toggle:checked ~ .cim-help-overlay { display:flex }"
+    # makes the overlay visible when the checkbox is checked. Labels toggle it.
     _toggle = f'<input type="checkbox" class="cim-help-toggle" id="{uid}-toggle">'
     _badge  = f'<label for="{uid}-toggle" class="cim-help-badge" title="查看使用說明">?</label>'
     _overlay = (
@@ -684,8 +634,8 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
     )
 
     if title:
-        # Render heading with badge inline — replaces the caller's st.subheader()
         st.markdown(
+            f'{_CSS}'
             f'<div style="overflow:visible;margin:0 0 4px 0;">'
             f'{_toggle}'
             f'<span class="cim-help-heading">{title} {_badge}</span>'
@@ -694,8 +644,8 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
             unsafe_allow_html=True,
         )
     else:
-        # Compact 22-px badge row for output pages that have no page-level title
         st.markdown(
+            f'{_CSS}'
             f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
             f'{_toggle}{_badge}{_overlay}'
             f'</div>',
