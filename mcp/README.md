@@ -10,7 +10,7 @@ This folder contains MCP servers for the CIM platform.
 The annotation MCP server exposes `annotation_*` tools backed by the sidecar
 annotation common component. It does not automate the X-AnyLabeling GUI; it
 creates datasets, schemas, annotation sets, validation reports, review
-decisions, X-AnyLabeling project folders, and derived exports.
+decisions, labeling project folders, and derived exports.
 
 For the current integration progress, runtime setup, validation status, and
 next steps, see `../docs/ANNOTATION_XANYLABELING.md`.
@@ -36,11 +36,17 @@ Common tools:
 | `annotation_validate_set` | Validate against schema and geometry rules |
 | `annotation_submit_for_review` | Submit a valid annotation set |
 | `annotation_review_task` | Approve, reject, or request changes |
-| `annotation_prepare_xanylabeling_project` | Prepare a local project folder |
+| `annotation_supported_annotation_formats` | List import/export format support |
+| `annotation_prepare_labeling_project` | Prepare a local LabelMe/X-AnyLabeling/ISAT project folder |
+| `annotation_prepare_xanylabeling_project` | Compatibility alias for X-AnyLabeling project preparation |
 | `annotation_detect_xanylabeling` | Detect installed X-AnyLabeling runtime |
 | `annotation_launch_xanylabeling_project` | Launch X-AnyLabeling for a prepared project folder |
+| `annotation_detect_labeling_tool` | Detect a supported labeling tool runtime |
+| `annotation_launch_labeling_project` | Launch a supported labeling tool for a prepared project folder |
 | `annotation_import_xanylabeling` | Import LabelMe/X-AnyLabeling JSON |
-| `annotation_create_export` | Export LabelMe, COCO, or YOLO detection artifacts |
+| `annotation_import_annotations` | Import one supported annotation file, including LabelMe/X-AnyLabeling, ISAT, and COCO |
+| `annotation_import_project_labels` | Import supported project labels directories, including LabelMe/X-AnyLabeling, ISAT, YOLO detection, and YOLO segmentation |
+| `annotation_create_export` | Export LabelMe, X-AnyLabeling, ISAT, COCO, YOLO detection, or YOLO segmentation artifacts |
 
 ---
 

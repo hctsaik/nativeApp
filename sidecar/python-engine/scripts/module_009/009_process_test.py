@@ -258,6 +258,17 @@ def test_worker_outputs_xanylabeling_json_format(tmp_db, tmp_path):
     assert "confidence=" in data["shapes"][0]["description"]
 
 
+def test_frame_annotation_source_accepts_labelme_and_isat(tmp_db):
+    _, sid = _insert_asset(tmp_db, "/fake/source.mp4")
+    ann_json = json.dumps({"version": "6.0.0", "shapes": [], "imagePath": "frame.jpg"})
+
+    db.upsert_frame_annotation(tmp_db, sid, 0, ann_json, None, "labelme")
+    db.upsert_frame_annotation(tmp_db, sid, 1, ann_json, None, "isat")
+
+    sources = {row["source"] for row in db.get_frame_annotations(tmp_db, sid)}
+    assert {"labelme", "isat"} <= sources
+
+
 def test_worker_flow_only_when_dino_unavailable(tmp_db, tmp_path):
     from _worker import DINO_AVAILABLE, _optical_flow_track
     import numpy as np

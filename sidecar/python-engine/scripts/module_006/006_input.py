@@ -42,6 +42,11 @@ def _get_manifest_db_path_006() -> Path:
     return _cim_log / "db" / "manifest.sqlite"
 
 CATEGORIES = ["ALL", "貓", "狗", "大象"]
+ANNOTATION_TOOLS = {
+    "X-AnyLabeling": "x-anylabeling",
+    "LabelMe": "labelme",
+    "ISAT": "isat",
+}
 
 
 # ── step state helpers ────────────────────────────────────────────────────────
@@ -148,6 +153,7 @@ def _render_phase1(workspace_root: str) -> dict:
     with col1:
         category   = st.selectbox("篩選動物類別", CATEGORIES, index=0,
                                   help="要匯入 X-AnyLabeling 的動物類別")
+        tool_label = st.selectbox("Labeling Tool", list(ANNOTATION_TOOLS), index=0)
         default_labels = ", ".join(get_annotation_labels())
         labels_raw = st.text_input(
             "標注 Labels（逗號分隔）",
@@ -159,19 +165,21 @@ def _render_phase1(workspace_root: str) -> dict:
         image_dir  = st.text_input("影像目錄",   value=str(_DEFAULT_ANIMAL_DIR), key="p1_img")
 
     workspace_root = st.text_input("Workspace 根目錄", value=workspace_root)
-    launch_xany    = st.checkbox("準備完成後自動啟動 X-AnyLabeling", value=True)
+    launch_tool    = st.checkbox("準備完成後自動啟動 labeling tool", value=True)
 
     labels = [lbl.strip() for lbl in labels_raw.split(",") if lbl.strip()]
     if labels:
         set_annotation_labels(labels)
     return {
         "mode": "xany_phase1",
+        "annotation_tool": ANNOTATION_TOOLS[tool_label],
         "category":       category,
         "labels":         labels,
         "db_path":        db_path,
         "image_dir":      image_dir,
         "workspace_root": workspace_root,
-        "launch_xany":    launch_xany,
+        "launch_labeling_tool": launch_tool,
+        "launch_xany":    launch_tool,
     }
 
 

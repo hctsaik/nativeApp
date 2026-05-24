@@ -17,12 +17,15 @@ The MVP is implemented and validated for:
 - Basic review and approval.
 - Local workspace storage with SQLite metadata.
 - Artifact files with checksums.
-- LabelMe / X-AnyLabeling-compatible JSON exchange.
+- LabelMe / X-AnyLabeling-compatible JSON import/export.
+- Native ISAT JSON import/export.
 - X-AnyLabeling project folder preparation.
+- ISAT project folder preparation.
 - X-AnyLabeling runtime detection.
 - Optional X-AnyLabeling GUI launch handoff.
-- COCO export.
-- YOLO detection export.
+- COCO import/export.
+- YOLO detection import/export.
+- YOLO segmentation import/export.
 - Conversion reports and export manifests.
 - Electron visual workflow demo through `module_008`.
 - Generic `annotation_*` MCP server package.
@@ -36,7 +39,7 @@ The MVP is implemented and validated for:
 - 4-point rectangle bbox fix for X-AnyLabeling import (min/max over all points).
 - Browse mode reads labels_dir from session.json; X-Any annotations visible without Phase 2.
 
-The current design keeps `annotation-core` as the only canonical source of truth. X-AnyLabeling, LabelMe, COCO, and YOLO files are adapter inputs or derived artifacts.
+The current design keeps `annotation-core` as the only canonical source of truth. X-AnyLabeling, LabelMe, ISAT, COCO, and YOLO files are adapter inputs or derived artifacts.
 
 ## Installed X-AnyLabeling Runtime
 
@@ -105,10 +108,13 @@ sidecar/python-engine/annotation/
     workspace.py
   adapters/
     labelme.py
+    isat.py
+    labeling_runtime.py
     xanylabeling.py
     xanylabeling_runtime.py
     coco.py
     yolo_detection.py
+    yolo_segmentation.py
   domains/
     animal/schema_presets.py
   services.py
@@ -149,12 +155,12 @@ Despite the historical "Demo" suffix, the module now supports the MVP workflow:
 1. Create dataset/schema.
 2. Select generated sample, host-selected image, extra images, or image folders.
 3. Create canonical annotation set.
-4. Prepare X-AnyLabeling project folder.
-5. Optionally launch X-AnyLabeling.
-6. Optionally import reviewed LabelMe/X-AnyLabeling JSON.
+4. Prepare a LabelMe/X-AnyLabeling/ISAT project folder.
+5. Optionally launch the selected labeling tool.
+6. Optionally import reviewed LabelMe/X-AnyLabeling/ISAT/COCO/YOLO labels.
 7. Validate.
 8. Submit and approve.
-9. Export LabelMe, COCO, and YOLO detection artifacts.
+9. Export LabelMe, X-AnyLabeling, ISAT, COCO, YOLO detection, or YOLO segmentation artifacts.
 10. Show visual preview and export content in Output.
 
 Default project output:
@@ -231,10 +237,16 @@ annotation_upsert_annotations
 annotation_validate_set
 annotation_submit_for_review
 annotation_review_task
+annotation_supported_annotation_formats
+annotation_prepare_labeling_project
 annotation_prepare_xanylabeling_project
 annotation_detect_xanylabeling
 annotation_launch_xanylabeling_project
+annotation_detect_labeling_tool
+annotation_launch_labeling_project
 annotation_import_xanylabeling
+annotation_import_annotations
+annotation_import_project_labels
 annotation_create_export
 annotation_get_export
 ```
@@ -267,6 +279,7 @@ Relevant OpenSpec changes:
 ```text
 openspec/changes/annotation-common-component/
 openspec/changes/x-anylabeling-adapter-mvp/
+openspec/changes/multi-labeling-tool-format-support/
 ```
 
 The old animal-specific draft remains:

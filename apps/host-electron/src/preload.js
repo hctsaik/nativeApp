@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("cimHost", {
   getDiagnostics: () => ipcRenderer.invoke("get-diagnostics"),
   log: (level, message) => ipcRenderer.send("renderer-log", level, message),
   externalOpenXanylabeling: (imageUrl, metadata) => ipcRenderer.invoke("external-open-xanylabeling", imageUrl, metadata),
+  externalOpenLabelingTool: (tool, imageUrl, metadata) => ipcRenderer.invoke("external-open-labeling-tool", tool, imageUrl, metadata),
   externalQueueImage: (imageUrl, metadata) => ipcRenderer.invoke("external-queue-image", imageUrl, metadata),
   externalGetQueue: () => ipcRenderer.invoke("external-get-queue"),
   externalDequeue: (itemId) => ipcRenderer.invoke("external-dequeue", itemId),

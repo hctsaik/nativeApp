@@ -5,6 +5,7 @@ Public API:
   start_propagation(session_dir, session_data) -> dict
   re_propagate(session_dir, from_frame_idx) -> dict
   save_correction(session_dir, frame_idx, bboxes) -> None
+  export_annotation_format(session_dir, export_format) -> dict
   export_xanylabeling(session_dir) -> dict
   get_task_status(session_dir) -> dict
   load_session(session_dir) -> dict | None
@@ -149,17 +150,22 @@ def save_correction(
     )
 
 
-def export_xanylabeling(session_dir: str | Path) -> dict:
+def export_annotation_format(session_dir: str | Path, export_format: str = "x-anylabeling") -> dict:
     sd = Path(session_dir)
     ann_dir = _ann_dir(sd)
-    export_dir = sd / "exports" / "xanylabeling"
+    fmt = _normalize_format(export_format)
+    export_dir = sd / "exports" / fmt.replace("-", "_")
     export_dir.mkdir(parents=True, exist_ok=True)
 
     ann_files = sorted(ann_dir.glob("frame_*.json"))
     copied = []
     for f in ann_files:
         dest = export_dir / f.name
-        shutil.copy2(f, dest)
+        if fmt == "isat":
+            data = _labelme_to_isat(json.loads(f.read_text(encoding="utf-8")), f)
+            dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            shutil.copy2(f, dest)
         copied.append(f.name)
 
     # Also copy frames so the JSON imagePaths resolve
@@ -175,6 +181,7 @@ def export_xanylabeling(session_dir: str | Path) -> dict:
     manifest = {
         "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "session_dir": str(sd),
+        "format": fmt,
         "annotation_count": len(copied),
         "files": copied,
     }
@@ -183,9 +190,78 @@ def export_xanylabeling(session_dir: str | Path) -> dict:
     )
     return {
         "export_dir": str(export_dir),
+        "format": fmt,
         "annotation_count": len(copied),
         "manifest": manifest,
     }
+
+
+def export_xanylabeling(session_dir: str | Path) -> dict:
+    return export_annotation_format(session_dir, "x-anylabeling")
+
+
+def _normalize_format(value: str) -> str:
+    fmt = (value or "x-anylabeling").strip().lower().replace("_", "-")
+    aliases = {"xanylabeling": "x-anylabeling", "labelme-style": "x-anylabeling"}
+    return aliases.get(fmt, fmt)
+
+
+def _labelme_to_isat(data: dict, ann_file: Path) -> dict:
+    image_path = data.get("imagePath", ann_file.with_suffix(".jpg").name)
+    objects = []
+    for index, shape in enumerate(data.get("shapes", []), start=1):
+        label = shape.get("label", "")
+        points = shape.get("points", [])
+        if shape.get("shape_type") == "rectangle" and len(points) >= 2:
+            xs = [float(p[0]) for p in points]
+            ys = [float(p[1]) for p in points]
+            bbox = [min(xs), min(ys), max(xs), max(ys)]
+            segmentation = [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]]
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        elif len(points) >= 3:
+            segmentation = [[float(p[0]), float(p[1])] for p in points]
+            bbox = _bbox_from_points(segmentation)
+            area = abs(_polygon_area(segmentation))
+        else:
+            continue
+        objects.append(
+            {
+                "category": label,
+                "group": index,
+                "segmentation": segmentation,
+                "area": area,
+                "layer": float(index),
+                "bbox": bbox,
+                "iscrowd": False,
+                "note": shape.get("description", ""),
+            }
+        )
+    return {
+        "info": {
+            "description": "ISAT",
+            "folder": "../frames",
+            "name": Path(image_path).name,
+            "width": data.get("imageWidth", 0),
+            "height": data.get("imageHeight", 0),
+            "depth": 3,
+            "note": "",
+        },
+        "objects": objects,
+    }
+
+
+def _bbox_from_points(points: list[list[float]]) -> list[float]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _polygon_area(points: list[list[float]]) -> float:
+    area = 0.0
+    for index, (x1, y1) in enumerate(points):
+        x2, y2 = points[(index + 1) % len(points)]
+        area += x1 * y2 - x2 * y1
+    return area / 2.0
 
 
 def get_xany_exe(project_root: str | Path) -> str:

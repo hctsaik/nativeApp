@@ -1,0 +1,12 @@
+- [x] 1. Add failing unit tests for LabelMe/X-AnyLabeling compatibility, ISAT JSON import/export, YOLO segmentation export, and service format dispatch.
+- [x] 2. Implement ISAT adapter for canonical bbox/polygon import/export with conversion reports.
+- [x] 3. Implement YOLO segmentation export and service aliases for `yolo-seg`, `yolo-segmentation`, and `yolo_segment`.
+- [x] 4. Add generic `import_annotations`, `import_project_labels`, `prepare_labeling_project`, and `supported_annotation_formats` service APIs while preserving existing X-AnyLabeling APIs.
+- [x] 5. Add generic MCP tools and keep existing X-AnyLabeling MCP tools as compatibility aliases.
+- [x] 6. Update module_012 to allow ISAT selection, ISAT JSON status counting, and ISAT launch handoff.
+- [x] 7. Update documentation and OpenSpec status after focused and regression validation passes.
+- [x] 8. Generalize module_006 animal tagging project/import flow from X-AnyLabeling-specific to tool/format-aware while preserving legacy `xany_phase*` compatibility.
+- [x] 9. Generalize module_008 video export helpers from LabelMe-style X-AnyLabeling JSON to selectable LabelMe/X-AnyLabeling/ISAT exports.
+- [x] 10. Add module_009 compatibility facade and DB source support for LabelMe/ISAT while preserving existing X-AnyLabeling launch automation.
+- [x] 11. Add COCO, YOLO detection, and YOLO segmentation import support for canonical bbox/polygon geometry.
+- [x] 12. Generalize Electron/Portal external labeling bridge with `/external/open-labeling-tool` while preserving `/external/open-xanylabeling`.

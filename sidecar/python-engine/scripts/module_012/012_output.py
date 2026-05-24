@@ -440,6 +440,19 @@ def _launch_labelme(file_path: str, classes_path: str, labelme_exe: str) -> str 
         return str(e)
 
 
+def _launch_isat(file_path: str, isat_exe: str) -> str | None:
+    """Launch ISAT. Current ISAT-SAM console script opens the GUI without file args."""
+    cmd = [isat_exe]
+    exe_path = Path(isat_exe)
+    if isat_exe != "isat-sam" and exe_path.suffix.lower() == ".py":
+        cmd = [sys.executable, str(exe_path)]
+    try:
+        subprocess.Popen(cmd, cwd=str(Path(file_path).parent))
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def _launch_annotation_tool(
     annotation_tool: str,
     file_path: str,
@@ -448,11 +461,14 @@ def _launch_annotation_tool(
     xany_work_dir: str,
     xany_exe: str,
     labelme_exe: str,
+    isat_exe: str = "isat-sam",
     ann_path: str = "",
 ) -> tuple[str, str | None]:
     """Launch selected annotation tool. Returns (display_name, error)."""
     if annotation_tool == "labelme":
         return "LabelMe", _launch_labelme(file_path, classes_path, labelme_exe)
+    if annotation_tool == "isat":
+        return "ISAT", _launch_isat(file_path, isat_exe)
     return "X-AnyLabeling", _launch_xany(
         file_path, labels, classes_path, xany_work_dir, xany_exe, ann_path=ann_path
     )
@@ -947,6 +963,7 @@ def render_output(result: dict) -> None:
     classification_labels  = result.get("classification_labels", [])
     xany_exe               = result.get("xany_exe", "xanylabeling")
     labelme_exe            = result.get("labelme_exe", "labelme")
+    isat_exe               = result.get("isat_exe", "isat-sam")
     classes_path           = result.get("classes_path", "")
     xany_work_dir          = result.get("xany_work_dir", "")
     cfg                    = _cfg.load_config()
@@ -1301,6 +1318,7 @@ def render_output(result: dict) -> None:
                             tool_name, err = _launch_annotation_tool(
                                 annotation_tool, fp, labels, classes_path,
                                 xany_work_dir, xany_exe, labelme_exe,
+                                isat_exe=isat_exe,
                                 ann_path=item["ann_path"],
                             )
                             if err:

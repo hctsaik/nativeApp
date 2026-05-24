@@ -321,9 +321,10 @@ def render_output(result: dict) -> None:
     st.divider()
     exp_col, info_col = st.columns([1, 3])
     with exp_col:
-        if st.button("📤 匯出 X-AnyLabeling JSON", type="primary", use_container_width=True,
+        export_format = st.selectbox("匯出格式", ["x-anylabeling", "labelme", "isat"], index=0)
+        if st.button("📤 匯出標注 JSON", type="primary", use_container_width=True,
                      disabled=task.get("state") == "running"):
-            r = _proc.export_xanylabeling(session_dir)
+            r = _proc.export_annotation_format(session_dir, export_format)
             st.success(f"✅ 匯出完成：{r['annotation_count']} 個 JSON\n\n路徑：`{r['export_dir']}`")
     with info_col:
         st.caption(f"工作區：`{session_dir}`　已追蹤幀數：{len(frame_indices)}")

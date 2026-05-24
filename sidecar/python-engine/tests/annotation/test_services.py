@@ -109,6 +109,62 @@ def test_service_imports_labelme_as_new_annotation_set(tmp_path: Path) -> None:
     assert imported["conversion_report"]["warnings"] == []
 
 
+def test_service_lists_supported_annotation_formats(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+
+    formats = service.supported_annotation_formats()
+    by_id = {item["id"]: item for item in formats}
+
+    assert by_id["labelme"]["can_import"] is True
+    assert by_id["x-anylabeling"]["can_export"] is True
+    assert by_id["isat"]["can_import"] is True
+    assert by_id["coco"]["can_import"] is True
+    assert by_id["yolo-segmentation"]["can_export"] is True
+
+
+def test_service_create_export_dispatches_isat_and_yolo_segmentation(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    _, _, _, annotation_set_id = _seed(service, tmp_path)
+
+    isat = service.create_export(annotation_set_id, "isat", str(tmp_path / "isat"))
+    yolo_seg = service.create_export(annotation_set_id, "yolo-seg", str(tmp_path / "yolo_seg"))
+
+    assert isat["format"] == "isat"
+    assert (tmp_path / "isat" / "conversion_report.json").exists()
+    assert yolo_seg["format"] == "yolo-seg"
+    assert (tmp_path / "yolo_seg" / "classes.txt").exists()
+
+
+def test_service_generic_imports_isat_file(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    dataset_id, asset_id, schema_id, annotation_set_id = _seed(service, tmp_path)
+    service.create_export(annotation_set_id, "isat", str(tmp_path / "isat"))
+
+    imported = service.import_annotations(
+        dataset_id,
+        schema_id,
+        "isat",
+        str(tmp_path / "isat" / f"{asset_id}.json"),
+        asset_id=asset_id,
+    )
+
+    assert imported["annotation_set"]["id"] != annotation_set_id
+    assert imported["annotation_set"]["provenance"]["adapter"] == "isat"
+
+
+def test_service_imports_yolo_detection_project_labels(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    dataset_id, asset_id, schema_id, _ = _seed(service, tmp_path)
+    labels_dir = tmp_path / "yolo_labels"
+    labels_dir.mkdir()
+    (labels_dir / f"{asset_id}.txt").write_text("0 0.250000 0.500000 0.300000 0.500000\n", encoding="utf-8")
+
+    imported = service.import_project_labels(dataset_id, schema_id, "yolo-detect", str(labels_dir))
+
+    assert imported["annotation_set"]["provenance"]["adapter"] == "yolo-detection"
+    assert imported["matched_count"] == 1
+
+
 def test_service_prepare_xanylabeling_project(tmp_path: Path) -> None:
     service = _service(tmp_path)
     dataset_id, _, schema_id, _ = _seed(service, tmp_path)
@@ -119,6 +175,19 @@ def test_service_prepare_xanylabeling_project(tmp_path: Path) -> None:
     assert result["artifact_refs"]
     assert manifest["dataset_id"] == dataset_id
     assert (tmp_path / "xany" / "classes.txt").exists()
+
+
+def test_service_prepare_labeling_project_dispatches_isat(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    dataset_id, _, schema_id, _ = _seed(service, tmp_path)
+
+    result = service.prepare_labeling_project("isat", dataset_id, schema_id, str(tmp_path / "isat_project"))
+    manifest = json.loads((tmp_path / "isat_project" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert result["artifact_refs"]
+    assert manifest["adapter"] == "isat"
+    assert (tmp_path / "isat_project" / "images").exists()
+    assert (tmp_path / "isat_project" / "categories.txt").exists()
 
 
 def test_service_detect_xanylabeling_shape(tmp_path: Path) -> None:

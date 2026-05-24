@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import json
@@ -17,7 +17,7 @@ _spec.loader.exec_module(_mod)
 execute_logic = _mod.execute_logic
 
 
-# ── fixtures ──────────────────────────────────────────────────────────────────
+# ?? fixtures ??????????????????????????????????????????????????????????????????
 
 @pytest.fixture()
 def animal_db(tmp_path: Path) -> tuple[Path, Path]:
@@ -26,7 +26,7 @@ def animal_db(tmp_path: Path) -> tuple[Path, Path]:
     img_dir.mkdir()
 
     filenames = ["cat1.jpg", "cat2.jpg", "dog1.jpg"]
-    labels    = ["貓", "貓", "狗"]
+    labels    = ["cat", "cat", "dog"]
     colors    = [(200, 100, 80), (80, 200, 100), (100, 80, 200)]
     for fname, label, color in zip(filenames, labels, colors):
         from PIL import ImageDraw
@@ -55,7 +55,7 @@ def _phase1_params(tmp_path: Path, db_path: Path, img_dir: Path, **overrides) ->
     return {
         "mode": "xany_phase1",
         "category": "ALL",
-        "labels": ["貓", "狗"],
+        "labels": ["cat", "dog"],
         "db_path": str(db_path),
         "image_dir": str(img_dir),
         "workspace_root": str(tmp_path / "workspace"),
@@ -89,7 +89,37 @@ def _write_labelme_json(labels_dir: Path, image_name: str, label: str) -> None:
     )
 
 
-# ── browse mode tests ─────────────────────────────────────────────────────────
+def _write_isat_json(labels_dir: Path, image_name: str, label: str) -> None:
+    payload = {
+        "info": {
+            "description": "ISAT",
+            "folder": "",
+            "name": image_name,
+            "width": 100,
+            "height": 80,
+            "depth": 3,
+            "note": "",
+        },
+        "objects": [
+            {
+                "category": label,
+                "group": 1,
+                "segmentation": [[10, 10], [80, 10], [80, 60], [10, 60]],
+                "area": 3500,
+                "layer": 1.0,
+                "bbox": [10, 10, 80, 60],
+                "iscrowd": False,
+                "note": "",
+            }
+        ],
+    }
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    (labels_dir / image_name.replace(".jpg", ".json")).write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+
+# ?? browse mode tests ?????????????????????????????????????????????????????????
 
 def test_browse_passthrough_with_valid_db(tmp_path: Path, animal_db) -> None:
     db_path, img_dir = animal_db
@@ -103,13 +133,14 @@ def test_browse_returns_error_when_db_missing(tmp_path: Path) -> None:
     assert result["error"] == "db_not_found"
 
 
-# ── phase 1 tests ─────────────────────────────────────────────────────────────
+# ?? phase 1 tests ?????????????????????????????????????????????????????????????
 
 def test_phase1_creates_xany_project(tmp_path: Path, animal_db) -> None:
     db_path, img_dir = animal_db
     result = execute_logic(_phase1_params(tmp_path, db_path, img_dir))
 
-    assert result["mode"] == "xany_phase1"
+    assert result["mode"] == "labeling_phase1"
+    assert result["legacy_mode"] == "xany_phase1"
     assert result.get("error") is None
     assert result["image_count"] == 3
     xany = Path(result["xany_dir"])
@@ -121,15 +152,27 @@ def test_phase1_creates_xany_project(tmp_path: Path, animal_db) -> None:
 
 def test_phase1_classes_txt_contains_labels(tmp_path: Path, animal_db) -> None:
     db_path, img_dir = animal_db
-    result = execute_logic(_phase1_params(tmp_path, db_path, img_dir, labels=["貓", "狗", "大象"]))
+    result = execute_logic(_phase1_params(tmp_path, db_path, img_dir, labels=["cat", "dog", "bird"]))
     classes = set(result["project_files"]["classes_txt"].splitlines())
-    assert classes == {"貓", "狗", "大象"}
+    assert classes == {"cat", "dog", "bird"}
 
 
 def test_phase1_category_filter_reduces_images(tmp_path: Path, animal_db) -> None:
     db_path, img_dir = animal_db
-    result = execute_logic(_phase1_params(tmp_path, db_path, img_dir, category="貓"))
+    result = execute_logic(_phase1_params(tmp_path, db_path, img_dir, category="cat"))
     assert result["image_count"] == 2  # only cat1.jpg + cat2.jpg
+
+
+def test_phase1_creates_isat_project(tmp_path: Path, animal_db) -> None:
+    db_path, img_dir = animal_db
+    result = execute_logic(_phase1_params(tmp_path, db_path, img_dir, annotation_tool="isat"))
+
+    assert result["mode"] == "labeling_phase1"
+    assert result["annotation_tool"] == "isat"
+    project = Path(result["project_dir"])
+    assert (project / "manifest.json").exists()
+    assert (project / "categories.txt").exists()
+    assert (project / "annotations").is_dir()
 
 
 def test_phase1_saves_session_json(tmp_path: Path, animal_db) -> None:
@@ -148,7 +191,7 @@ def test_phase1_returns_error_when_db_missing(tmp_path: Path, animal_db) -> None
     assert result["error"] == "db_not_found"
 
 
-# ── phase 2 tests ─────────────────────────────────────────────────────────────
+# ?? phase 2 tests ?????????????????????????????????????????????????????????????
 
 def test_phase2_imports_and_exports(tmp_path: Path, animal_db) -> None:
     db_path, img_dir = animal_db
@@ -158,9 +201,9 @@ def test_phase2_imports_and_exports(tmp_path: Path, animal_db) -> None:
     labels_dir = xany / "labels"
 
     image_names = [p.name for p in (xany / "images").glob("*")]
-    _write_labelme_json(labels_dir, image_names[0], "貓")
+    _write_labelme_json(labels_dir, image_names[0], p1["schema"]["labels"][0]["name"])
     if len(image_names) > 1:
-        _write_labelme_json(labels_dir, image_names[1], "狗")
+        _write_labelme_json(labels_dir, image_names[1], p1["schema"]["labels"][1]["name"])
 
     # Phase 2
     p2 = execute_logic({
@@ -169,11 +212,13 @@ def test_phase2_imports_and_exports(tmp_path: Path, animal_db) -> None:
         "dataset_id": p1["dataset"]["id"],
         "schema_id": p1["schema"]["id"],
         "labels_dir": str(labels_dir),
+        "annotation_format": "x-anylabeling",
         "approve": True,
         "export_formats": ["coco", "yolo-detection"],
     })
 
-    assert p2["mode"] == "xany_phase2"
+    assert p2["mode"] == "labeling_phase2"
+    assert p2["legacy_mode"] == "xany_phase2"
     assert p2["import_result"]["matched_count"] >= 1
     assert p2["import_result"]["unmatched_files"] == []
     assert p2["validation"]["ok"] is True
@@ -190,7 +235,7 @@ def test_phase2_without_approve_stays_draft(tmp_path: Path, animal_db) -> None:
     xany = Path(p1["xany_dir"])
     labels_dir = xany / "labels"
     image_names = [p.name for p in (xany / "images").glob("*")]
-    _write_labelme_json(labels_dir, image_names[0], "貓")
+    _write_labelme_json(labels_dir, image_names[0], p1["schema"]["labels"][0]["name"])
 
     p2 = execute_logic({
         "mode": "xany_phase2",
@@ -204,6 +249,32 @@ def test_phase2_without_approve_stays_draft(tmp_path: Path, animal_db) -> None:
 
     assert p2["annotation_set"]["state"] == "draft"
     assert p2["review"] is None
+
+
+def test_phase2_imports_isat_project_labels(tmp_path: Path, animal_db) -> None:
+    db_path, img_dir = animal_db
+    p1 = execute_logic(_phase1_params(tmp_path, db_path, img_dir, annotation_tool="isat"))
+    project = Path(p1["project_dir"])
+    labels_dir = project / "annotations"
+    image_names = [p.name for p in (project / "images").glob("*")]
+    _write_isat_json(labels_dir, image_names[0], p1["schema"]["labels"][0]["name"])
+
+    p2 = execute_logic({
+        "mode": "labeling_phase2",
+        "workspace_root": p1["workspace_root"],
+        "dataset_id": p1["dataset"]["id"],
+        "schema_id": p1["schema"]["id"],
+        "labels_dir": str(labels_dir),
+        "annotation_format": "isat",
+        "approve": True,
+        "export_formats": ["isat", "yolo-segmentation"],
+    })
+
+    assert p2["mode"] == "labeling_phase2"
+    assert p2["annotation_format"] == "isat"
+    assert p2["import_result"]["matched_count"] >= 1
+    assert "isat" in p2["exports"]
+    assert "yolo-segmentation" in p2["exports"]
 
 
 def test_no_streamlit_import_in_process() -> None:

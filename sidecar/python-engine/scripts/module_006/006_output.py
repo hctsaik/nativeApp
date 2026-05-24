@@ -77,6 +77,22 @@ def _load_label_json(labels_dir: Path | None, image_filename: str) -> dict | Non
         return None
 
 
+def _annotation_objects(label_data: dict | None) -> list[dict]:
+    if not label_data:
+        return []
+    if "objects" in label_data:
+        return [
+            {
+                "label": obj.get("category", ""),
+                "shape_type": "polygon",
+                "points": obj.get("segmentation", []),
+                "bbox": obj.get("bbox", []),
+            }
+            for obj in label_data.get("objects", [])
+        ]
+    return label_data.get("shapes", [])
+
+
 def _draw_annotations(img_path: Path, label_data: dict, enhance: bool = False) -> bytes:
     img = ImageOps.exif_transpose(Image.open(img_path)).convert("RGB")
     if enhance:
@@ -87,7 +103,7 @@ def _draw_annotations(img_path: Path, label_data: dict, enhance: bool = False) -
     font = _get_font(fs)
 
     colour_map: dict[str, tuple] = {}
-    for shape in label_data.get("shapes", []):
+    for shape in _annotation_objects(label_data):
         label      = shape.get("label", "?")
         shape_type = shape.get("shape_type", "")
         points     = shape.get("points", [])
@@ -265,11 +281,12 @@ def _do_browse_export(workspace: str, export_formats: list[str], approve: bool) 
     mod  = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     p2 = mod.execute_logic({
-        "mode":           "xany_phase2",
+        "mode":           "labeling_phase2",
         "workspace_root": workspace,
         "dataset_id":     session["dataset_id"],
         "schema_id":      session["schema_id"],
         "labels_dir":     session.get("labels_dir", ""),
+        "annotation_format": session.get("annotation_format", "x-anylabeling"),
         "approve":        approve,
         "export_formats": export_formats,
     })
@@ -285,7 +302,7 @@ def _image_status(filename: str, labels_dir: Path | None, classification: str | 
         if lp.exists():
             try:
                 d = json.loads(lp.read_text(encoding="utf-8"))
-                has_ann = len(d.get("shapes", [])) > 0
+                has_ann = len(_annotation_objects(d)) > 0
             except Exception:
                 pass
 
@@ -360,7 +377,7 @@ def _render_browse(result: dict) -> None:
     if labels_dir:
         for r in records:
             ld = _load_label_json(labels_dir, r["filename"])
-            if ld and ld.get("shapes"):
+            if ld and _annotation_objects(ld):
                 ann_count += 1
 
     m1, m2, m3, m4 = st.columns(4)
@@ -513,7 +530,7 @@ setTimeout(function() {
 
         img_path   = image_dir / selected["filename"]
         label_data = _load_label_json(labels_dir, selected["filename"]) if labels_dir else None
-        shapes     = label_data.get("shapes", []) if label_data else []
+        shapes     = _annotation_objects(label_data) if label_data else []
 
         # ── keyboard shortcut hint ────────────────────────────────────────────
         st.caption("⌨️ ↑/K 上一張　↓/J 下一張　1-4 快速分類　Enter 確認　Tab 跳過　C 對比")
@@ -623,7 +640,7 @@ setTimeout(function() {
                     if jf.name in {"manifest.json", "conversion_report.json"}:
                         continue
                     try:
-                        if json.loads(jf.read_text(encoding="utf-8")).get("shapes"):
+                        if _annotation_objects(json.loads(jf.read_text(encoding="utf-8"))):
                             ann_count_for_export += 1
                     except Exception:
                         pass
@@ -631,7 +648,7 @@ setTimeout(function() {
             exp_col1, exp_col2 = st.columns(2)
             with exp_col1:
                 export_formats_sel = st.multiselect(
-                    "匯出格式", ["coco", "yolo-detection", "labelme"],
+                    "匯出格式", ["coco", "yolo-detection", "yolo-segmentation", "labelme", "x-anylabeling", "isat"],
                     default=["coco", "yolo-detection"],
                     key="browse_export_formats",
                 )
@@ -665,11 +682,12 @@ def _do_inline_import(
 
     pf = phase1_result.get("project_files", {})
     p2 = mod.execute_logic({
-        "mode":           "xany_phase2",
+        "mode":           "labeling_phase2",
         "workspace_root": phase1_result["workspace_root"],
         "dataset_id":     phase1_result["dataset"]["id"],
         "schema_id":      phase1_result["schema"]["id"],
         "labels_dir":     pf.get("labels_dir", ""),
+        "annotation_format": phase1_result.get("annotation_format", "x-anylabeling"),
         "approve":        True,
         "export_formats": export_formats or ["coco", "yolo-detection"],
     })
@@ -688,10 +706,11 @@ def _render_xany_phase1(r: dict) -> None:
         st.error(_error_map.get(r["error"], r["error"]))
         return
 
-    install    = r.get("xany_install") or {}
+    tool_name  = r.get("annotation_tool", "x-anylabeling")
+    install    = r.get("tool_install") or r.get("xany_install") or {}
     pf         = r.get("project_files", {})
     labels_dir = Path(pf.get("labels_dir", "")) if pf.get("labels_dir") else None
-    images_dir = Path(r["xany_dir"]) / "images"
+    images_dir = Path(r.get("project_dir", r.get("xany_dir", ""))) / "images"
 
     # ── project summary ───────────────────────────────────────────────────────
     st.subheader("標注專案已準備完成")
@@ -708,7 +727,7 @@ def _render_xany_phase1(r: dict) -> None:
 
     for img_name in image_names:
         ld     = _load_label_json(labels_dir, img_name)
-        shapes = ld.get("shapes", []) if ld else []
+        shapes = _annotation_objects(ld) if ld else []
         n      = len(shapes)
         total_shapes += n
         labels_seen = list({s.get("label", "") for s in shapes if s.get("label")})
@@ -746,7 +765,7 @@ def _render_xany_phase1(r: dict) -> None:
             fmt_col, yes_col, no_col = st.columns([3, 1, 1])
             with fmt_col:
                 inline_formats = st.multiselect(
-                    "匯出格式", ["coco", "yolo-detection", "labelme"],
+                    "匯出格式", ["coco", "yolo-detection", "yolo-segmentation", "labelme", "x-anylabeling", "isat"],
                     default=["coco", "yolo-detection"],
                     key="inline_export_formats",
                     label_visibility="collapsed",
@@ -770,7 +789,7 @@ def _render_xany_phase1(r: dict) -> None:
 
     # launch command
     st.divider()
-    launch = r.get("xany_launch") or {}
+    launch = r.get("tool_launch") or r.get("xany_launch") or {}
     if launch.get("launched"):
         st.success("X-AnyLabeling 已啟動。")
         st.code(" ".join(str(c) for c in launch.get("command", [])), language="text")
@@ -862,12 +881,12 @@ def _render_xany_phase2(r: dict) -> None:
             if fmt == "coco":
                 ann = fmt_dir / "annotations.json"
                 st.code(ann.read_text(encoding="utf-8") if ann.exists() else "", language="json")
-            elif fmt in ("labelme", "x-anylabeling"):
+            elif fmt in ("labelme", "x-anylabeling", "isat"):
                 files = sorted(p for p in fmt_dir.glob("*.json")
                                if p.name not in {"manifest.json", "conversion_report.json"})
                 if files:
                     st.code(files[0].read_text(encoding="utf-8"), language="json")
-            elif fmt == "yolo-detection":
+            elif fmt in ("yolo-detection", "yolo-segmentation"):
                 lf = sorted((fmt_dir / "labels").glob("*.txt"))
                 if lf:
                     st.code(lf[0].read_text(encoding="utf-8"), language="text")
@@ -882,9 +901,9 @@ def _render_xany_phase2(r: dict) -> None:
 
 def render_output(result: dict) -> None:
     mode = result.get("mode", "browse")
-    if mode == "xany_phase1":
+    if mode in {"xany_phase1", "labeling_phase1"}:
         _render_xany_phase1(result)
-    elif mode == "xany_phase2":
+    elif mode in {"xany_phase2", "labeling_phase2"}:
         _render_xany_phase2(result)
     else:
         if result.get("error") == "db_not_found":

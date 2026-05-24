@@ -54,7 +54,7 @@ def init_db(db_path: Path) -> None:
                 frame_idx       INTEGER NOT NULL,
                 annotation_json TEXT NOT NULL,
                 confidence_avg  REAL,
-                source          TEXT CHECK(source IN ('tracking', 'manual', 'xanylabeling')),
+                source          TEXT CHECK(source IN ('tracking', 'manual', 'xanylabeling', 'labelme', 'isat')),
                 created_at      TEXT DEFAULT (datetime('now')),
                 updated_at      TEXT DEFAULT (datetime('now')),
                 UNIQUE(session_id, frame_idx)

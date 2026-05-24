@@ -122,6 +122,17 @@ def annotation_prepare_xanylabeling_project(
 
 
 @mcp.tool()
+def annotation_prepare_labeling_project(
+    tool: str,
+    dataset_id: str,
+    schema_id: str,
+    output_dir: str,
+    asset_ids_json: str = "null",
+) -> str:
+    return _handlers.prepare_labeling_project(tool, dataset_id, schema_id, output_dir, asset_ids_json)
+
+
+@mcp.tool()
 def annotation_detect_xanylabeling() -> str:
     return _handlers.detect_xanylabeling()
 
@@ -129,6 +140,16 @@ def annotation_detect_xanylabeling() -> str:
 @mcp.tool()
 def annotation_launch_xanylabeling_project(project_dir: str) -> str:
     return _handlers.launch_xanylabeling_project(project_dir)
+
+
+@mcp.tool()
+def annotation_detect_labeling_tool(tool: str) -> str:
+    return _handlers.detect_labeling_tool(tool)
+
+
+@mcp.tool()
+def annotation_launch_labeling_project(tool: str, project_dir: str) -> str:
+    return _handlers.launch_labeling_project(tool, project_dir)
 
 
 @mcp.tool()
@@ -145,6 +166,27 @@ def annotation_import_xanylabeling_project_labels(dataset_id: str, schema_id: st
     report listing any files that could not be matched.
     """
     return _handlers.import_xanylabeling_project_labels(dataset_id, schema_id, labels_dir)
+
+
+@mcp.tool()
+def annotation_import_annotations(
+    dataset_id: str,
+    schema_id: str,
+    input_format: str,
+    input_path: str,
+    asset_id: str | None = None,
+) -> str:
+    return _handlers.import_annotations(dataset_id, schema_id, input_format, input_path, asset_id)
+
+
+@mcp.tool()
+def annotation_import_project_labels(dataset_id: str, schema_id: str, input_format: str, labels_dir: str) -> str:
+    return _handlers.import_project_labels(dataset_id, schema_id, input_format, labels_dir)
+
+
+@mcp.tool()
+def annotation_supported_annotation_formats() -> str:
+    return _handlers.supported_annotation_formats()
 
 
 @mcp.tool()

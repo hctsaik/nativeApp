@@ -138,11 +138,30 @@ class AnnotationMCPHandlers:
             lambda: self.service.prepare_xanylabeling_project(dataset_id, schema_id, output_dir, asset_ids)
         )
 
+    def prepare_labeling_project(
+        self,
+        tool: str,
+        dataset_id: str,
+        schema_id: str,
+        output_dir: str,
+        asset_ids_json: str = "null",
+    ) -> str:
+        asset_ids = json.loads(asset_ids_json)
+        return call_service(
+            lambda: self.service.prepare_labeling_project(tool, dataset_id, schema_id, output_dir, asset_ids)
+        )
+
     def detect_xanylabeling(self) -> str:
         return call_service(self.service.detect_xanylabeling)
 
     def launch_xanylabeling_project(self, project_dir: str) -> str:
         return call_service(lambda: self.service.launch_xanylabeling_project(project_dir))
+
+    def detect_labeling_tool(self, tool: str) -> str:
+        return call_service(lambda: self.service.detect_labeling_tool(tool))
+
+    def launch_labeling_project(self, tool: str, project_dir: str) -> str:
+        return call_service(lambda: self.service.launch_labeling_project(tool, project_dir))
 
     def import_xanylabeling(
         self,
@@ -164,6 +183,32 @@ class AnnotationMCPHandlers:
         return call_service(
             lambda: self.service.import_xanylabeling_project_labels(dataset_id, schema_id, labels_dir)
         )
+
+    def import_annotations(
+        self,
+        dataset_id: str,
+        schema_id: str,
+        input_format: str,
+        input_path: str,
+        asset_id: str | None = None,
+    ) -> str:
+        return call_service(
+            lambda: self.service.import_annotations(dataset_id, schema_id, input_format, input_path, asset_id)
+        )
+
+    def import_project_labels(
+        self,
+        dataset_id: str,
+        schema_id: str,
+        input_format: str,
+        labels_dir: str,
+    ) -> str:
+        return call_service(
+            lambda: self.service.import_project_labels(dataset_id, schema_id, input_format, labels_dir)
+        )
+
+    def supported_annotation_formats(self) -> str:
+        return call_service(self.service.supported_annotation_formats)
 
     def create_export(
         self,

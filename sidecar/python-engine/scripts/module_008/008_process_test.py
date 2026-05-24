@@ -159,6 +159,22 @@ def test_export_creates_correct_file_count(tmp_path):
     assert len(json_files) == 5
 
 
+def test_export_annotation_format_creates_isat_json(tmp_path):
+    ann_dir = tmp_path / "annotations"
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_dummy_annotation(ann_dir, 0, ["animal"])
+    (frames_dir / "frame_000000.jpg").write_bytes(b"fake")
+
+    result = _proc.export_annotation_format(tmp_path, "isat")
+    export_dir = Path(result["export_dir"])
+    payload = json.loads((export_dir / "frame_000000.json").read_text(encoding="utf-8"))
+
+    assert result["format"] == "isat"
+    assert payload["info"]["description"] == "ISAT"
+    assert payload["objects"][0]["category"] == "animal"
+
+
 def test_list_annotated_frames_returns_sorted_indices(tmp_path):
     ann_dir = tmp_path / "annotations"
     for i in [3, 1, 7, 0]:

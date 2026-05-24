@@ -35,6 +35,7 @@ _DEFAULT_LABELS: list[str] = []
 _ANNOTATION_TOOLS = {
     "X-AnyLabeling": "x-anylabeling",
     "LabelMe": "labelme",
+    "ISAT": "isat",
 }
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from annotation.adapters.common import write_conversion_report, write_json_artifact
 from annotation.core.models import (
+    Annotation,
     AdapterResult,
     AnnotationSet,
     BBoxGeometry,
@@ -102,3 +103,83 @@ def _polygon_area(points: list[list[float]]) -> float:
         x2, y2 = points[(index + 1) % len(points)]
         area += x1 * y2 - x2 * y1
     return area / 2.0
+
+
+def import_coco_file(
+    input_path: Path | str,
+    dataset_id: str,
+    schema: LabelSchema,
+    assets: list[ImageAsset],
+) -> tuple[AnnotationSet, ConversionReport, list[str]]:
+    import json
+
+    path = Path(input_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    report = ConversionReport(source_format_version="coco-1.0")
+    asset_by_filename = {Path(asset.uri).name: asset for asset in assets}
+    image_id_to_asset: dict[int, ImageAsset] = {}
+    unmatched: list[str] = []
+    for image in payload.get("images", []):
+        file_name = Path(image.get("file_name", "")).name
+        asset = asset_by_filename.get(file_name)
+        if asset is None:
+            unmatched.append(file_name)
+            report.mark_loss("asset", f"No asset matched for COCO image {file_name!r}.")
+            continue
+        image_id_to_asset[int(image["id"])] = asset
+
+    label_by_name = {label.name: label for label in schema.labels}
+    category_id_to_label = {
+        int(category["id"]): label_by_name[category["name"]]
+        for category in payload.get("categories", [])
+        if category.get("name") in label_by_name
+    }
+
+    annotations: list[Annotation] = []
+    for item in payload.get("annotations", []):
+        asset = image_id_to_asset.get(int(item.get("image_id", -1)))
+        label = category_id_to_label.get(int(item.get("category_id", -1)))
+        if asset is None or label is None:
+            report.mark_loss("annotation", f"Skipped COCO annotation {item.get('id')}: missing asset or label.")
+            continue
+        segmentation = item.get("segmentation")
+        geometry = None
+        if isinstance(segmentation, list) and segmentation and isinstance(segmentation[0], list):
+            coords = segmentation[0]
+            points = [[float(coords[i]), float(coords[i + 1])] for i in range(0, len(coords) - 1, 2)]
+            if len(points) >= 3:
+                geometry = PolygonGeometry(rings=[points])
+        elif isinstance(segmentation, dict):
+            report.mark_loss("segmentation", f"COCO RLE segmentation skipped for annotation {item.get('id')}.")
+            report.unsupported_annotations.append(str(item.get("id")))
+            continue
+        if geometry is None:
+            bbox = item.get("bbox") or []
+            if len(bbox) == 4:
+                geometry = BBoxGeometry(x=float(bbox[0]), y=float(bbox[1]), width=float(bbox[2]), height=float(bbox[3]))
+            else:
+                report.mark_loss("geometry", f"COCO annotation {item.get('id')} has no supported geometry.")
+                continue
+        annotation = Annotation(
+            asset_id=asset.id,
+            label_id=label.id,
+            geometry=geometry,
+            source="imported",
+            attributes={"coco_iscrowd": item.get("iscrowd", 0)},
+            provenance={"imported_from": path.name},
+        )
+        if item.get("id") is not None:
+            annotation.id = str(item["id"])
+        annotations.append(annotation)
+
+    return (
+        AnnotationSet(
+            dataset_id=dataset_id,
+            schema_id=schema.id,
+            annotations=annotations,
+            source="imported",
+            provenance={"adapter": "coco", "source_file": path.name},
+        ),
+        report,
+        unmatched,
+    )

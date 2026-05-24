@@ -29,16 +29,19 @@ def _query_images(db_path: str, category: str) -> list[dict]:
         conn.close()
 
 
-# ── phase 1: prepare xany_project ─────────────────────────────────────────────
+# ── phase 1: prepare labeling project ────────────────────────────────────────
 
 def _execute_phase1(params: dict) -> dict:
     t0 = time.perf_counter()
     root = Path(params["workspace_root"])
     root.mkdir(parents=True, exist_ok=True)
+    tool = _normalize_tool(params.get("annotation_tool", params.get("tool", "x-anylabeling")))
+    annotation_format = _format_for_tool(tool)
+    project_name = _project_dir_name(tool)
 
     db_path = params.get("db_path", "")
     if not Path(db_path).exists():
-        return {"mode": "xany_phase1", "error": "db_not_found"}
+        return {"mode": "labeling_phase1", "legacy_mode": "xany_phase1", "error": "db_not_found", "annotation_tool": tool}
 
     image_dir = Path(params.get("image_dir", ""))
     category = params.get("category", "ALL")
@@ -46,11 +49,11 @@ def _execute_phase1(params: dict) -> dict:
 
     rows = _query_images(db_path, category)
     if not rows:
-        return {"mode": "xany_phase1", "error": "no_images", "category": category}
+        return {"mode": "labeling_phase1", "legacy_mode": "xany_phase1", "error": "no_images", "category": category, "annotation_tool": tool}
 
     image_paths = [str(image_dir / r["filename"]) for r in rows if (image_dir / r["filename"]).exists()]
     if not image_paths:
-        return {"mode": "xany_phase1", "error": "no_images_found", "category": category}
+        return {"mode": "labeling_phase1", "legacy_mode": "xany_phase1", "error": "no_images_found", "category": category, "annotation_tool": tool}
 
     service = AnnotationService(AnnotationWorkspace(root / "workspace"))
 
@@ -64,19 +67,23 @@ def _execute_phase1(params: dict) -> dict:
     ]
     schema = service.create_schema(f"{dataset_name}-schema", label_defs)
 
-    xany_dir = str(root / "xany_project")
-    service.prepare_xanylabeling_project(dataset["id"], schema["id"], xany_dir)
+    project_dir = str(root / project_name)
+    service.prepare_labeling_project(tool, dataset["id"], schema["id"], project_dir)
 
-    xany_install = service.detect_xanylabeling()
-    xany_launch = None
-    if params.get("launch_xany", False):
-        xany_launch = service.launch_xanylabeling_project(xany_dir)
+    tool_install = service.detect_labeling_tool(tool)
+    tool_launch = None
+    if params.get("launch_labeling_tool", params.get("launch_xany", False)):
+        tool_launch = service.launch_labeling_project(tool, project_dir)
 
+    labels_dir_name = "annotations" if tool == "isat" else "labels"
     session = {
         "dataset_id": dataset["id"],
         "schema_id": schema["id"],
-        "xany_dir": xany_dir,
-        "labels_dir": str(Path(xany_dir) / "labels"),
+        "annotation_tool": tool,
+        "annotation_format": annotation_format,
+        "project_dir": project_dir,
+        "labels_dir": str(Path(project_dir) / labels_dir_name),
+        "xany_dir": project_dir,
         "assets": [{"id": a["id"], "uri": a["uri"]} for a in assets],
     }
     (root / "session.json").write_text(
@@ -84,10 +91,14 @@ def _execute_phase1(params: dict) -> dict:
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    xany_root = Path(xany_dir)
+    project_root = Path(project_dir)
+    classes_file = project_root / ("categories.txt" if tool == "isat" else "classes.txt")
     return {
-        "mode": "xany_phase1",
+        "mode": "labeling_phase1",
+        "legacy_mode": "xany_phase1",
         "phase": 1,
+        "annotation_tool": tool,
+        "annotation_format": annotation_format,
         "elapsed_ms": elapsed_ms,
         "workspace_root": str(root),
         "category": category,
@@ -95,14 +106,19 @@ def _execute_phase1(params: dict) -> dict:
         "schema": schema,
         "assets": assets,
         "image_count": len(image_paths),
-        "xany_dir": xany_dir,
-        "xany_install": xany_install,
-        "xany_launch": xany_launch,
+        "project_dir": project_dir,
+        "labels_dir": str(Path(project_dir) / labels_dir_name),
+        "tool_install": tool_install,
+        "tool_launch": tool_launch,
+        "xany_dir": project_dir,
+        "xany_install": tool_install,
+        "xany_launch": tool_launch,
         "session": session,
         "project_files": {
-            "classes_txt": (xany_root / "classes.txt").read_text(encoding="utf-8").strip(),
-            "images": [p.name for p in (xany_root / "images").glob("*") if p.is_file()],
-            "labels_dir": str(xany_root / "labels"),
+            "classes_txt": classes_file.read_text(encoding="utf-8").strip(),
+            "images": [p.name for p in (project_root / "images").glob("*") if p.is_file()],
+            "labels_dir": str(Path(project_dir) / labels_dir_name),
+            "project_dir": project_dir,
         },
     }
 
@@ -115,9 +131,11 @@ def _execute_phase2(params: dict) -> dict:
 
     service = AnnotationService(AnnotationWorkspace(root / "workspace"))
 
-    result = service.import_xanylabeling_project_labels(
+    annotation_format = _normalize_format(params.get("annotation_format", params.get("input_format", "x-anylabeling")))
+    result = service.import_project_labels(
         params["dataset_id"],
         params["schema_id"],
+        annotation_format,
         params["labels_dir"],
     )
     annotation_set = result["annotation_set"]
@@ -145,8 +163,10 @@ def _execute_phase2(params: dict) -> dict:
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
     return {
-        "mode": "xany_phase2",
+        "mode": "labeling_phase2",
+        "legacy_mode": "xany_phase2",
         "phase": 2,
+        "annotation_format": annotation_format,
         "elapsed_ms": elapsed_ms,
         "workspace_root": str(root),
         "import_result": result,
@@ -193,12 +213,44 @@ def execute_logic(params: dict) -> dict:
             params["_using_manifest"] = False
 
     mode = params.get("mode", "browse")
-    if mode == "xany_phase1":
+    if mode in {"xany_phase1", "labeling_phase1"}:
         return _execute_phase1(params)
-    if mode == "xany_phase2":
+    if mode in {"xany_phase2", "labeling_phase2"}:
         return _execute_phase2(params)
     # browse: pass-through with DB existence check
     db_path = params.get("db_path", "")
     if not Path(db_path).exists():
         return {**params, "error": "db_not_found"}
     return params
+
+
+def _normalize_tool(value: str) -> str:
+    tool = (value or "x-anylabeling").strip().lower().replace("_", "-")
+    if tool == "xanylabeling":
+        return "x-anylabeling"
+    return tool
+
+
+def _normalize_format(value: str) -> str:
+    fmt = (value or "x-anylabeling").strip().lower().replace("_", "-")
+    aliases = {
+        "xanylabeling": "x-anylabeling",
+        "yolo": "yolo-detection",
+        "yolo-detect": "yolo-detection",
+        "yolo-seg": "yolo-segmentation",
+    }
+    return aliases.get(fmt, fmt)
+
+
+def _format_for_tool(tool: str) -> str:
+    if tool == "isat":
+        return "isat"
+    return "x-anylabeling" if tool == "x-anylabeling" else "labelme"
+
+
+def _project_dir_name(tool: str) -> str:
+    return {
+        "isat": "isat_project",
+        "labelme": "labelme_project",
+        "x-anylabeling": "xany_project",
+    }.get(tool, f"{tool.replace('-', '_')}_project")

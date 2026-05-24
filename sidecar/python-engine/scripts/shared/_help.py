@@ -710,20 +710,25 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
     )
 
     if title:
-        st.markdown(
+        _markdown_html(
             f'{_CSS}'
             f'<div style="overflow:visible;margin:0 0 4px 0;">'
             f'{_toggle}'
             f'<span class="cim-help-heading">{title} {_badge}</span>'
             f'{_overlay}'
             f'</div>',
-            unsafe_allow_html=True,
         )
     else:
-        st.markdown(
+        _markdown_html(
             f'{_CSS}'
             f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
             f'{_toggle}{_badge}{_overlay}'
             f'</div>',
-            unsafe_allow_html=True,
         )
+
+
+def _markdown_html(markup: str) -> None:
+    try:
+        st.markdown(markup, unsafe_allow_html=True)
+    except TypeError:
+        st.markdown(markup)

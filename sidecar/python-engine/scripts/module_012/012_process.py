@@ -46,7 +46,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 def _json_matches_image(json_file: Path, target: Path) -> bool:
     """Return True when a LabelMe JSON either omits imagePath or points at target."""
     try:
-        stored = json.loads(json_file.read_text(encoding="utf-8")).get("imagePath", "")
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+        stored = data.get("imagePath", "") or data.get("info", {}).get("name", "")
         if not stored:
             return True
         stored_path = Path(stored)
@@ -78,7 +79,7 @@ def _count_shapes(ann_path: str) -> int:
     """計算標注檔中的 shape 數量。"""
     try:
         data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-        return len(data.get("shapes", []))
+        return len(data.get("shapes", data.get("objects", [])))
     except Exception:
         return 0
 
@@ -106,6 +107,14 @@ def get_labelme_exe() -> str:
         if c and c.exists():
             return str(c)
     return "labelme"
+
+
+def get_isat_exe() -> str:
+    """Return the configured ISAT launcher, falling back to isat-sam."""
+    env_exe = os.environ.get("ISAT_EXE", "")
+    if env_exe and Path(env_exe).exists():
+        return env_exe
+    return "isat-sam"
 
 
 # ─── 公開 API ─────────────────────────────────────────────────────────────────
@@ -143,7 +152,7 @@ def execute_logic(params: dict) -> dict:
 
     manifest_id: str = params.get("manifest_id", "")
     annotation_tool: str = params.get("annotation_tool", "x-anylabeling")
-    if annotation_tool not in {"x-anylabeling", "labelme"}:
+    if annotation_tool not in {"x-anylabeling", "labelme", "isat"}:
         annotation_tool = "x-anylabeling"
     labels: list[str] = params.get("labels", [])
     classification_labels: list[str] = params.get("classification_labels", [])
@@ -239,8 +248,10 @@ def execute_logic(params: dict) -> dict:
 
     xany_exe = get_xany_exe()
     labelme_exe = get_labelme_exe()
+    isat_exe = get_isat_exe()
     _log.info("[012] xany_exe: %s  exists=%s", xany_exe, Path(xany_exe).exists())
     _log.info("[012] labelme_exe: %s  exists=%s", labelme_exe, Path(labelme_exe).exists())
+    _log.info("[012] isat_exe: %s  exists=%s", isat_exe, Path(isat_exe).exists())
     _log.info("[012] execute_logic 完成 ✔  total=%d annotated=%d",
               len(items), annotated)
     _log.info("=" * 60)
@@ -256,6 +267,7 @@ def execute_logic(params: dict) -> dict:
         "autorefresh_seconds":   autorefresh_seconds,
         "xany_exe":             xany_exe,
         "labelme_exe":          labelme_exe,
+        "isat_exe":             isat_exe,
         "classes_path":          str(classes_txt),
         "xany_work_dir":         str(xany_work_dir),
         "total":                len(items),

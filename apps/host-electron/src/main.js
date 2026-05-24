@@ -234,6 +234,7 @@ function labelMeDinoEnv() {
     env.LABELME_DINO_RUNTIME = path.join(dinoRoot, ".venv");
     env.LABELME_EXE = path.join(dinoRoot, ".venv", "Scripts", "labelme.exe");
     env.XANYLABELING_EXE = path.join(repoRoot, ".venv-xanylabeling", "Scripts", "xanylabeling.exe");
+    env.ISAT_EXE = process.env.ISAT_EXE || "isat-sam";
     env.CIM_REPO_ROOT = repoRoot;
   }
   return env;
@@ -400,6 +401,10 @@ ipcMain.handle("get-diagnostics", async () => {
 
 ipcMain.handle("external-open-xanylabeling", async (_event, imageUrl, metadata) => {
   return requestJson("POST", "/external/open-xanylabeling", { image_url: imageUrl, metadata: metadata ?? {} });
+});
+
+ipcMain.handle("external-open-labeling-tool", async (_event, tool, imageUrl, metadata) => {
+  return requestJson("POST", "/external/open-labeling-tool", { tool: tool ?? "x-anylabeling", image_url: imageUrl, metadata: metadata ?? {} });
 });
 
 ipcMain.handle("external-queue-image", async (_event, imageUrl, metadata) => {

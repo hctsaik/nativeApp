@@ -3,11 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from annotation.adapters.coco import export_coco
+from annotation.adapters.coco import export_coco, import_coco_file
+from annotation.adapters.isat import export_isat, import_isat_file, import_isat_project_dir, prepare_isat_project
+from annotation.adapters.labeling_runtime import detect_labeling_tool, launch_labeling_project
 from annotation.adapters.labelme import export_labelme, import_labelme_file, import_labelme_project_dir
 from annotation.adapters.xanylabeling import XAnyLabelingProjectAdapter
 from annotation.adapters.xanylabeling_runtime import detect_xanylabeling, launch_xanylabeling_project
-from annotation.adapters.yolo_detection import export_yolo_detection
+from annotation.adapters.yolo_detection import export_yolo_detection, import_yolo_detection_dir
+from annotation.adapters.yolo_segmentation import export_yolo_segmentation, import_yolo_segmentation_dir
 from annotation.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from annotation.core.models import (
     AdapterResult,
@@ -201,11 +204,40 @@ class AnnotationService:
         result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
         return result.to_dict()
 
+    def prepare_labeling_project(
+        self,
+        tool: str,
+        dataset_id: str,
+        schema_id: str,
+        output_dir: str,
+        asset_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._require_dataset(dataset_id)
+        schema = self._require_schema(schema_id)
+        assets = self.workspace.metadata.list_assets(dataset_id)
+        if asset_ids is not None:
+            wanted = set(asset_ids)
+            assets = [asset for asset in assets if asset.id in wanted]
+        normalized = _normalize_tool(tool)
+        if normalized in {"x-anylabeling", "labelme"}:
+            result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
+        elif normalized == "isat":
+            result = prepare_isat_project(dataset_id, schema, assets, Path(output_dir))
+        else:
+            raise ValueError(f"Unsupported labeling tool: {tool}")
+        return result.to_dict()
+
     def detect_xanylabeling(self) -> dict[str, Any]:
         return detect_xanylabeling().to_dict()
 
     def launch_xanylabeling_project(self, project_dir: str) -> dict[str, Any]:
         return launch_xanylabeling_project(project_dir)
+
+    def detect_labeling_tool(self, tool: str) -> dict[str, Any]:
+        return detect_labeling_tool(tool).to_dict()
+
+    def launch_labeling_project(self, tool: str, project_dir: str) -> dict[str, Any]:
+        return launch_labeling_project(tool, project_dir)
 
     def import_xanylabeling_annotations(
         self,
@@ -214,12 +246,7 @@ class AnnotationService:
         asset_id: str,
         input_path: str,
     ) -> dict[str, Any]:
-        self._require_dataset(dataset_id)
-        schema = self._require_schema(schema_id)
-        asset = self._require_asset(dataset_id, asset_id)
-        annotation_set, report = import_labelme_file(input_path, dataset_id, schema, asset)
-        self.workspace.write_canonical_annotation_set(annotation_set)
-        return {"annotation_set": annotation_set.to_dict(), "conversion_report": report.to_dict()}
+        return self.import_annotations(dataset_id, schema_id, "x-anylabeling", input_path, asset_id=asset_id)
 
     def import_xanylabeling_project_labels(
         self,
@@ -233,12 +260,66 @@ class AnnotationService:
         Returns the merged AnnotationSet, an aggregated conversion report, and
         a list of JSON filenames that could not be matched to any dataset asset.
         """
+        return self.import_project_labels(dataset_id, schema_id, "x-anylabeling", labels_dir)
+
+    def import_annotations(
+        self,
+        dataset_id: str,
+        schema_id: str,
+        input_format: str,
+        input_path: str,
+        asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_dataset(dataset_id)
+        schema = self._require_schema(schema_id)
+        fmt = _normalize_format(input_format)
+        if fmt == "coco":
+            asset = None
+        elif asset_id is None:
+            asset = self._asset_for_annotation_file(dataset_id, input_path, fmt)
+        else:
+            asset = self._require_asset(dataset_id, asset_id)
+        if fmt in {"labelme", "x-anylabeling"}:
+            annotation_set, report = import_labelme_file(input_path, dataset_id, schema, asset)
+        elif fmt == "isat":
+            annotation_set, report = import_isat_file(input_path, dataset_id, schema, asset)
+        elif fmt == "coco":
+            assets = self.workspace.metadata.list_assets(dataset_id)
+            annotation_set, report, _unmatched = import_coco_file(input_path, dataset_id, schema, assets)
+        else:
+            raise ValueError(f"Unsupported import format: {input_format}")
+        self.workspace.write_canonical_annotation_set(annotation_set)
+        return {"annotation_set": annotation_set.to_dict(), "conversion_report": report.to_dict()}
+
+    def import_project_labels(
+        self,
+        dataset_id: str,
+        schema_id: str,
+        input_format: str,
+        labels_dir: str,
+    ) -> dict[str, Any]:
         self._require_dataset(dataset_id)
         schema = self._require_schema(schema_id)
         assets = self.workspace.metadata.list_assets(dataset_id)
-        annotation_set, report, unmatched = import_labelme_project_dir(
-            Path(labels_dir), dataset_id, schema, assets
-        )
+        fmt = _normalize_format(input_format)
+        if fmt in {"labelme", "x-anylabeling"}:
+            annotation_set, report, unmatched = import_labelme_project_dir(
+                Path(labels_dir), dataset_id, schema, assets
+            )
+        elif fmt == "isat":
+            annotation_set, report, unmatched = import_isat_project_dir(
+                Path(labels_dir), dataset_id, schema, assets
+            )
+        elif fmt == "yolo-detection":
+            annotation_set, report, unmatched = import_yolo_detection_dir(
+                Path(labels_dir), dataset_id, schema, assets
+            )
+        elif fmt == "yolo-segmentation":
+            annotation_set, report, unmatched = import_yolo_segmentation_dir(
+                Path(labels_dir), dataset_id, schema, assets
+            )
+        else:
+            raise ValueError(f"Unsupported import format: {input_format}")
         self.workspace.write_canonical_annotation_set(annotation_set)
         return {
             "annotation_set": annotation_set.to_dict(),
@@ -246,6 +327,16 @@ class AnnotationService:
             "unmatched_files": unmatched,
             "matched_count": len(annotation_set.annotations),
         }
+
+    def supported_annotation_formats(self) -> list[dict[str, Any]]:
+        return [
+            {"id": "labelme", "name": "LabelMe JSON", "can_import": True, "can_export": True},
+            {"id": "x-anylabeling", "name": "X-AnyLabeling JSON", "can_import": True, "can_export": True},
+            {"id": "isat", "name": "ISAT JSON", "can_import": True, "can_export": True},
+            {"id": "coco", "name": "COCO", "can_import": True, "can_export": True},
+            {"id": "yolo-detection", "name": "YOLO Detection", "can_import": True, "can_export": True},
+            {"id": "yolo-segmentation", "name": "YOLO Segmentation", "can_import": True, "can_export": True},
+        ]
 
     def create_export(
         self,
@@ -264,12 +355,17 @@ class AnnotationService:
         assets = {asset.id: asset for asset in self.workspace.metadata.list_assets(annotation_set.dataset_id)}
         output = Path(output_dir)
         result: AdapterResult
-        if export_format in {"labelme", "x-anylabeling"}:
+        normalized_format = _normalize_format(export_format)
+        if normalized_format in {"labelme", "x-anylabeling"}:
             result = export_labelme(annotation_set, schema, assets, output)
-        elif export_format == "coco":
+        elif normalized_format == "isat":
+            result = export_isat(annotation_set, schema, assets, output)
+        elif normalized_format == "coco":
             result = export_coco(annotation_set, schema, assets, output)
-        elif export_format in {"yolo-detection", "yolo_detection", "yolo"}:
+        elif normalized_format == "yolo-detection":
             result = export_yolo_detection(annotation_set, schema, assets, output)
+        elif normalized_format == "yolo-segmentation":
+            result = export_yolo_segmentation(annotation_set, schema, assets, output)
         else:
             raise ValueError(f"Unsupported export format: {export_format}")
         payload = result.to_dict()
@@ -286,6 +382,26 @@ class AnnotationService:
         if export_record is None:
             raise NotFoundError("export", export_id)
         return export_record
+
+    def _asset_for_annotation_file(self, dataset_id: str, input_path: str, input_format: str):
+        path = Path(input_path)
+        assets = self.workspace.metadata.list_assets(dataset_id)
+        by_filename = {Path(asset.uri).name: asset for asset in assets}
+        try:
+            import json
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if input_format == "isat":
+            image_name = Path(payload.get("info", {}).get("name", "")).name
+        else:
+            image_name = Path(payload.get("imagePath", "")).name
+        if image_name and image_name in by_filename:
+            return by_filename[image_name]
+        if len(assets) == 1:
+            return assets[0]
+        raise NotFoundError("asset", image_name or path.stem)
 
     def _require_dataset(self, dataset_id: str):
         dataset = self.workspace.metadata.get_dataset(dataset_id)
@@ -341,3 +457,26 @@ def _annotation_from_payload(payload: dict[str, Any]) -> Annotation:
         provenance=data.get("provenance", {}),
         version=data.get("version", 1),
     )
+
+
+def _normalize_format(value: str) -> str:
+    fmt = (value or "").strip().lower().replace("_", "-")
+    aliases = {
+        "xanylabeling": "x-anylabeling",
+        "x-any": "x-anylabeling",
+        "yolo": "yolo-detection",
+        "yolo-detect": "yolo-detection",
+        "yolo-detection": "yolo-detection",
+        "yolo-seg": "yolo-segmentation",
+        "yolo-segment": "yolo-segmentation",
+        "yolo-segmentation": "yolo-segmentation",
+        "yolo-segmentations": "yolo-segmentation",
+    }
+    return aliases.get(fmt, fmt)
+
+
+def _normalize_tool(value: str) -> str:
+    tool = (value or "").strip().lower().replace("_", "-")
+    if tool == "xanylabeling":
+        return "x-anylabeling"
+    return tool

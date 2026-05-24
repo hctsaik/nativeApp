@@ -6,6 +6,7 @@ Public API:
   load_assets(db_path)                  -> list[dict]
   start_annotation(session_id, anchor_info) -> dict
   open_xanylabeling(session_id)         -> dict
+  open_labeling_tool(session_id, tool)  -> dict
   open_single_frame(session_id, frame_idx) -> dict
   get_session_status(session_id)        -> dict | None
   update_after_xany_close(session_id)   -> dict
@@ -109,6 +110,18 @@ def open_xanylabeling(session_id: int) -> dict:
     return launcher.open_xanylabeling(_db_path(), session_id)
 
 
+def open_labeling_tool(session_id: int, tool: str = "x-anylabeling") -> dict:
+    normalized = (tool or "x-anylabeling").strip().lower().replace("_", "-")
+    if normalized in {"xanylabeling", "x-anylabeling"}:
+        return open_xanylabeling(session_id)
+    return {
+        "ok": False,
+        "error": f"module_009 tracking correction currently supports launch automation for x-anylabeling only; requested {tool}",
+        "tool": normalized,
+        "xany_pid": None,
+    }
+
+
 def open_single_frame(session_id: int, frame_idx: int) -> dict:
     return launcher.open_single_frame(_db_path(), session_id, frame_idx)
 
@@ -119,6 +132,13 @@ def get_session_status(session_id: int) -> Optional[dict]:
 
 def update_after_xany_close(session_id: int) -> dict:
     return launcher.update_after_xany_close(_db_path(), session_id)
+
+
+def update_after_labeling_close(session_id: int, tool: str = "x-anylabeling") -> dict:
+    normalized = (tool or "x-anylabeling").strip().lower().replace("_", "-")
+    if normalized in {"xanylabeling", "x-anylabeling"}:
+        return update_after_xany_close(session_id)
+    return {"ok": False, "error": f"Unsupported module_009 sync tool: {tool}", "tool": normalized}
 
 
 def update_after_single_close(session_id: int, frame_idx: int) -> dict:
@@ -155,7 +175,7 @@ def poll_tracking_status(session_id: int) -> dict:
         return {"status": "unknown"}
     status = session["status"]
     if status == "標記中" and session.get("xany_pid") is None:
-        result = open_xanylabeling(session_id)
+        result = open_labeling_tool(session_id, "x-anylabeling")
         if result.get("ok"):
             return {"status": "xany_launched", "result": result}
         return {"status": "xany_launch_failed", "error": result.get("error")}
