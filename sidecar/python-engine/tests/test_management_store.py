@@ -278,6 +278,38 @@ def test_store_records_tool_runs_and_usage(store: SQLiteManagementStore) -> None
     assert summary[0]["stopped_count"] == 1
 
 
+def test_store_log_module_execution_and_query(store: SQLiteManagementStore) -> None:
+    # Seed a sheet so context_sheet_id makes sense
+    store.upsert_sheet("wf_test", "Test WF", "", [{"plugin_id": "module_aaa", "label": "A"}])
+
+    run_id = store.log_module_execution(
+        plugin_id="module_aaa",
+        sheet_id="wf_test",
+        success=True,
+        duration_ms=2500,
+        actor="user",
+    )
+    assert run_id
+
+    # module_usage_by_sheet should pick it up
+    rows = store.module_usage_by_sheet("wf_test", days=1)
+    assert rows[0]["plugin_id"] == "module_aaa"
+    assert rows[0]["run_count"] == 1
+    assert rows[0]["completed_count"] == 1
+
+    # failed execution
+    store.log_module_execution("module_aaa", "wf_test", success=False, duration_ms=None)
+    rows2 = store.module_usage_by_sheet("wf_test", days=1)
+    assert rows2[0]["failed_count"] == 1
+
+
+def test_store_stale_modules_detects_unused(store: SQLiteManagementStore) -> None:
+    # module_aaa exists but has no module_exec runs → should appear as stale
+    stale = store.stale_modules(days=1)
+    tool_ids = [r["tool_id"] for r in stale]
+    assert "module_aaa" in tool_ids
+
+
 def test_store_delete_draft_tool_blocks_versions_and_references(store: SQLiteManagementStore) -> None:
     store.publish_tool_snapshot("module_aaa", "Module A", "1.0.0", "{}", "v1", "alice", enable_prod=False)
 

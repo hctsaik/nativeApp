@@ -106,6 +106,7 @@ _ALTER_MIGRATIONS = [
     "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE tools ADD COLUMN description TEXT",
     "ALTER TABLE tools ADD COLUMN slug TEXT",
+    "ALTER TABLE tool_runs ADD COLUMN context_sheet_id TEXT",
 ]
 
 _SEED_SQL = """

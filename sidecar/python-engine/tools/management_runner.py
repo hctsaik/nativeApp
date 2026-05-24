@@ -1571,94 +1571,169 @@ def _page_runs(reg: PluginRegistry) -> None:
     st.header(":material/monitoring: Runs & Usage")
     store = _store()
 
-    # 工具名稱對照表
-    tool_names = {p.plugin_id: p.name for p in reg.list_plugins()}
+    tab_usage, tab_sheet_log, tab_stale = st.tabs(["模組使用率", "Sheet 執行記錄", "閒置建議"])
 
-    # ── 時間範圍選擇 ──────────────────────────────────────────────
-    days_map = {"7 天": 7, "30 天": 30, "90 天": 90}
-    period = st.radio("時間範圍", list(days_map.keys()), index=1,
-                      horizontal=True, label_visibility="collapsed")
-    days = days_map[period]
+    # ── Tab 1: 模組使用率（點選 Sheet → 顯示該 Sheet 各模組的使用率）────────
+    with tab_usage:
+        days_map = {"7 天": 7, "30 天": 30, "90 天": 90}
+        period = st.radio("時間範圍", list(days_map.keys()), index=1,
+                          horizontal=True, label_visibility="collapsed", key="usage_period")
+        days = days_map[period]
 
-    usage_rows = store.usage_summary(days=days)
-    if not usage_rows:
-        st.info("目前沒有執行記錄。請從 Portal 或 Tools 頁面啟動工具。")
-        return
-
-    # ── KPI 總覽 ─────────────────────────────────────────────────
-    total_runs = sum(r["run_count"] for r in usage_rows)
-    total_failed = sum(r["failed_count"] for r in usage_rows)
-    total_completed = sum(r["completed_count"] for r in usage_rows)
-    success_rate = f"{total_completed / total_runs * 100:.0f}%" if total_runs else "—"
-    active_tools = len(usage_rows)
-
-    kc = st.columns(4)
-    kc[0].metric("總執行次數", total_runs)
-    kc[1].metric("成功率", success_rate)
-    kc[2].metric("失敗次數", total_failed)
-    kc[3].metric("活躍工具", active_tools)
-
-    st.divider()
-
-    # ── 工具使用排行 ──────────────────────────────────────────────
-    summary_data = []
-    for r in usage_rows:
-        tid = r["tool_id"]
-        runs = r["run_count"]
-        failed = r["failed_count"]
-        rate = (r["completed_count"] / runs * 100) if runs else 0
-        rate_str = f"{rate:.0f}% ⚠" if rate < 80 and runs >= 3 else f"{rate:.0f}%"
-        summary_data.append({
-            "工具名稱": tool_names.get(tid, tid),
-            "執行次數": runs,
-            "成功率": rate_str,
-            "最後執行": r.get("last_started_at", "—"),
-            "_tool_id": tid,
-        })
-
-    df_summary = pd.DataFrame(summary_data)
-
-    evt = st.dataframe(
-        df_summary[["工具名稱", "執行次數", "成功率", "最後執行"]],
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="runs_table",
-    )
-
-    # ── 選中工具的執行記錄 ────────────────────────────────────────
-    sel_rows = evt.selection.rows
-    if not sel_rows:
-        st.caption("點選上方工具列查看執行記錄。")
-        return
-
-    selected_tool_id = df_summary.iloc[sel_rows[0]]["_tool_id"]
-    selected_tool_name = tool_names.get(selected_tool_id, selected_tool_id)
-
-    st.divider()
-    st.subheader(f"{selected_tool_name} 執行記錄")
-
-    runs = store.list_tool_run_rows(limit=50, tool_id=selected_tool_id)
-    if not runs:
-        st.caption("尚無執行記錄。")
-        return
-
-    run_data = []
-    for r in runs:
-        row = {
-            "時間": r.get("started_at", "—"),
-            "狀態": r.get("status", "—"),
-            "時長": _fmt_ms(r.get("duration_ms")),
-            "執行者": r.get("actor", "—"),
-        }
-        if r.get("status") == "failed" and r.get("error_summary"):
-            row["錯誤"] = r["error_summary"]
+        # Sheet 選擇
+        sheet_rows = store.list_sheet_reference_records()
+        sheet_ids = sorted({r["sheet_id"] for r in sheet_rows})
+        if not sheet_ids:
+            st.info("尚未建立任何 Sheet。請先在 Sheets 頁面新增工作流程。")
         else:
-            row["錯誤"] = "—"
-        run_data.append(row)
+            sheet_names = {r["sheet_id"]: r["sheet_name"] for r in sheet_rows}
+            sheet_options = [f"{sheet_names.get(sid, sid)}  ({sid})" for sid in sheet_ids]
+            sel_idx = st.selectbox("選擇 Sheet", range(len(sheet_ids)),
+                                   format_func=lambda i: sheet_options[i],
+                                   key="usage_sheet_sel")
+            selected_sheet_id = sheet_ids[sel_idx]
 
-    st.dataframe(pd.DataFrame(run_data), use_container_width=True, hide_index=True)
+            module_rows = store.module_usage_by_sheet(selected_sheet_id, days=days)
+            tool_names = {p.plugin_id: p.name for p in reg.list_plugins()}
+
+            if not module_rows:
+                st.info(f"此 Sheet 在過去 {days} 天內無模組執行記錄。")
+                st.caption("模組執行完成時，Portal 會自動回報執行結果。")
+            else:
+                # KPI 總覽
+                total = sum(r["run_count"] for r in module_rows)
+                completed = sum(r["completed_count"] for r in module_rows)
+                failed = sum(r["failed_count"] for r in module_rows)
+                rate = f"{completed / total * 100:.0f}%" if total else "—"
+                kc = st.columns(3)
+                kc[0].metric("總執行次數", total)
+                kc[1].metric("成功率", rate)
+                kc[2].metric("失敗次數", failed)
+
+                st.divider()
+
+                tdata = []
+                for r in module_rows:
+                    pid = r["plugin_id"]
+                    runs = r["run_count"]
+                    comp = r["completed_count"]
+                    r_rate = (comp / runs * 100) if runs else 0
+                    rate_str = f"{r_rate:.0f}% ⚠" if r_rate < 80 and runs >= 3 else f"{r_rate:.0f}%"
+                    tdata.append({
+                        "ID": pid,
+                        "模組名稱": tool_names.get(pid, pid),
+                        "執行次數": runs,
+                        "成功率": rate_str,
+                        "平均時長": _fmt_ms(r.get("avg_duration_ms")),
+                        "最後使用": r.get("last_used_at", "—"),
+                    })
+                st.dataframe(pd.DataFrame(tdata), use_container_width=True, hide_index=True)
+
+    # ── Tab 2: Sheet 執行記錄（原始 tool_runs，category=sheet）───────────────
+    with tab_sheet_log:
+        days_map2 = {"7 天": 7, "30 天": 30, "90 天": 90}
+        period2 = st.radio("時間範圍", list(days_map2.keys()), index=1,
+                           horizontal=True, label_visibility="collapsed", key="log_period")
+        days2 = days_map2[period2]
+
+        usage_rows = store.usage_summary(days=days2)
+        tool_names2 = {p.plugin_id: p.name for p in reg.list_plugins()}
+
+        if not usage_rows:
+            st.info("目前沒有執行記錄。請從 Portal 啟動工具後記錄會自動產生。")
+        else:
+            total_runs = sum(r["run_count"] for r in usage_rows)
+            total_failed = sum(r["failed_count"] for r in usage_rows)
+            total_completed = sum(r["completed_count"] for r in usage_rows)
+            success_rate = f"{total_completed / total_runs * 100:.0f}%" if total_runs else "—"
+
+            kc = st.columns(4)
+            kc[0].metric("總執行次數", total_runs)
+            kc[1].metric("成功率", success_rate)
+            kc[2].metric("失敗次數", total_failed)
+            kc[3].metric("活躍工具", len(usage_rows))
+
+            st.divider()
+
+            summary_data = []
+            for r in usage_rows:
+                tid = r["tool_id"]
+                runs = r["run_count"]
+                rate = (r["completed_count"] / runs * 100) if runs else 0
+                rate_str = f"{rate:.0f}% ⚠" if rate < 80 and runs >= 3 else f"{rate:.0f}%"
+                summary_data.append({
+                    "工具名稱": tool_names2.get(tid, tid),
+                    "執行次數": runs,
+                    "成功率": rate_str,
+                    "最後執行": r.get("last_started_at", "—"),
+                    "_tool_id": tid,
+                })
+
+            df_summary = pd.DataFrame(summary_data)
+            evt = st.dataframe(
+                df_summary[["工具名稱", "執行次數", "成功率", "最後執行"]],
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="runs_table",
+            )
+
+            sel_rows = evt.selection.rows
+            if not sel_rows:
+                st.caption("點選上方工具列查看詳細執行記錄。")
+            else:
+                selected_tool_id = df_summary.iloc[sel_rows[0]]["_tool_id"]
+                selected_tool_name = tool_names2.get(selected_tool_id, selected_tool_id)
+
+                st.divider()
+                st.subheader(f"{selected_tool_name} 執行記錄")
+
+                runs = store.list_tool_run_rows(limit=50, tool_id=selected_tool_id)
+                if not runs:
+                    st.caption("尚無執行記錄。")
+                else:
+                    run_data = []
+                    for r in runs:
+                        run_data.append({
+                            "時間": r.get("started_at", "—"),
+                            "狀態": r.get("status", "—"),
+                            "時長": _fmt_ms(r.get("duration_ms")),
+                            "執行者": r.get("actor", "—"),
+                            "錯誤": r["error_summary"] if r.get("status") == "failed" and r.get("error_summary") else "—",
+                        })
+                    st.dataframe(pd.DataFrame(run_data), use_container_width=True, hide_index=True)
+
+    # ── Tab 3: 閒置建議（90天未執行的模組）──────────────────────────────────
+    with tab_stale:
+        stale_days_map = {"30 天": 30, "60 天": 60, "90 天": 90}
+        stale_period = st.radio("閒置門檻", list(stale_days_map.keys()), index=2,
+                                horizontal=True, label_visibility="collapsed", key="stale_period")
+        stale_days = stale_days_map[stale_period]
+
+        stale_rows = store.stale_modules(days=stale_days)
+        if not stale_rows:
+            st.success(f"所有模組在過去 {stale_days} 天內都有執行記錄，無需清理。")
+        else:
+            st.warning(
+                f"以下 **{len(stale_rows)}** 個模組超過 **{stale_days} 天**未執行，"
+                "建議評估是否可停用或移除以降低維護負擔。"
+            )
+            stale_data = []
+            for r in stale_rows:
+                last_used = r.get("last_used_at") or "從未執行"
+                stale_data.append({
+                    "ID": r["tool_id"],
+                    "模組名稱": r["name"],
+                    "最後執行": last_used,
+                    "歷史執行次數": r.get("total_runs", 0),
+                    "建議": "停用（可從 Modules 頁重新啟用）",
+                })
+            st.dataframe(pd.DataFrame(stale_data), use_container_width=True, hide_index=True)
+            st.caption(
+                "**注意**：停用模組不會刪除資料；可隨時在 Modules 頁面重新啟用。"
+                " 確認不再使用後，才建議從 Modules 頁面執行刪除。"
+            )
 
 
 def _page_permissions(reg: PluginRegistry) -> None:

@@ -33,6 +33,7 @@ const fallbackApi = {
     return { ok: true, active_tool: { active: false } };
   },
   async externalOpenXanylabeling() { return {}; },
+  async externalOpenLabelingTool() { return {}; },
   async externalQueueImage() { return { queue_size: 0 }; },
   async externalGetQueue() { return { items: [], count: 0 }; },
   async externalDequeue() { return {}; },
@@ -395,6 +396,9 @@ function App() {
   useEffect(() => { sheetTabsRef.current = sheetTabs; }, [sheetTabs]);
   // Suppress poller-driven nav after EXECUTE_START / SWITCH_TAB to avoid race condition
   const suppressPollerNavUntilRef = useRef(0);
+  // Track active tool so EXECUTE_COMPLETE closure can log sheet context
+  const selectedToolIdRef = useRef("");
+  useEffect(() => { selectedToolIdRef.current = selectedToolId; }, [selectedToolId]);
 
 
   useEffect(() => {
@@ -548,7 +552,7 @@ function App() {
     function onExtMessage(event) {
       const data = event.data;
       if (!data || data.cim !== "v1") return;
-      const { action, imageUrl, metadata } = data;
+      const { action, imageUrl, metadata, tool } = data;
       if (!imageUrl) return;
       cimLog("info", `[ext-bridge] action=${action} url=${imageUrl}`);
 
@@ -556,6 +560,11 @@ function App() {
         nativeApi.externalOpenXanylabeling(imageUrl, metadata ?? {})
           .then(() => setStatus("xanylabeling 已開啟"))
           .catch(err => setStatus(`xanylabeling 啟動失敗: ${err.message}`));
+      } else if (action === "open_labeling_tool") {
+        const selectedTool = tool || metadata?.tool || "x-anylabeling";
+        nativeApi.externalOpenLabelingTool(selectedTool, imageUrl, metadata ?? {})
+          .then(() => setStatus(`${selectedTool} launched`))
+          .catch(err => setStatus(`${selectedTool} launch failed: ${err.message}`));
       } else if (action === "queue_image") {
         nativeApi.externalQueueImage(imageUrl, metadata ?? {})
           .then(res => {
@@ -591,6 +600,15 @@ function App() {
         case MessageTypes.EXECUTE_COMPLETE:
           cimLog("info", `EXECUTE_COMPLETE success=${payload.success} plugin_id=${payload.plugin_id ?? ""} error=${payload.error ?? ""}`);
           setIsExecuting(false);
+          if (payload.plugin_id && config?.sidecarControlUrl) {
+            const activeToolId = selectedToolIdRef.current;
+            const sheetId = activeToolId?.startsWith("sheet-") ? activeToolId.slice(6) : null;
+            fetch(`${config.sidecarControlUrl}/tools/runs/log`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plugin_id: payload.plugin_id, sheet_id: sheetId, success: !!payload.success, actor: "user" }),
+            }).catch(() => {});
+          }
           if (payload.success) {
             if (payload.plugin_id && sheetTabsRef.current.length > 0) {
               // Sheet tool: switch to the right module tab's Output and reload its iframe

@@ -764,3 +764,28 @@ def test_engine_has_preview_endpoints() -> None:
     assert "/tools/preview/stop" in src
     assert "/tools/preview/status" in src
     assert "_preview_process" in src
+
+
+def test_engine_has_log_module_run_endpoint() -> None:
+    """Engine exposes POST /tools/runs/log for portal to record module executions."""
+    src = (Path(__file__).parent.parent / "engine.py").read_text(encoding="utf-8")
+    assert "/tools/runs/log" in src
+    assert "log_module_execution" in src
+    assert "plugin_id" in src
+    assert "sheet_id" in src
+
+
+def test_management_runner_runs_page_has_three_tabs() -> None:
+    """_page_runs uses st.tabs with 模組使用率, Sheet 執行記錄, and 閒置建議."""
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "模組使用率" in src
+    assert "Sheet 執行記錄" in src
+    assert "閒置建議" in src
+    assert "module_usage_by_sheet" in src
+    assert "stale_modules" in src
+
+
+def test_management_store_schema_has_context_sheet_id_migration() -> None:
+    """_ALTER_MIGRATIONS must include the context_sheet_id column."""
+    src = (Path(__file__).parent.parent / "management_schema.py").read_text(encoding="utf-8")
+    assert "context_sheet_id" in src

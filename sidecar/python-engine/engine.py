@@ -1341,6 +1341,22 @@ def _ext_launch_xanylabeling(local_path: Path, log_dir: Path) -> None:
     subprocess.Popen(cmd)
 
 
+def _ext_launch_labeling_tool(tool: str, local_path: Path, log_dir: Path) -> None:
+    normalized = (tool or "x-anylabeling").strip().lower().replace("_", "-")
+    if normalized in {"xanylabeling", "x-anylabeling"}:
+        _ext_launch_xanylabeling(local_path, log_dir)
+        return
+    if normalized == "labelme":
+        labelme_exe = os.environ.get("LABELME_EXE", "labelme")
+        subprocess.Popen([labelme_exe, str(local_path), "--output", str(local_path.with_suffix(".json")), "--nodata", "--autosave"])
+        return
+    if normalized == "isat":
+        isat_exe = os.environ.get("ISAT_EXE", "isat-sam")
+        subprocess.Popen([isat_exe], cwd=str(local_path.parent))
+        return
+    raise RuntimeError(f"Unsupported labeling tool: {tool}")
+
+
 def create_app(
     manager: ToolProcessManager,
     registry: ToolRegistry,
@@ -1469,6 +1485,20 @@ def create_app(
     @app.get("/usage/summary")
     def usage_summary(days: int = 30) -> list[dict]:
         return SQLiteManagementStore(db_path).usage_summary(days=days)
+
+    @app.post("/tools/runs/log")
+    def log_module_run(body: dict) -> dict:
+        plugin_id = body.get("plugin_id", "")
+        if not plugin_id:
+            raise HTTPException(status_code=400, detail="plugin_id required")
+        run_id = SQLiteManagementStore(db_path).log_module_execution(
+            plugin_id=plugin_id,
+            sheet_id=body.get("sheet_id"),
+            success=bool(body.get("success", True)),
+            duration_ms=body.get("duration_ms"),
+            actor=body.get("actor", "user"),
+        )
+        return {"ok": True, "run_id": run_id}
 
     @app.post("/tools/{tool_id}/start", response_model=ToolStartResponse)
     def start_tool(tool_id: str) -> ToolStartResponse:
@@ -1631,6 +1661,11 @@ def create_app(
         image_url: str
         metadata: dict = {}
 
+    class ExternalLabelingToolRequest(BaseModel):
+        image_url: str
+        tool: str = "x-anylabeling"
+        metadata: dict = {}
+
     @app.post("/external/open-xanylabeling")
     def external_open_xanylabeling(request: ExternalImageRequest) -> dict:
         queue_dir = log_dir / "external-queue"
@@ -1645,6 +1680,21 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"xanylabeling 啟動失敗: {exc}") from exc
         return {"status": "launched", "local_path": str(local_path)}
+
+    @app.post("/external/open-labeling-tool")
+    def external_open_labeling_tool(request: ExternalLabelingToolRequest) -> dict:
+        queue_dir = log_dir / "external-queue"
+        try:
+            local_path = _ext_download_image(request.image_url, queue_dir)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"??銝?憭望?: {exc}") from exc
+        try:
+            _ext_launch_labeling_tool(request.tool, local_path, log_dir)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"{request.tool} ??憭望?: {exc}") from exc
+        return {"status": "launched", "tool": request.tool, "local_path": str(local_path)}
 
     @app.post("/external/queue-image")
     def external_queue_image(request: ExternalImageRequest) -> dict:

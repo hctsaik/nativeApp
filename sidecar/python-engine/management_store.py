@@ -87,6 +87,16 @@ class ManagementStore(Protocol):
     def finish_tool_run(self, run_id: str, status: str, error_summary: str | None = None) -> None: ...
     def list_tool_run_rows(self, limit: int = 50, tool_id: str | None = None) -> list[dict[str, Any]]: ...
     def usage_summary(self, days: int = 30) -> list[dict[str, Any]]: ...
+    def log_module_execution(
+        self,
+        plugin_id: str,
+        sheet_id: str | None,
+        success: bool,
+        duration_ms: int | None,
+        actor: str = "user",
+    ) -> str: ...
+    def module_usage_by_sheet(self, sheet_id: str, days: int = 90) -> list[dict[str, Any]]: ...
+    def stale_modules(self, days: int = 90) -> list[dict[str, Any]]: ...
     def delete_draft_tool(self, tool_id: str) -> None: ...
     def get_permission(self, plugin_id: str, role_id: str, action: str) -> bool | None: ...
     def list_role_rows(self) -> list[dict[str, Any]]: ...
@@ -593,6 +603,67 @@ class SQLiteManagementStore:
                    WHERE started_at >= datetime('now', ?)
                    GROUP BY tool_id
                    ORDER BY run_count DESC, tool_id""",
+                (f"-{safe_days} days",),
+            ).fetchall()
+        return self._rows(rows)
+
+    def log_module_execution(
+        self,
+        plugin_id: str,
+        sheet_id: str | None,
+        success: bool,
+        duration_ms: int | None,
+        actor: str = "user",
+    ) -> str:
+        run_id = uuid.uuid4().hex[:12]
+        status = "completed" if success else "failed"
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO tool_runs
+                   (run_id, tool_id, category, mode, actor, status,
+                    context_sheet_id, duration_ms, ended_at)
+                   VALUES (?, ?, 'module_exec', 'iframe', ?, ?, ?, ?, datetime('now'))""",
+                (run_id, plugin_id, actor or "user", status, sheet_id, duration_ms),
+            )
+        return run_id
+
+    def module_usage_by_sheet(self, sheet_id: str, days: int = 90) -> list[dict[str, Any]]:
+        safe_days = max(1, min(int(days), 365))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT tool_id AS plugin_id,
+                          COUNT(*) AS run_count,
+                          SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed_count,
+                          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_count,
+                          AVG(duration_ms) AS avg_duration_ms,
+                          MAX(started_at) AS last_used_at
+                   FROM tool_runs
+                   WHERE context_sheet_id = ?
+                     AND category = 'module_exec'
+                     AND started_at >= datetime('now', ?)
+                   GROUP BY tool_id
+                   ORDER BY run_count DESC""",
+                (sheet_id, f"-{safe_days} days"),
+            ).fetchall()
+        return self._rows(rows)
+
+    def stale_modules(self, days: int = 90) -> list[dict[str, Any]]:
+        safe_days = max(1, min(int(days), 365))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT t.tool_id, t.name,
+                          MAX(tr.started_at) AS last_used_at,
+                          COUNT(tr.run_id) AS total_runs
+                   FROM tools t
+                   LEFT JOIN tool_runs tr
+                     ON tr.tool_id = t.tool_id
+                    AND tr.category = 'module_exec'
+                   WHERE t.enabled = 1
+                     AND t.tool_id LIKE 'module_%'
+                   GROUP BY t.tool_id, t.name
+                   HAVING last_used_at IS NULL
+                      OR last_used_at < datetime('now', ?)
+                   ORDER BY last_used_at ASC NULLS FIRST""",
                 (f"-{safe_days} days",),
             ).fetchall()
         return self._rows(rows)
