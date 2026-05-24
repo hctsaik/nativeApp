@@ -1,0 +1,2487 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annotation Platform Architecture Discussion</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5d6678;
+      --line: #d9dee8;
+      --accent: #1d5fd1;
+      --ok: #087f5b;
+      --warn: #b26b00;
+      --bad: #b42318;
+      --code: #eef1f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      line-height: 1.72;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 36px 24px 64px;
+    }
+    header {
+      background: #10233f;
+      color: #fff;
+      padding: 34px 24px;
+      border-bottom: 4px solid var(--accent);
+    }
+    header .inner {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 {
+      line-height: 1.28;
+      margin: 0 0 12px;
+    }
+    h1 {
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    h2 {
+      font-size: 22px;
+      margin-top: 32px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 17px;
+      margin-top: 20px;
+    }
+    p { margin: 8px 0 12px; }
+    ul, ol { margin: 8px 0 14px 24px; padding: 0; }
+    li { margin: 5px 0; }
+    code {
+      background: var(--code);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 0.94em;
+    }
+    pre {
+      overflow-x: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 6px;
+      padding: 14px 16px;
+      line-height: 1.55;
+    }
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 22px;
+      background: var(--panel);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #edf1f7;
+      font-weight: 650;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin: 18px 0;
+    }
+    .lead {
+      color: #dce8ff;
+      max-width: 920px;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .metric {
+      background: #152d50;
+      border: 1px solid #284c7d;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      margin-bottom: 3px;
+    }
+    .note {
+      border-left: 4px solid var(--accent);
+      background: #eef5ff;
+      padding: 12px 14px;
+      margin: 14px 0;
+    }
+    .decision {
+      border-left: 4px solid var(--ok);
+      background: #ecfdf5;
+      padding: 12px 14px;
+      margin: 14px 0;
+    }
+    .risk {
+      border-left: 4px solid var(--warn);
+      background: #fff8eb;
+      padding: 12px 14px;
+      margin: 14px 0;
+    }
+    .ok { color: var(--ok); font-weight: 650; }
+    .warn { color: var(--warn); font-weight: 650; }
+    .bad { color: var(--bad); font-weight: 650; }
+    .muted { color: var(--muted); }
+    .diagram-panel {
+      border: 1px solid var(--line);
+      background: #f5f8ff;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 18px 0;
+      overflow-x: auto;
+    }
+    .diagram-panel pre.mermaid {
+      background: #f5f8ff;
+      color: var(--ink);
+      padding: 0;
+      border-radius: 0;
+    }
+    .diagram-panel svg {
+      max-width: 100%;
+      height: auto;
+    }
+    /* Overview architecture box styles */
+    .arch-overview {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      border: 2px solid #3b82f6;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 18px 0;
+      background: #fff;
+    }
+    .arch-col {
+      border-right: 1px solid #c8d4ec;
+      padding: 0;
+    }
+    .arch-col:last-child { border-right: none; }
+    .arch-col-header {
+      background: #1d4ed8;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 8px 10px;
+      text-align: center;
+      letter-spacing: 0.03em;
+    }
+    .arch-col-body { padding: 10px 12px; }
+    .arch-box {
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      border-radius: 6px;
+      padding: 7px 9px;
+      margin: 6px 0;
+      font-size: 13px;
+    }
+    .arch-box strong { display: block; font-size: 13px; margin-bottom: 2px; color: #1e40af; }
+    .arch-box.green { background: #f0fdf4; border-color: #86efac; }
+    .arch-box.green strong { color: #166534; }
+    .arch-box.orange { background: #fff8eb; border-color: #fcd34d; }
+    .arch-box.orange strong { color: #92400e; }
+    .arch-box.purple { background: #f5f3ff; border-color: #c4b5fd; }
+    .arch-box.purple strong { color: #5b21b6; }
+    .arch-box.gray { background: #f9fafb; border-color: #d1d5db; }
+    .arch-box.gray strong { color: #374151; }
+    .arch-arrow-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      margin: 10px 0;
+      color: #64748b;
+      font-size: 22px;
+    }
+    .diagram-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .diagram-flow {
+      display: grid;
+      grid-template-columns: minmax(170px, 1fr) 34px minmax(170px, 1fr) 34px minmax(170px, 1fr) 34px minmax(170px, 1fr);
+      gap: 8px;
+      align-items: stretch;
+      margin: 12px 0;
+    }
+    .diagram-flow.five {
+      grid-template-columns: minmax(150px, 1fr) 30px minmax(150px, 1fr) 30px minmax(150px, 1fr) 30px minmax(150px, 1fr) 30px minmax(150px, 1fr);
+    }
+    .diagram-node {
+      border: 1px solid #c8d2e4;
+      border-top: 4px solid var(--accent);
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 98px;
+    }
+    .diagram-node strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+    .diagram-node ul {
+      margin: 0 0 0 18px;
+      font-size: 14px;
+    }
+    .diagram-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-weight: 800;
+      font-size: 20px;
+    }
+    .diagram-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .interface-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 13px;
+    }
+    .interface-card h4 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .interface-card .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 8px 0;
+    }
+    .tag {
+      display: inline-block;
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      color: #334155;
+    }
+    .swimlane {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+      margin: 10px 0;
+    }
+    .swimlane-label {
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .step-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .step {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 6px;
+      padding: 7px 9px;
+      font-size: 13px;
+    }
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .phase-card {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 126px;
+    }
+    .phase-card strong {
+      display: block;
+      color: var(--accent);
+      margin-bottom: 5px;
+    }
+    .phase-card p {
+      margin: 0;
+      font-size: 14px;
+    }
+    @media (max-width: 820px) {
+      main { padding: 24px 14px 48px; }
+      section { padding: 18px 16px; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .diagram-flow,
+      .diagram-flow.five,
+      .diagram-grid,
+      .roadmap {
+        grid-template-columns: 1fr;
+      }
+      .diagram-arrow {
+        transform: rotate(90deg);
+        min-height: 20px;
+      }
+      .swimlane {
+        grid-template-columns: 1fr;
+      }
+      table { font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>Annotation Platform Architecture Discussion</h1>
+      <p class="lead">
+        Multi-agent 設計整理：評估目前系統是否足以彈性擴展多種 labeling tool、常見 annotation format，
+        以及如何讓不同 Oracle schema、Oracle table、web service、權限與資料欄位的外部系統容易接入。
+      </p>
+      <div class="summary-grid">
+        <div class="metric">
+          <strong>70%</strong>
+          <span>Format adapter 彈性已有基礎</span>
+        </div>
+        <div class="metric">
+          <strong>45%</strong>
+          <span>Labeling tool runtime 還需要 adapter 化</span>
+        </div>
+        <div class="metric">
+          <strong>30%</strong>
+          <span>Enterprise integration 尚缺正式 common interface</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. Executive Summary</h2>
+      <div class="decision">
+        <strong>判斷：</strong>
+        目前系統已經從 X-AnyLabeling 專用，演進到支援 LabelMe、X-AnyLabeling、ISAT、COCO、
+        YOLO detection、YOLO segmentation 的第一版多格式架構。核心方向正確：平台內部保留
+        canonical annotation model，外部格式透過 adapter 進出。
+      </div>
+      <p>
+        但如果目標是讓不同系統容易對接，目前還不算完整彈性。主要缺口不是再多加一個 exporter，
+        而是需要把 <code>Format Registry</code>、<code>Labeling Tool Adapter</code>、
+        <code>External System Connector</code>、<code>Schema Mapping Profile</code>、
+        <code>Capability Matrix</code> 與 <code>Conversion Loss Report</code> 拉成正式 common interface。
+      </p>
+      <p>
+        最重要的設計原則是：annotation core 永遠只處理平台 canonical model；所有外部格式差異放在
+        format adapter；所有工具差異放在 tool adapter；所有客戶系統差異放在 integration connector
+        與 mapping profile。這樣才能同時支援 LabelMe、ISAT、COCO、YOLO，也能接不同 Oracle schema、
+        REST service、身份權限與資料欄位，而不讓核心流程被客製邏輯污染。
+      </p>
+      <div class="note">
+        <strong>可行性結論：</strong>
+        這個 solution 是可行的，但應採漸進式改造。第一步不要直接做大型 plugin system 或 Oracle
+        雙向同步，而是先把目前已存在的 adapters、tool launch、service dispatch 收斂到 registry 與 contract。
+        等核心 extension point 穩定後，再把外部系統 connector、mapping profile、export delivery 接上去。
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Feasibility Review</h2>
+      <p>
+        重新檢視後，我認為這份設計的方向正確，且可以落在目前 repo 架構上。它不是要推翻既有
+        <code>AnnotationService</code>、MCP、module_006/008/009/012，而是把這些既有入口逐步變成 registry
+        與 connector 的 façade。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>設計項目</th>
+            <th>可行性</th>
+            <th>落地方式</th>
+            <th>主要風險</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>FormatRegistry</td>
+            <td class="ok">高</td>
+            <td>把目前 LabelMe、X-AnyLabeling、ISAT、COCO、YOLO adapters 先註冊成 descriptors，再讓 service 透過 registry dispatch。</td>
+            <td>若 descriptor 太複雜，第一版會拖慢開發；應先支援 import/export/capability/aliases。</td>
+          </tr>
+          <tr>
+            <td>ToolRegistry</td>
+            <td class="ok">中高</td>
+            <td>包住現有 <code>labeling_runtime.py</code> 與 X-AnyLabeling runtime，逐步讓 module_006/012 使用同一套 launch contract。</td>
+            <td>不同 GUI 工具的 CLI 能力不一致，collect results 需要以 capability 表示，不要假設每個工具都能完整自動化。</td>
+          </tr>
+          <tr>
+            <td>ExternalSystemConnector</td>
+            <td class="warn">中</td>
+            <td>先做 contract、fake connector、file connector，再接 Oracle/REST。核心不要直接 import Oracle driver。</td>
+            <td>客戶系統差異大，若沒有 profile/mapping versioning，會變成到處加客製 if/else。</td>
+          </tr>
+          <tr>
+            <td>IntegrationProfile</td>
+            <td class="ok">高</td>
+            <td>用 JSON/YAML 描述 system_id、tenant、connector、field mapping、schema mapping、format policy。</td>
+            <td>profile 欄位要版本化，否則後續 migration 會痛。</td>
+          </tr>
+          <tr>
+            <td>Structured ConversionReport</td>
+            <td class="ok">高</td>
+            <td>延伸既有 <code>ConversionReport</code>，加入 loss summary、field losses、mapping version、dry-run 結果。</td>
+            <td>若 UI 不顯示 loss report，使用者仍會誤以為 export 一定無損。</td>
+          </tr>
+          <tr>
+            <td>Module migration</td>
+            <td class="warn">中</td>
+            <td>module_006 已接近 generic；module_008 需從 LabelMe-style session JSON 轉向 canonical bridge；module_009 需分階段拆 X-Any coupling。</td>
+            <td>module_009 tracking correction 與 X-AnyLabeling 結合較深，不適合一次改完。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="decision">
+        <strong>建議落地策略：</strong>
+        先把 registry 與 contract 建起來，保留既有 public API 與 legacy aliases。也就是外部呼叫者仍可用
+        <code>annotation_create_export</code>、<code>annotation_prepare_labeling_project</code>，
+        但內部 dispatch 從 hard-coded <code>if/elif</code> 改成 registry。這樣風險最低，也最容易用現有 tests 證明沒有 regression。
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 設計圖與 Interface 標註</h2>
+      <p>
+        這一章把前面的設計轉成可溝通的圖。重點是讓討論時可以快速回答三件事：
+        資料從哪裡來、標註工具和輸出格式如何分開、各系統要實作哪個 common interface。
+      </p>
+
+      <div class="diagram-panel">
+        <div class="diagram-title">3.1 整體架構圖：外部系統到 Annotation Platform</div>
+        <div class="diagram-flow five">
+          <div class="diagram-node">
+            <strong>External Systems</strong>
+            <ul>
+              <li>Oracle tables / schemas</li>
+              <li>REST / web services</li>
+              <li>File shares / object storage</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Integration Boundary</strong>
+            <ul>
+              <li>ExternalSystemConnector</li>
+              <li>IntegrationProfile</li>
+              <li>SchemaMappingProfile</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Annotation Core</strong>
+            <ul>
+              <li>Dataset / Asset / Schema</li>
+              <li>AnnotationSet / Review</li>
+              <li>Validation / Provenance</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Extension Registries</strong>
+            <ul>
+              <li>FormatRegistry</li>
+              <li>ToolRegistry</li>
+              <li>ConversionReport</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Delivery APIs</strong>
+            <ul>
+              <li>MCP / REST / modules</li>
+              <li>Export artifacts</li>
+              <li>Push back to systems</li>
+            </ul>
+          </div>
+        </div>
+        <div class="note">
+          Annotation core 是唯一的 system of record。Oracle schema、REST endpoint、LabelMe JSON、YOLO TXT
+          都只出現在邊界層，不進核心模型。
+        </div>
+      </div>
+
+      <div class="diagram-panel">
+        <div class="diagram-title">3.2 Labeling Tool 與 Annotation Format 分離圖</div>
+        <div class="diagram-flow">
+          <div class="diagram-node">
+            <strong>ToolRegistry</strong>
+            <ul>
+              <li>X-AnyLabeling</li>
+              <li>LabelMe GUI</li>
+              <li>ISAT / ISAT-SAM</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Tool Project / Session</strong>
+            <ul>
+              <li>prepare project</li>
+              <li>launch GUI</li>
+              <li>collect result files</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>FormatRegistry</strong>
+            <ul>
+              <li>LabelMe JSON</li>
+              <li>ISAT JSON</li>
+              <li>COCO / YOLO</li>
+            </ul>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-node">
+            <strong>Canonical Model</strong>
+            <ul>
+              <li>bbox / polygon</li>
+              <li>classification</li>
+              <li>future mask/keypoint</li>
+            </ul>
+          </div>
+        </div>
+        <div class="risk">
+          溝通重點：用 X-AnyLabeling 標註，不代表只能 export X-AnyLabeling；用 ISAT 標註，也可以 export COCO。
+          Tool 是人機互動流程，format 是資料交換契約。
+        </div>
+      </div>
+
+      <div class="diagram-panel">
+        <div class="diagram-title">3.3 Import / Export 雙向流程圖</div>
+        <div class="swimlane">
+          <div class="swimlane-label">Import</div>
+          <div class="step-row">
+            <span class="step">Connector pull task/assets</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Field/schema mapping</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Format adapter import</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Canonical AnnotationSet</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Validate / review</span>
+          </div>
+        </div>
+        <div class="swimlane">
+          <div class="swimlane-label">Export</div>
+          <div class="step-row">
+            <span class="step">Canonical AnnotationSet</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Dry-run capability check</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Loss report preview</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Format adapter export</span>
+            <span class="diagram-arrow">&rarr;</span>
+            <span class="step">Artifact or connector push</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagram-panel">
+        <div class="diagram-title">3.4 Common Interface 標註圖</div>
+        <div class="diagram-grid">
+          <div class="interface-card">
+            <h4>FormatAdapter</h4>
+            <div class="tag-row">
+              <span class="tag">import file</span>
+              <span class="tag">import directory</span>
+              <span class="tag">export</span>
+              <span class="tag">dry-run</span>
+            </div>
+            <p>
+              只負責 canonical model 與外部格式互轉。不得連 Oracle、不得處理使用者權限。
+            </p>
+          </div>
+          <div class="interface-card">
+            <h4>LabelingToolAdapter</h4>
+            <div class="tag-row">
+              <span class="tag">detect</span>
+              <span class="tag">prepare project</span>
+              <span class="tag">launch</span>
+              <span class="tag">collect outputs</span>
+            </div>
+            <p>
+              只負責 GUI tool lifecycle。不得決定客戶最終 export 格式，也不得直接回寫外部系統。
+            </p>
+          </div>
+          <div class="interface-card">
+            <h4>ExternalSystemConnector</h4>
+            <div class="tag-row">
+              <span class="tag">list tasks</span>
+              <span class="tag">resolve assets</span>
+              <span class="tag">push annotations</span>
+              <span class="tag">conflict check</span>
+            </div>
+            <p>
+              封裝 Oracle、REST、檔案服務與客戶 API。不得讓 SQL/table 欄位污染 annotation core。
+            </p>
+          </div>
+          <div class="interface-card">
+            <h4>IntegrationProfile</h4>
+            <div class="tag-row">
+              <span class="tag">tenant</span>
+              <span class="tag">field mapping</span>
+              <span class="tag">schema mapping</span>
+              <span class="tag">format policy</span>
+            </div>
+            <p>
+              用設定描述每個系統如何對接。新增客戶時優先新增 profile/connector，不修改 core。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagram-panel">
+        <div class="diagram-title">3.5 實作 Roadmap 圖</div>
+        <div class="roadmap">
+          <div class="phase-card">
+            <strong>Phase 1</strong>
+            <p>FormatRegistry：把既有 LabelMe、ISAT、COCO、YOLO adapters 註冊化。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 2</strong>
+            <p>ConversionReport：支援 export dry-run 與 loss report preview。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 3</strong>
+            <p>ToolRegistry：收斂 X-AnyLabeling、LabelMe、ISAT 的 launch/prepare。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 4</strong>
+            <p>IntegrationProfile：導入 field/schema/status mapping 與 format policy。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 5</strong>
+            <p>Connectors：先 file/fake，再 REST/Oracle，避免核心綁資料庫。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 6</strong>
+            <p>Orchestration：import/export job、retry、conflict detection。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 7</strong>
+            <p>Module migration：module_006/MCP 先行，module_009 最後分階段。</p>
+          </div>
+          <div class="phase-card">
+            <strong>Phase 8</strong>
+            <p>Contract tests：format/tool/connector/profile 都有共同驗收測試。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. Multi-Agent Findings</h2>
+      <h3>Agent A：目前 repo 架構</h3>
+      <p>
+        <code>sidecar/python-engine/annotation</code> 已有 canonical model、format adapters、service API；
+        <code>mcp/annotation_mcp</code> 已有 generic tools；OpenSpec 也明確區分 annotation format 與
+        labeling tool。這是好的基底。
+      </p>
+      <p>
+        但 <code>AnnotationService</code> 仍用 <code>if/elif</code> 做 adapter dispatch；
+        <code>module_008</code> 內部仍偏 LabelMe-style JSON；
+        <code>module_009</code> tracking correction 仍高度 X-AnyLabeling specific；
+        <code>module_012</code> 自己做 tool launch dispatch。這些都是下一步要收斂的地方。
+      </p>
+
+      <h3>Agent B：外部系統整合</h3>
+      <p>
+        不同系統的差異不只在標註格式，也包含 Oracle table/schema、web service API、身份權限、
+        資料 lifecycle、審核流程、回寫策略、錯誤重試與版本衝突。這些不應該進 annotation core，
+        應由 integration connector 與 mapping profile 承接。
+      </p>
+
+      <h3>Agent C：Format / Export / Import</h3>
+      <p>
+        LabelMe、X-AnyLabeling、ISAT、COCO、YOLO 的資料模型不同。困難點不是能不能寫出檔案，
+        而是轉換時哪些資訊會遺失。例如 polygon 匯出 YOLO detection、bbox 匯出 YOLO segmentation、
+        mask 匯出未支援格式，都應在 conversion report 中清楚呈現。
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Current Architecture Assessment</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>面向</th>
+            <th>目前狀態</th>
+            <th>評估</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Canonical Model</td>
+            <td>已有 <code>Dataset</code>、<code>ImageAsset</code>、<code>LabelSchema</code>、<code>AnnotationSet</code>、<code>Annotation</code>、bbox、polygon、classification。</td>
+            <td class="ok">方向正確，是多格式支援的核心。</td>
+          </tr>
+          <tr>
+            <td>Format Adapter</td>
+            <td>已有 LabelMe、X-AnyLabeling、ISAT、COCO、YOLO detection、YOLO segmentation。</td>
+            <td class="ok">已有基礎，但還不是 registry/plugin 型。</td>
+          </tr>
+          <tr>
+            <td>Service API</td>
+            <td>已有 <code>prepare_labeling_project</code>、<code>import_annotations</code>、<code>import_project_labels</code>、<code>supported_annotation_formats</code>、<code>create_export</code>。</td>
+            <td class="ok">API 名稱已往 generic 方向走。</td>
+          </tr>
+          <tr>
+            <td>Service Dispatch</td>
+            <td>格式與工具 dispatch 仍散在 <code>services.py</code> 的條件判斷。</td>
+            <td class="warn">格式越多越難維護，應改成 registry。</td>
+          </tr>
+          <tr>
+            <td>Tool Runtime</td>
+            <td>已有 detect/launch 起點，但 project layout、output collection、single image/project mode 還沒完整 interface 化。</td>
+            <td class="warn">工具擴展性不足。</td>
+          </tr>
+          <tr>
+            <td>External Integration</td>
+            <td>尚未正式抽出 Oracle/REST/schema/identity/mapping connector contract。</td>
+            <td class="bad">若要支援多系統對接，這是最大缺口。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. Tool 與 Format 必須分開</h2>
+      <p>
+        設計上要明確分開兩個概念：
+      </p>
+      <ul>
+        <li><strong>Labeling tool</strong>：可啟動或準備 project 的工具，例如 X-AnyLabeling、LabelMe、ISAT。</li>
+        <li><strong>Annotation format</strong>：檔案與資料交換格式，例如 LabelMe JSON、ISAT JSON、COCO、YOLO detection、YOLO segmentation。</li>
+      </ul>
+      <div class="note">
+        一個工具可能使用某種格式，但不等於格式本身。例如 X-AnyLabeling 大致使用 LabelMe-compatible JSON，
+        但有自己的 launch args、project layout、rectangle 表現、工具行為。Export 時使用者選 COCO 或 YOLO，
+        不代表標註時一定要用 COCO 或 YOLO 工具。
+      </div>
+    </section>
+
+    <section>
+      <h2>7. 建議目標分層</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th>
+            <th>責任</th>
+            <th>不應該知道</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Annotation Core</td>
+            <td>canonical dataset、asset、schema、annotation set、review state、validation、provenance。</td>
+            <td>Oracle table、REST endpoint、LabelMe/ISAT/YOLO 檔案細節。</td>
+          </tr>
+          <tr>
+            <td>Format Adapter</td>
+            <td>canonical model 與 LabelMe、ISAT、COCO、YOLO、CVAT 等格式互轉。</td>
+            <td>客戶系統資料庫、權限、任務 lifecycle。</td>
+          </tr>
+          <tr>
+            <td>Labeling Tool Adapter</td>
+            <td>detect runtime、prepare project、launch GUI、collect output、描述 tool capabilities。</td>
+            <td>Oracle schema 與客戶回寫邏輯。</td>
+          </tr>
+          <tr>
+            <td>Integration Connector</td>
+            <td>連 Oracle、REST、檔案服務、客戶 API，讀取任務/影像/schema，回寫標註結果。</td>
+            <td>格式轉換細節與 GUI tool lifecycle。</td>
+          </tr>
+          <tr>
+            <td>Mapping/Profile</td>
+            <td>欄位 mapping、label taxonomy mapping、status mapping、format policy、tenant policy。</td>
+            <td>核心 validation 演算法。</td>
+          </tr>
+          <tr>
+            <td>Orchestration/API</td>
+            <td>import job、labeling session、review job、export job、sync/retry/conflict detection。</td>
+            <td>個別 adapter 的檔案細節。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>8. Common Interface 建議</h2>
+
+      <h3>8.1 FormatAdapter</h3>
+      <pre><code>class FormatAdapter:
+    format_id: str
+
+    def descriptor(self) -> FormatDescriptor:
+        ...
+
+    def import_file(self, input_path, context) -> ImportResult:
+        ...
+
+    def import_directory(self, input_dir, context) -> ImportResult:
+        ...
+
+    def export(self, annotation_set, output_dir, context) -> ExportResult:
+        ...
+
+    def dry_run_export(self, annotation_set, context) -> ConversionReport:
+        ...</code></pre>
+
+      <h3>8.2 LabelingToolAdapter</h3>
+      <pre><code>class LabelingToolAdapter:
+    tool_id: str
+
+    def detect_runtime(self) -> RuntimeStatus:
+        ...
+
+    def prepare_project(self, assets, schema, output_dir, context) -> ProjectResult:
+        ...
+
+    def launch(self, project_dir, context) -> LaunchResult:
+        ...
+
+    def expected_outputs(self, project_dir, context) -> list[ArtifactRef]:
+        ...
+
+    def collect_results(self, project_dir, context) -> CollectedArtifacts:
+        ...</code></pre>
+
+      <h3>8.3 ExternalSystemConnector</h3>
+      <pre><code>class ExternalSystemConnector:
+    system_id: str
+
+    def list_tasks(self, query, page) -> Page[ExternalTask]:
+        ...
+
+    def resolve_asset(self, external_task) -> ResolvedAsset:
+        ...
+
+    def load_label_schema(self, schema_ref) -> LabelSchema:
+        ...
+
+    def push_annotations(self, payloads, mode) -> list[PushResult]:
+        ...
+
+    def mark_task_state(self, external_task_id, state, actor) -> StateResult:
+        ...
+
+    def check_conflicts(self, payloads) -> list[Conflict]:
+        ...</code></pre>
+
+      <h3>8.4 IntegrationProfile</h3>
+      <pre><code>{
+  "system_id": "customer_a_mes",
+  "tenant_id": "fab_01",
+  "asset_source": {
+    "type": "oracle",
+    "connector": "oracle_image_source_v1",
+    "query_id": "pending_inspection_images"
+  },
+  "annotation_sink": {
+    "type": "oracle",
+    "connector": "oracle_annotation_sink_v1",
+    "write_mode": "upsert"
+  },
+  "schema_source": {
+    "type": "web_service",
+    "connector": "customer_taxonomy_api_v1"
+  },
+  "format_policy": {
+    "default_labeling_tool": "x-anylabeling",
+    "default_export_format": "coco",
+    "allowed_export_formats": ["labelme", "isat", "coco", "yolo-detection"]
+  },
+  "field_mapping": {
+    "external_task_id": "TASK_ID",
+    "external_asset_id": "IMAGE_ID",
+    "image_uri": "IMAGE_PATH",
+    "width": "IMG_WIDTH",
+    "height": "IMG_HEIGHT"
+  },
+  "schema_mapping": {
+    "label_mappings": {
+      "DEFECT_A": "scratch",
+      "DEFECT_B": "dent"
+    },
+    "unknown_label_policy": "warn_and_skip"
+  }
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>9. Format Registry 與 Capability Matrix</h2>
+      <p>
+        建議將目前散在 service 中的格式判斷搬到 registry。新增格式時只註冊 descriptor 與 adapter，
+        不修改核心 service flow。
+      </p>
+      <pre><code>FormatDescriptor:
+  id: "labelme" | "isat" | "coco" | "yolo-detection" | ...
+  display_name: "LabelMe JSON"
+  aliases: ["xanylabeling", "labelme-style"]
+  layout: "single-file" | "directory" | "dataset-file"
+  can_import: true
+  can_export: true
+  supported_geometries:
+    bbox: full | approximated | unsupported
+    polygon: full | approximated | unsupported
+    mask: full | approximated | unsupported
+    keypoint: full | approximated | unsupported
+    classification: full | approximated | unsupported
+  supports_attributes: true | partial | false
+  supports_confidence: true | false
+  supports_instance_id: true | false
+  adapter: FormatAdapter</code></pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Format</th>
+            <th>BBox</th>
+            <th>Polygon</th>
+            <th>Mask</th>
+            <th>Keypoint</th>
+            <th>Attributes</th>
+            <th>主要風險</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>LabelMe</td>
+            <td class="ok">Full</td>
+            <td class="ok">Full</td>
+            <td class="warn">Partial/Future</td>
+            <td class="warn">Partial/Future</td>
+            <td class="warn">Partial</td>
+            <td>不同工具對 shape_type、flags 解讀不同。</td>
+          </tr>
+          <tr>
+            <td>X-AnyLabeling</td>
+            <td class="ok">Full</td>
+            <td class="ok">Full</td>
+            <td class="warn">Partial/Future</td>
+            <td class="warn">Partial/Future</td>
+            <td class="warn">Partial</td>
+            <td>看似 LabelMe，但工具端有自己的慣例。</td>
+          </tr>
+          <tr>
+            <td>ISAT</td>
+            <td class="warn">Approx</td>
+            <td class="ok">Full</td>
+            <td class="warn">Future</td>
+            <td class="bad">No</td>
+            <td class="warn">Partial</td>
+            <td>bbox 可能要轉 polygon/segmentation approximation。</td>
+          </tr>
+          <tr>
+            <td>COCO</td>
+            <td class="ok">Full</td>
+            <td class="ok">Full</td>
+            <td class="warn">RLE Future</td>
+            <td class="warn">Future</td>
+            <td class="warn">Partial</td>
+            <td>category id、image id、RLE、iscrowd、area。</td>
+          </tr>
+          <tr>
+            <td>YOLO Detection</td>
+            <td class="ok">Full</td>
+            <td class="bad">No</td>
+            <td class="bad">No</td>
+            <td class="bad">No</td>
+            <td class="bad">No</td>
+            <td>只保留 class + bbox，polygon/attributes 會遺失。</td>
+          </tr>
+          <tr>
+            <td>YOLO Segmentation</td>
+            <td class="bad">No/Approx</td>
+            <td class="ok">Full</td>
+            <td class="bad">No</td>
+            <td class="bad">No</td>
+            <td class="bad">No</td>
+            <td>只支援 polygon rows，attributes 會遺失。</td>
+          </tr>
+          <tr>
+            <td>Pascal VOC</td>
+            <td class="ok">Full</td>
+            <td class="bad">No</td>
+            <td class="warn">Separate VOC Segmentation</td>
+            <td class="bad">No</td>
+            <td class="warn">Partial</td>
+            <td>XML schema，通常 bbox only。</td>
+          </tr>
+          <tr>
+            <td>CVAT</td>
+            <td class="ok">Full</td>
+            <td class="ok">Full</td>
+            <td class="warn">Partial/Full</td>
+            <td class="warn">Partial/Full</td>
+            <td class="ok">Full-ish</td>
+            <td>task model 較大，image/video task 差異大。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>10. Export 應如何決定 LabelMe / ISAT / COCO / YOLO</h2>
+      <p>
+        Export 不應只看使用者標註時用了哪個工具，而應由三個因素共同決定：
+      </p>
+      <ul>
+        <li><strong>用途：</strong>human review、training、customer handoff、model evaluation、archive。</li>
+        <li><strong>目標系統能力：</strong>客戶系統能吃 COCO、YOLO、ISAT、LabelMe 或自訂格式。</li>
+        <li><strong>資料內容：</strong>bbox、polygon、mask、classification、track、attribute 是否會在目標格式中失真。</li>
+      </ul>
+      <p>
+        建議 export API 使用明確 request：
+      </p>
+      <pre><code>{
+  "annotation_set_id": "aset_xxx",
+  "target_system": "customer_a_mes",
+  "purpose": "training",
+  "export_format": "coco",
+  "delivery": {
+    "type": "connector_push",
+    "sink": "customer_a_oracle_annotation_sink"
+  },
+  "options": {
+    "include_images": false,
+    "class_id_policy": "schema_order",
+    "on_loss": "warn"
+  }
+}</code></pre>
+      <div class="risk">
+        若使用者沒有指定 <code>export_format</code>，平台可以從 integration profile 的
+        <code>format_policy.default_export_format</code> 選擇。但實際匯出前應做 dry-run capability check，
+        讓使用者知道是否會丟失 polygon、attribute、mask、instance metadata。
+      </div>
+    </section>
+
+    <section>
+      <h2>11. Import / Export 流程建議</h2>
+      <h3>Export flow</h3>
+      <pre><code>使用者或外部系統建立 export request
+  -> 查 IntegrationProfile 與 FormatRegistry
+  -> 檢查 CapabilityMatrix
+  -> 套用 SchemaMappingProfile
+  -> Dry-run conversion
+  -> 產生 LossReport preview
+  -> 使用者或 policy 確認
+  -> 實際 export artifact
+  -> 儲存 artifact + conversion report + mapping profile version
+  -> 透過 AnnotationSinkConnector 回寫外部系統</code></pre>
+
+      <h3>Import flow</h3>
+      <pre><code>使用者或外部系統指定 import format
+  -> Registry 找 adapter
+  -> 解析檔案或資料夾
+  -> AssetResolver 對應 image
+  -> SchemaMappingProfile 對應 label/category/class index
+  -> Geometry normalization
+  -> Validation
+  -> 寫入 canonical AnnotationSet
+  -> 回傳 unmatched / skipped / approximated / unknown labels report</code></pre>
+    </section>
+
+    <section>
+      <h2>12. Conversion Loss Report 應升級成一級公民</h2>
+      <p>
+        目前已有 <code>ConversionReport</code>，但未來應更結構化，讓 UI、API、測試與外部系統都能理解。
+      </p>
+      <pre><code>ConversionReport:
+  lossless: false
+  source_format: "canonical"
+  target_format: "yolo-detection"
+  summary:
+    exported_annotations: 120
+    skipped_annotations: 8
+    approximated_annotations: 3
+  losses:
+    - annotation_id: "ann_001"
+      severity: "dropped"
+      field: "polygon"
+      reason: "YOLO detection does not support polygon"
+      suggested_format: "yolo-segmentation"
+    - annotation_id: "ann_002"
+      severity: "approximated"
+      field: "bbox"
+      reason: "ISAT stores segmentation; bbox converted to rectangle polygon"
+  class_mapping:
+    scratch: 0
+    dent: 1
+  coordinate_transform:
+    from: "pixel"
+    to: "normalized"
+  warnings:
+    - "Attributes were not exported to YOLO"</code></pre>
+    </section>
+
+    <section>
+      <h2>13. 不污染 Annotation Core 的做法</h2>
+      <ul>
+        <li>Core model 只放平台共通欄位，不放 <code>CUSTOMER_A_IMAGE_ID</code> 這種欄位。</li>
+        <li>外部 primary key 放在 <code>metadata</code> 或 <code>provenance.external_refs</code>。</li>
+        <li>Oracle SQL、REST URL、token、table name 只存在 connector config。</li>
+        <li>客戶欄位轉換寫在 mapping profile，不寫在 annotation service。</li>
+        <li>客戶特殊 JSON 寫成 custom format adapter，不修改既有 LabelMe/COCO adapter。</li>
+        <li>客戶特殊 push 行為寫成 sink connector，不修改 core storage。</li>
+        <li>多 tenant 時，workspace、schema、credential、audit log 應有清楚 boundary。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>14. Recommended Target Structure</h2>
+      <pre><code>annotation-platform/
+  core/
+    canonical models
+    validation
+    review state
+    provenance
+
+  formats/
+    registry.py
+    contracts.py
+    labelme adapter
+    x-anylabeling adapter
+    isat adapter
+    coco adapter
+    yolo adapter
+    customer custom format adapters
+
+  tools/
+    registry.py
+    contracts.py
+    labelme tool adapter
+    x-anylabeling tool adapter
+    isat tool adapter
+
+  integrations/
+    contracts/
+      common DTOs
+      capability model
+      error model
+      versioning
+    connectors/
+      oracle connector
+      rest connector
+      file connector
+      custom connector
+    profiles/
+      customer_a.yaml
+      customer_b.yaml
+    mappings/
+      field mapping
+      schema mapping
+      status mapping
+
+  orchestration/
+    import workflow
+    labeling workflow
+    review workflow
+    export workflow
+    sync queue
+    retry
+    conflict detection
+
+  api/
+    MCP tools
+    REST API
+    internal service API</code></pre>
+    </section>
+
+    <section>
+      <h2>15. Test Strategy</h2>
+      <h3>Contract tests</h3>
+      <ul>
+        <li>每個 format adapter 必須能列出 descriptor/capability。</li>
+        <li>每個 adapter 都能 export empty annotation set。</li>
+        <li>bbox、polygon、classification 支援子集要有共同測試。</li>
+        <li>遇到 unsupported geometry 不可 silent fail，必須寫 loss report。</li>
+        <li>import 後 canonical model 正確。</li>
+        <li>class mapping deterministic。</li>
+      </ul>
+
+      <h3>Golden file tests</h3>
+      <p>
+        為 LabelMe、ISAT、COCO、YOLO、Pascal VOC、CVAT 建立小型 golden samples。
+        每次 adapter 修改都比較輸出 JSON/XML/TXT 結構。
+      </p>
+
+      <h3>Round-trip tests</h3>
+      <pre><code>lossless format:
+  canonical -> format -> canonical
+
+lossy format:
+  canonical -> format -> canonical + expected loss report</code></pre>
+
+      <h3>Integration contract tests</h3>
+      <ul>
+        <li>Oracle connector 用 fake Oracle 或 contract fixture 測 list/pull/push。</li>
+        <li>REST connector 用 mock server 測 auth、pagination、retry、conflict。</li>
+        <li>mapping profile 測未知 label、版本差異、欄位缺失。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>16. Suggested OpenSpec Direction</h2>
+      <p>
+        下一個 OpenSpec 不建議只叫「add another format」。它應該處理 extension mechanism：
+      </p>
+      <pre><code>openspec/changes/annotation-format-registry-and-external-integration/</code></pre>
+      <ol>
+        <li>新增 <code>FormatRegistry</code> 與 <code>FormatAdapter</code> protocol。</li>
+        <li>新增 <code>ToolRegistry</code> 與 <code>LabelingToolAdapter</code> protocol。</li>
+        <li>新增 <code>IntegrationProfile</code> schema。</li>
+        <li>新增 <code>ExternalSystemConnector</code> contracts。</li>
+        <li>新增 schema/field/status mapping policy。</li>
+        <li>新增 export dry-run 與 structured loss report。</li>
+        <li>把 module_006/008/009/012 的 tool/format dispatch 收斂到 registry。</li>
+        <li>補 contract tests、golden tests、round-trip tests、integration connector tests。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>17. Final Recommendation</h2>
+      <div class="decision">
+        <strong>建議：</strong>
+        你現在的系統已經有可擴展多格式 labeling 的基礎，但要成為能讓不同系統穩定對接的平台，
+        下一步應該不是繼續在 service 裡加更多 <code>if/elif</code>，而是正式建立 common interface：
+        <code>FormatRegistry</code>、<code>ToolRegistry</code>、<code>ExternalSystemConnector</code>、
+        <code>IntegrationProfile</code>、<code>SchemaMappingProfile</code> 與 structured
+        <code>ConversionReport</code>。
+      </div>
+      <p>
+        做完這一層之後，未來新增 Label Studio、CVAT、Pascal VOC、客戶自訂 Oracle schema、REST web service、
+        或自訂 export JSON，都應該是「新增 adapter/profile/connector」，而不是改 annotation core。
+      </p>
+    </section>
+
+    <section>
+      <h2>18. 實作設計：如何落地</h2>
+      <p>
+        下面是建議的實作順序。重點是每一階段都能獨立測試、保留既有 API、避免一次改壞既有 workflow。
+      </p>
+
+      <h3>Phase 0：建立 OpenSpec 與 contract acceptance criteria</h3>
+      <ul>
+        <li>新增 <code>openspec/changes/annotation-format-registry-and-external-integration/</code>。</li>
+        <li>定義四組需求：format registry、tool registry、integration profile、external connector。</li>
+        <li>把「不修改 annotation core 來支援客戶系統」寫成明確 requirement。</li>
+        <li>把 export dry-run、loss report、mapping profile version 寫成 acceptance criteria。</li>
+      </ul>
+
+      <h3>Phase 1：FormatRegistry 先落地，替換 service if/elif</h3>
+      <p>
+        先新增格式 contract，但不要搬動既有 adapter 的檔案位置，降低風險。
+      </p>
+      <pre><code>sidecar/python-engine/annotation/formats/
+  __init__.py
+  contracts.py       # FormatAdapter, FormatDescriptor, FormatCapabilities
+  registry.py        # register(), get(), normalize(), list_supported()
+  builtins.py        # 註冊 labelme/x-anylabeling/isat/coco/yolo adapters</code></pre>
+      <ul>
+        <li>將現有 <code>labelme.py</code>、<code>isat.py</code>、<code>coco.py</code>、<code>yolo_detection.py</code>、<code>yolo_segmentation.py</code> 包成 adapter descriptor。</li>
+        <li><code>AnnotationService.supported_annotation_formats()</code> 改讀 registry。</li>
+        <li><code>AnnotationService.create_export()</code>、<code>import_annotations()</code>、<code>import_project_labels()</code> 改由 registry dispatch。</li>
+        <li>保留 <code>import_xanylabeling_*</code> 與既有 MCP tools，內部改呼叫 registry。</li>
+      </ul>
+
+      <h3>Phase 2：Structured ConversionReport 與 export dry-run</h3>
+      <ul>
+        <li>擴充既有 <code>ConversionReport</code>，加入 <code>lossless</code>、<code>losses</code>、<code>mapping_version</code>、<code>summary</code>。</li>
+        <li>新增 <code>dry_run_export(annotation_set_id, export_format, options)</code> service API。</li>
+        <li>MCP 增加 <code>annotation_dry_run_export</code>，UI 可在真正 export 前顯示 loss preview。</li>
+        <li>YOLO detection/segmentation、ISAT bbox approximation、COCO RLE unsupported 都應回報結構化 losses。</li>
+      </ul>
+
+      <h3>Phase 3：ToolRegistry 收斂 project preparation 與 GUI launch</h3>
+      <pre><code>sidecar/python-engine/annotation/tools/
+  __init__.py
+  contracts.py       # LabelingToolAdapter, ToolDescriptor, RuntimeStatus
+  registry.py
+  builtins.py        # x-anylabeling, labelme, isat</code></pre>
+      <ul>
+        <li>把 <code>labeling_runtime.py</code> 包成第一版 tool adapters。</li>
+        <li><code>prepare_labeling_project()</code> 改讀 ToolRegistry，並由 tool descriptor 決定預設 output format 與 labels directory。</li>
+        <li>module_006 優先使用 ToolRegistry，保留 <code>xany_dir</code>、<code>legacy_mode</code> 相容欄位。</li>
+        <li>module_012 的 <code>_launch_xany/_launch_labelme/_launch_isat</code> 後續改成呼叫同一個 tool launch API。</li>
+      </ul>
+
+      <h3>Phase 4：IntegrationProfile 與 SchemaMappingProfile</h3>
+      <pre><code>sidecar/python-engine/annotation/integrations/
+  contracts.py       # ExternalSystemConnector, ExternalTask, PushResult
+  profiles.py        # load/validate profile JSON or YAML
+  mappings.py        # field/schema/status mapping
+  connectors/
+    file_connector.py
+    rest_connector.py
+    oracle_connector.py   # later, behind optional dependency</code></pre>
+      <ul>
+        <li>第一版先做 <code>file_connector</code> 與 fake connector 測 contract，不急著接正式 Oracle。</li>
+        <li>profile 必須有 <code>version</code>、<code>system_id</code>、<code>tenant_id</code>、<code>format_policy</code>、<code>field_mapping</code>、<code>schema_mapping</code>。</li>
+        <li>Oracle SQL、table name、REST URL、credential reference 只能存在 connector config/profile，不可進 core model。</li>
+        <li>mapping 預設 policy 建議是 <code>warn_and_skip</code> 或 <code>fail</code>，不要自動建立未知 label，避免 taxonomy 被污染。</li>
+      </ul>
+
+      <h3>Phase 5：Orchestration job API</h3>
+      <p>
+        等 registry/profile 穩定後，再建立高階 workflow API。這一層讓不同系統用一致流程對接。
+      </p>
+      <pre><code>create_import_job(profile_id, query, options)
+create_labeling_session(task_ids, tool_id, options)
+dry_run_export_job(annotation_set_id, target_system, purpose, export_format)
+create_export_job(annotation_set_id, target_system, purpose, delivery)
+get_job_status(job_id)
+get_conversion_report(job_id)</code></pre>
+      <ul>
+        <li>短期可同步執行，長期再接 queue/retry。</li>
+        <li>所有 job 都記錄 profile version、mapping version、format adapter version。</li>
+        <li>export job 可輸出 artifact，也可透過 connector push 回 Oracle/REST。</li>
+      </ul>
+
+      <h3>Phase 6：Module migration order</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th>建議順序</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>module_006</td>
+            <td>第一批</td>
+            <td>已經最接近 generic flow，可用來驗證 ToolRegistry + FormatRegistry。</td>
+          </tr>
+          <tr>
+            <td>MCP</td>
+            <td>第一批</td>
+            <td>外部系統與 agent 會走 MCP/API，必須先穩定 contract。</td>
+          </tr>
+          <tr>
+            <td>module_012</td>
+            <td>第二批</td>
+            <td>單圖 launch dispatch 可收斂到 ToolRegistry，但風險較小。</td>
+          </tr>
+          <tr>
+            <td>module_008</td>
+            <td>第三批</td>
+            <td>目前內部仍偏 LabelMe-style session JSON，需要 canonical bridge。</td>
+          </tr>
+          <tr>
+            <td>module_009</td>
+            <td>最後分階段</td>
+            <td>tracking correction 與 X-AnyLabeling coupling 最深，先保留 XAny automation，再逐步拆 schema/table 欄位與 launcher。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Phase 7：驗證策略</h3>
+      <ul>
+        <li>每個 format adapter 都跑同一組 contract tests。</li>
+        <li>保留既有 annotation、MCP、module_006/008/009/012 regression tests。</li>
+        <li>新增 dry-run loss report golden tests。</li>
+        <li>新增 fake connector integration tests，確保外部 system profile 不會污染 canonical model。</li>
+        <li>Oracle connector 先以 contract fixture 測 SQL mapping，不在核心 test 中要求真實 Oracle 連線。</li>
+      </ul>
+
+      <div class="decision">
+        <strong>實作結論：</strong>
+        可行的第一個 PR 應該只做 <code>FormatRegistry</code>，並讓現有 service 行為完全不變；
+        第二個 PR 再做 <code>ToolRegistry</code>；第三個 PR 才開始做 <code>IntegrationProfile</code>
+        和 fake connector。這個順序最能保護目前已經支援的 LabelMe、X-AnyLabeling、ISAT、COCO、YOLO 流程。
+      </div>
+    </section>
+
+    <section>
+      <h2>19. 如何讓 AI 讀這份文件並安全實作</h2>
+      <p>
+        這份 HTML 已經足夠讓 AI 理解目標架構、邊界、phase order 與主要 interface。
+        但是它應該被當成「架構藍圖」，不要當成一次全部實作的指令。最安全的做法是讓 AI 每次只實作一個 phase，
+        並且先建立 OpenSpec、補 unit tests、保留既有 API 相容性，再做程式修改。
+      </p>
+
+      <div class="risk">
+        <strong>不要這樣下指令：</strong>
+        「請讀這份 HTML，然後全部實作完。」這會讓修改範圍過大，容易同時碰到 service、MCP、module_006、
+        module_008、module_009、module_012、Oracle connector 與前端 workflow，風險太高。
+      </div>
+
+      <div class="decision">
+        <strong>建議這樣下指令：</strong>
+        「請閱讀 <code>docs/ANNOTATION_PLATFORM_ARCHITECTURE_DISCUSSION.html</code>，依照第 18 章只實作
+        Phase 1：<code>FormatRegistry</code>。請先建立 OpenSpec change，再新增/更新 unit tests，
+        最後改 service dispatch。保留所有既有 public API、MCP tools、legacy aliases。
+        不要實作 Phase 2 以後的內容。」
+      </div>
+
+      <h3>19.1 推薦 AI 實作流程</h3>
+      <ol>
+        <li>先讀本文件，特別是第 2 章可行性、第 3 章設計圖、第 18 章實作設計。</li>
+        <li>建立或更新 OpenSpec change，明確寫出本次只做哪一個 phase。</li>
+        <li>先新增 failing tests 或 contract tests，確認目標行為。</li>
+        <li>只修改本 phase 需要的最小檔案範圍。</li>
+        <li>保留現有 API、MCP tool names、legacy aliases 與 module behavior。</li>
+        <li>跑 focused tests，再跑 annotation/MCP/module regression tests。</li>
+        <li>更新文件與 OpenSpec tasks，最後再 commit。</li>
+      </ol>
+
+      <h3>19.2 Phase-by-phase AI Prompt 範本</h3>
+      <pre><code>Phase 1 prompt:
+請閱讀 docs/ANNOTATION_PLATFORM_ARCHITECTURE_DISCUSSION.html。
+請只實作 Phase 1：FormatRegistry。
+需求：
+- 建立 annotation/formats/contracts.py、registry.py、builtins.py。
+- 把既有 LabelMe、X-AnyLabeling、ISAT、COCO、YOLO detection、YOLO segmentation adapters 註冊到 registry。
+- AnnotationService.supported_annotation_formats/create_export/import_annotations/import_project_labels 改由 registry dispatch。
+- 保留所有既有 public API、MCP tools、legacy aliases。
+- 不要實作 ToolRegistry、IntegrationProfile、ExternalSystemConnector。
+- 先建立 OpenSpec change 與 unit tests，再修改程式。
+- 最後跑 annotation/MCP/module regression tests。</code></pre>
+
+      <pre><code>Phase 2 prompt:
+請閱讀 docs/ANNOTATION_PLATFORM_ARCHITECTURE_DISCUSSION.html。
+請只實作 Phase 2：Structured ConversionReport 與 export dry-run。
+需求：
+- 擴充既有 ConversionReport，支援 lossless、summary、losses、mapping_version。
+- 新增 dry_run_export service API 與 MCP tool。
+- 讓 YOLO/ISAT/COCO unsupported 或 approximated conversion 產生結構化 loss report。
+- 不要修改 ToolRegistry 或 ExternalSystemConnector。
+- 保留現有 export 行為與既有 conversion_report.json 相容性。</code></pre>
+
+      <pre><code>Phase 3 prompt:
+請閱讀 docs/ANNOTATION_PLATFORM_ARCHITECTURE_DISCUSSION.html。
+請只實作 Phase 3：ToolRegistry。
+需求：
+- 建立 annotation/tools/contracts.py、registry.py、builtins.py。
+- 將 X-AnyLabeling、LabelMe、ISAT runtime detect/launch/prepare project 包成 tool adapters。
+- prepare_labeling_project 與 launch_labeling_project 改讀 ToolRegistry。
+- module_006 優先接 ToolRegistry，保留 xany_dir、legacy_mode、xany_* 相容欄位。
+- 不要實作 IntegrationProfile 或 Oracle/REST connector。</code></pre>
+
+      <h3>19.3 AI 實作 Guardrails</h3>
+      <ul>
+        <li>每次只做一個 phase，不跨 phase 修改。</li>
+        <li>不得把 Oracle table name、REST URL、客戶欄位名稱寫進 annotation core。</li>
+        <li>不得刪除現有 X-AnyLabeling compatibility API。</li>
+        <li>不得讓 module_009 tracking correction 在第一輪 registry refactor 中大改。</li>
+        <li>新增格式時必須註冊 capability matrix，並補 conversion/loss tests。</li>
+        <li>任何有損 export 必須能在 ConversionReport 中被看見。</li>
+        <li>每個 phase 完成後要有獨立 commit，方便 rollback。</li>
+      </ul>
+
+      <h3>19.4 AI 完成條件</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>檢查項目</th>
+            <th>完成標準</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>OpenSpec</td>
+            <td>有 proposal/design/tasks/spec，且本 phase tasks 已勾選。</td>
+          </tr>
+          <tr>
+            <td>Tests</td>
+            <td>新增 phase 對應 tests，既有 annotation/MCP/module regression tests pass。</td>
+          </tr>
+          <tr>
+            <td>Compatibility</td>
+            <td>既有 service API、MCP tools、legacy aliases、module flows 不破壞。</td>
+          </tr>
+          <tr>
+            <td>Documentation</td>
+            <td>README、OpenSpec、本討論文件或相關 handoff docs 已同步。</td>
+          </tr>
+          <tr>
+            <td>Scope control</td>
+            <td>沒有實作本 phase 以外的大型功能，例如 Phase 1 不做 Oracle connector。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <strong>總結：</strong>
+        AI 可以讀這份 HTML 來實作，但請把它當成分階段工程藍圖。每次交給 AI 的任務都應明確說：
+        「只做某一個 phase」、「保留相容性」、「先測試後修改」、「不要跨 phase」。
+        這樣成功率最高，也最能保護目前已經能運作的多格式 labeling 流程。
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- Section 20: Codebase 現狀 vs 設計文件 Gap Analysis (Agent A)     -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>20. Codebase 現狀 Gap Analysis（Multi-Agent 掃描結果）</h2>
+      <p>
+        以下為對 <code>sidecar/python-engine/annotation/</code>、<code>mcp/annotation_mcp/</code>、
+        <code>scripts/module_006/008/009/012/</code> 進行完整程式碼審查後的對比報告。
+      </p>
+
+      <h3>20.1 已存在且符合設計方向</h3>
+      <table>
+        <thead><tr><th>項目</th><th>檔案</th><th>符合度</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Canonical Models</td>
+            <td><code>annotation/core/models.py</code></td>
+            <td class="ok">100%</td>
+            <td>Dataset / ImageAsset / LabelSchema / AnnotationSet / Annotation 完整，含 BBoxGeometry、PolygonGeometry、ClassificationValue discriminated union，及完整 state enum。</td>
+          </tr>
+          <tr>
+            <td>Storage Ports</td>
+            <td><code>annotation/storage/ports.py</code></td>
+            <td class="ok">100%</td>
+            <td>MetadataStore / ArtifactStore 抽象協議完整，SQLiteMetadataStore + LocalArtifactStore 正確實作。</td>
+          </tr>
+          <tr>
+            <td>Validation Engine</td>
+            <td><code>annotation/core/validation.py</code></td>
+            <td class="ok">100%</td>
+            <td>結構化 ValidationIssue，包含 schema mismatch、unknown label、geometry constraint、bbox bounds、polygon validity 等六類規則。</td>
+          </tr>
+          <tr>
+            <td>State Machine</td>
+            <td><code>annotation/core/states.py</code></td>
+            <td class="ok">100%</td>
+            <td>VALID_ANNOTATION_SET_TRANSITIONS 強制狀態機，非法轉移拋出 InvalidStateTransition。</td>
+          </tr>
+          <tr>
+            <td>MCP Tools</td>
+            <td><code>mcp/annotation_mcp/server.py</code></td>
+            <td class="ok">100%</td>
+            <td>61 個 <code>annotation_*</code> 前綴工具，JSON 序列化統一在 handlers.py 處理。</td>
+          </tr>
+          <tr>
+            <td>Format Adapters</td>
+            <td><code>annotation/adapters/</code></td>
+            <td class="warn">70%</td>
+            <td>LabelMe、X-AnyLabeling、ISAT、COCO、YOLO detection/segmentation 皆存在，但無 Registry，改用 if/elif hard-coded dispatch。</td>
+          </tr>
+          <tr>
+            <td>Tool Runtime</td>
+            <td><code>annotation/adapters/labeling_runtime.py</code></td>
+            <td class="warn">80%</td>
+            <td>detect/launch 起點已有，但 if/elif dispatch（line 31–39）。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>20.2 已存在但需 Refactor 的部分（具體位置）</h3>
+      <div class="risk">
+        <strong>services.py 中 5 處 if/elif dispatch（最高優先）：</strong>
+        <ul>
+          <li>Tool dispatch（lines 221–228）：<code>if normalized in {"x-anylabeling", "labelme"} ... elif normalized == "isat"</code></li>
+          <li>Export format dispatch（lines 358–370）：每新增一種格式需在此加一個 elif</li>
+          <li>Import format dispatch（lines 275–290、304–320）：同樣問題</li>
+          <li><code>labeling_runtime.py</code> lines 31–39：detect tool 的 if/elif</li>
+        </ul>
+        每新增格式或工具都必須改動這些地方，且容易遺漏。應全部改成 Registry dispatch。
+      </div>
+      <div class="risk">
+        <strong>module_012 / module_006 中的重複與混入邏輯：</strong>
+        <ul>
+          <li><code>012_process.py</code> line 162：工具白名單 <code>{"x-anylabeling", "labelme", "isat"}</code> 硬編碼，應改為從 ToolRegistry 動態取得。</li>
+          <li><code>_normalize_tool()</code>、<code>_normalize_format()</code> 在 <code>006_process.py</code>、<code>services.py</code>、<code>labeling_runtime.py</code> 三處重複定義，應統一到 shared constants。</li>
+          <li><code>012_process.py</code> 直接 import manifest DB（動態載入 <code>_manifest_db.py</code>），職責混亂，難以 mock 測試。</li>
+        </ul>
+      </div>
+      <div class="risk">
+        <strong>module_009 完全綁定 X-AnyLabeling（<code>_xany_launcher.py</code>）：</strong>
+        <code>open_labeling_tool()</code> 在非 XAny 時直接回傳 unsupported error。
+        聲稱多工具支援，但實作只有 XAny，需要抽象 LabelingToolLauncher interface。
+      </div>
+
+      <h3>20.3 完全缺失、需要新建</h3>
+      <table>
+        <thead><tr><th>缺失項目</th><th>影響</th><th>建議位置</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>AdapterRegistry</strong></td>
+            <td class="bad">高</td>
+            <td><code>annotation/formats/registry.py</code> + <code>annotation/tools/registry.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>Job Queue（目前是 stub）</strong></td>
+            <td class="bad">高</td>
+            <td><code>handlers.py</code> line 227–231 現在 hardcode 回傳 "succeeded" — 大型 export 無法非同步追蹤</td>
+          </tr>
+          <tr>
+            <td><strong>Audit Trail</strong></td>
+            <td class="warn">中</td>
+            <td><code>annotation/core/audit.py</code>（設計文件提到但完全未實作）</td>
+          </tr>
+          <tr>
+            <td><strong>Manifest ↔ Annotation Adapter 層</strong></td>
+            <td class="warn">中</td>
+            <td><code>annotation/adapters/manifest_adapter.py</code>，module_012/006 目前各自直接查 manifest DB</td>
+          </tr>
+          <tr>
+            <td><strong>Coordinate Space Transform 追蹤</strong></td>
+            <td class="warn">中</td>
+            <td>ConversionReport 有 coordinate_transform 欄位但未填寫；COCO/YOLO import 時未記錄 pixel→normalized 轉換</td>
+          </tr>
+          <tr>
+            <td><strong>ExternalSystemConnector + IntegrationProfile</strong></td>
+            <td class="bad">高</td>
+            <td><code>annotation/integrations/</code>（整個目錄完全不存在）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>20.4 程式碼中發現的設計疑問</h3>
+      <div class="note">
+        <strong>AnnotationSet vs Task ID 混用：</strong>
+        <code>services.py</code> 的 <code>get_task(task_id)</code>（line 107）實際回傳的是 AnnotationSet，
+        MCP tool 叫 <code>annotation_create_task</code> 但內部呼叫 <code>create_annotation_set()</code>。
+        命名不一致會讓外部呼叫者混淆。建議決定：Task 是 AnnotationSet 的 view，還是獨立實體？
+      </div>
+      <div class="note">
+        <strong>ConversionReport.lossless 邏輯反轉：</strong>
+        初始值為 <code>True</code>，呼叫 <code>mark_loss()</code> 時設為 <code>False</code>。
+        但如果沒有填入 <code>dropped_fields</code>，<code>lossless=False</code> 但沒有具體損失資訊，語意模糊。
+      </div>
+      <div class="note">
+        <strong>SQLite 缺乏事務隔離設定：</strong>
+        <code>sqlite_store.py</code> lines 23–26 沒有設定 <code>journal_mode=WAL</code> 或 <code>isolation_level</code>，
+        多並發寫入（Streamlit autorefresh + button click）有 dirty read 風險。
+      </div>
+      <div class="note">
+        <strong>AI 預測邏輯在 Output Page：</strong>
+        <code>012_output.py</code> lines ~75–100 包含 YOLO 模型載入與推論，
+        應抽到 <code>AnnotationService.predict_with_model()</code>，Output page 不應含 ML 邏輯。
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- Section 21: 外部整合設計疑問 (Agent B)                           -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>21. 外部整合設計疑問與建議（深度評論）</h2>
+      <p>以下為從「外部系統整合工程師」角度，針對設計文件提出的具體疑問。每條都附上風險與建議。</p>
+
+      <h3>21.1 ExternalSystemConnector 介面疑問</h3>
+
+      <div class="risk">
+        <strong>Q1：<code>list_tasks</code> 的分頁機制 — offset-based vs cursor-based</strong><br>
+        目前介面簽名 <code>list_tasks(query, page)</code> 隱含 offset-based pagination。
+        Oracle 大量資料時，offset-based 有嚴重 skew：若 import 進行中有新任務插入，同一筆可能被重複或跳過。
+        更常見的是 DBA 提供 View，無 cursor token 概念。<br>
+        <strong>建議：</strong> <code>page</code> 改為 <code>PaginationToken</code>（opaque string），各 Connector 自行決定實作方式（keyset / stored procedure cursor / offset）。需明確規定「任務列表的穩定排序欄位」作為前提條件。
+      </div>
+
+      <div class="risk">
+        <strong>Q2：<code>resolve_asset</code> — 影像在 Oracle 中以 BLOB 存放時如何處理？</strong><br>
+        設計假設影像有可直接存取的 file path，但企業環境常見 BLOB 欄位、SMB share 無法掛載、或 Token-based 短效 URL。
+        若無 streaming/temp download 機制，記憶體壓力大（工業相機影像動輒 50MB+），且暫存檔若無清理會洩漏磁碟空間。<br>
+        <strong>建議：</strong> <code>ResolvedAsset</code> 改為 Union type，支援 <code>LocalFilePath | RemoteURL | BlobStream | ContentAddressedRef</code>，含 <code>ttl</code> 欄位（Token URL 過期時間）。Connector 負責 BLOB 下載，暫存路徑由平台統一注入。
+      </div>
+
+      <div class="risk">
+        <strong>Q3：<code>check_conflicts</code> — conflict 語意完全未定義</strong><br>
+        並發寫入衝突、版本衝突、語意衝突（label 不一致）是三種完全不同的問題。
+        用 check-then-act 模式防並發衝突是 TOCTOU 問題，根本無法保護。<br>
+        <strong>建議：</strong> 明確定義 <code>Conflict</code> type system（含 <code>conflict_type</code> 和 <code>resolution_hint</code>），並發保護由 DB-level locking 處理，<code>check_conflicts</code> 只做版本號對比查詢。
+      </div>
+
+      <div class="risk">
+        <strong>Q4：<code>push_annotations</code> 的 <code>mode</code> 語意不完整</strong><br>
+        insert-only / upsert / replace-all / append-labels / patch 行為差異巨大。
+        Upsert 的 natural key（「以哪個 key 判斷已存在」）完全未定義。<br>
+        <strong>建議：</strong> <code>mode</code> 改為結構化物件，Connector 在 CapabilityMatrix 中聲明支援哪些 mode，job 建立時就 fail-fast，不要等 push 時才報錯。
+      </div>
+
+      <div class="risk">
+        <strong>Q5：Oracle Batch Commit — all-or-nothing 支援</strong><br>
+        若外部系統要求一個 task 下所有 annotation 必須 all-or-nothing（同時寫 header + detail 兩張表），
+        Orchestration 層如果逐筆調用 push，中途失敗會造成 Oracle 資料不一致。
+        Retry 若無冪等 key，可能造成重複寫入。<br>
+        <strong>建議：</strong> Connector 需聲明 <code>supports_batch_commit</code> 和 <code>idempotency_key_field</code>，Orchestration 層尊重 Connector 的 transaction boundary 宣告。
+      </div>
+
+      <div class="risk">
+        <strong>Q6：錯誤重試策略缺失</strong><br>
+        哪些錯誤是 Transient（retry with backoff）、哪些是 Fatal（dead-letter + 告警）、哪些是 BusinessLogic（人工介入）完全未定義。<br>
+        <strong>建議：</strong> Exception 要帶分類標記，Orchestration 根據標記決定處理路徑；沒有 dead-letter 機制的話，失敗 job 可能靜默消失。
+      </div>
+
+      <h3>21.2 IntegrationProfile 設計疑問</h3>
+
+      <div class="risk">
+        <strong>Q7：Profile 缺乏版本欄位 — Audit 追溯失效</strong><br>
+        如果 <code>field_mapping</code> 被修改，過去的 export artifact 無法追溯是用哪個版本 mapping 產生。
+        Regulatory 環境（品管記錄）可能要求完整重現能力。<br>
+        <strong>建議：</strong> Profile 必須有 <code>version</code> + <code>effective_from</code> + <code>checksum</code>；每次 export job 的 provenance 記錄必須儲存「執行時的 profile snapshot」，而非只是參照可能被修改的 profile ID。
+      </div>
+
+      <div class="risk">
+        <strong>Q8：<code>query_id</code> 安全性 — SQL Injection 風險</strong><br>
+        <code>"query_id": "pending_inspection_images"</code> 若直接代入 SQL 執行，存在 SQL injection 風險。
+        即使是內部系統，若 profile 被惡意修改，後果嚴重。<br>
+        <strong>建議：</strong> <code>query_id</code> 必須對應 allowlist registry（管理員預先登記合法的 query handle），Connector 只能引用已登記的 handle。
+      </div>
+
+      <div class="risk">
+        <strong>Q9：Credential 管理完全缺失（最高優先）</strong><br>
+        Profile 裡完全沒有 Oracle connection string、密碼、REST API token 的存放設計。
+        若寫在 profile JSON 中，任何能讀取 profile 的人都能看到明文 credential。<br>
+        <strong>建議：</strong> 獨立 CredentialStore 機制，profile 只存 secret reference（<code>"credential_ref": "vault://fab_01/oracle_prod"</code>），Connector 透過 <code>CredentialProvider</code> 介面取得認證，不從 profile 直接讀取。<strong>這是實作第一個 Oracle Connector 之前必須設計完成的前提條件。</strong>
+      </div>
+
+      <div class="risk">
+        <strong>Q10：同一客戶多個 Oracle Instance（prod/staging）無法區分</strong><br>
+        <code>system_id: "customer_a_mes"</code> 無法區分 prod/staging，但兩個環境的 field_mapping 往往不同（staging schema 常落後一個版本）。<br>
+        <strong>建議：</strong> Profile 加入 <code>environment</code> 欄位，執行 job 時強制校驗 annotation platform 自身環境與 profile target environment 一致，否則拒絕執行。
+      </div>
+
+      <div class="risk">
+        <strong>Q11：Schema Source 不可用時的 Fallback 機制缺失</strong><br>
+        <code>schema_source: {type: "web_service"}</code> 若 web service 暫時維護中，整個標注 workflow 是否全面停擺？
+        若 schema 動態變化（今天與昨天不同），進行中的標注使用過期 label 集合。<br>
+        <strong>建議：</strong> 必須定義 schema TTL、不可用時的 fallback 行為（用 cached version 繼續 vs. fail），以及 schema immutability 保證：AnnotationSet 一旦開始使用某版 schema 就 pin 住，直到完成。
+      </div>
+
+      <h3>21.3 Schema Mapping 疑問</h3>
+
+      <div class="risk">
+        <strong>Q12：<code>warn_and_skip</code> 的 skip 粒度未定義</strong><br>
+        跳過「這個 annotation」vs 跳過「整張圖所有 annotation」vs 跳過「整個 batch job」，損失範圍差異極大。
+        <code>warn</code> 的 warning 要送到哪裡？沒有追蹤機制的 warning 等於沒有。<br>
+        <strong>建議：</strong> 明確定義 skip 粒度，並且必須產生結構化 <code>SkipReport</code>（含每個被跳過的 annotation ID + 原因），讓使用者在 confirm export 之前就能看到，而非事後從 log 挖。
+      </div>
+
+      <div class="risk">
+        <strong>Q13：樹狀 Label Taxonomy 的 Mapping 無法表達</strong><br>
+        Flat key-value mapping 無法處理「缺陷 &gt; 外觀缺陷 &gt; 刮痕」這樣的階層 label。
+        Export 時父節點 category 資訊會丟失，外部系統若期望 hierarchical 結構則無法填充。<br>
+        <strong>建議：</strong> Schema Mapping 支援 path-based mapping（<code>"缺陷/外觀缺陷/刮痕": {"external_class": "SCRATCH", "external_parent": "SURFACE"}</code>），CapabilityMatrix 加入「是否支援 hierarchical label」維度。
+      </div>
+
+      <div class="risk">
+        <strong>Q14：Label 為數字 ID 時的型別轉換問題</strong><br>
+        JSON key 必然是字串，Oracle 中 <code>DEFECT_CLASS_ID = 7</code>（integer）vs <code>"7"</code>（string）可能靜默 mapping 失敗，尤其是有 leading zero 或 compound key 時。<br>
+        <strong>建議：</strong> Profile 加入 <code>label_id_type: "string" | "integer" | "compound"</code>，Connector 層做明確型別轉換。
+      </div>
+
+      <div class="risk">
+        <strong>Q15：Schema Mapping 版本更新 — 歷史 AnnotationSet 如何處理</strong><br>
+        客戶把 <code>"DEFECT_A"</code> 廢棄、改為 <code>"DEFECT_A1"</code>/<code>"DEFECT_A2"</code> 時，
+        已完成的 AnnotationSet 要 retroactive 更新？freeze？dual-label？這是業務決策，不能留到實作時再定。<br>
+        <strong>建議：</strong> 必須在設計階段確定 migration 策略，且 AnnotationSet 必須有 <code>schema_version_ref</code> 欄位，SchemaStore 必須是 immutable（不能刪除已被引用的 schema 版本）。
+      </div>
+
+      <h3>21.4 多 Tenant 與 Audit</h3>
+
+      <div class="risk">
+        <strong>Q16：Canonical Model 是否有 <code>tenant_id</code>？資料隔離層級未定義</strong><br>
+        設計文件提到 multi-tenant 但 canonical model 欄位沒有列出 tenant_id。
+        若靠 application logic 做隔離（WHERE clause 加 tenant filter），一個遺漏的 query 就可能造成跨 tenant 資料洩漏。<br>
+        <strong>建議：</strong> 必須明確決定 tenancy model：Row-level isolation（<code>tenant_id</code> + RLS）、Schema-level isolation（每 tenant 獨立 DB schema），或 Database-level isolation。這個決策影響所有 CRUD 操作設計，<strong>必須在第一行 DB migration 之前確定。</strong>
+      </div>
+
+      <div class="risk">
+        <strong>Q17：Audit Log 設計完全缺失</strong><br>
+        誰在什麼時間用哪個 profile 版本對哪個 AnnotationSet 做了什麼操作（export/import/delete）、結果成功還是失敗——無從查詢。
+        Regulatory 環境（ISO、FDA 21 CFR Part 11）可能強制要求完整 audit trail。<br>
+        <strong>建議：</strong> 獨立 AuditLog 機制，每個 job 完成（無論成功失敗）都寫入，且必須 append-only（任何 API 都不能刪除或修改）。
+      </div>
+
+      <h3>21.5 Onboarding、Callback、Event-Driven</h3>
+
+      <div class="note">
+        <strong>Q18：新客戶 Onboarding 流程缺乏定義</strong><br>
+        文件沒有說明第一次對接 Oracle 時的 onboarding 步驟、需向客戶 DBA 索取哪些資訊、需要哪些帳號權限，以及如何驗證 connector 設定正確。<br>
+        <strong>建議：</strong> 設計 <code>ConnectorHealthCheck</code> 介面，讓 Management UI 可以逐步驗證：① 連線 ping、② list_tasks 冒煙測試、③ resolve_asset 可達性、④ push_annotations dry-run。詳見第 22 章 Diagram 3。
+      </div>
+
+      <div class="note">
+        <strong>Q19：外部系統反向通知機制缺失</strong><br>
+        目前是單向：annotation platform 拉取任務、推送結果。若 MES 品管員人工審核後認為標注有誤，要如何通知平台重新標注？<br>
+        <strong>建議：</strong> 定義 callback/webhook 機制，或在 <code>list_tasks</code> 查詢中包含「因 rework 被退回」的任務狀態，<code>ExternalTask</code> 加入 <code>rework_reason</code> 欄位。
+      </div>
+
+      <div class="note">
+        <strong>Q20：Event-Driven 外部系統支援缺失</strong><br>
+        設計假設 annotation platform 主動 polling。若外部系統用 Kafka / RabbitMQ / Oracle AQ 發布事件，現有架構無法配合，且 polling 對 Oracle 造成查詢壓力。<br>
+        <strong>建議：</strong> Connector 在 CapabilityMatrix 中聲明工作模式（<code>pull</code> vs <code>push</code>），Orchestration 根據 connector 宣告選擇驅動方式。
+      </div>
+
+      <div class="note">
+        <strong>Q21：Orchestration 的觸發機制未定義</strong><br>
+        是 cron job、API call trigger、還是外部事件？沒定義的話各 Connector 可能各自實作 scheduler，造成競爭條件。<br>
+        <strong>建議：</strong> 文件化觸發來源、最小觸發間隔、concurrent job 限制（同一 profile 同時只能有一個 running import job？），及 job 狀態機（queued → running → succeeded/failed/partial）。
+      </div>
+
+      <h3>21.6 三個最重要的實作前決策</h3>
+      <div class="risk">
+        <strong>決策一（最緊急）：Tenancy Model 與 Canonical Model 資料隔離層級</strong><br>
+        Row-level vs Schema-level vs Database-level isolation。一旦上線後再改，代價極高（data migration + 全面 API 審查）。必須在寫第一行 DB migration 之前確定。
+      </div>
+      <div class="risk">
+        <strong>決策二（最緊急）：Credential 管理架構與 Secret Rotation 策略</strong><br>
+        IntegrationProfile 目前完全沒有 credential 設計，但所有外部連線都需要認證。
+        影響 Connector 介面、onboarding 流程、Security Review。不能等到實作第一個 Oracle Connector 時才臨時決定。
+      </div>
+      <div class="risk">
+        <strong>決策三：Schema Mapping 版本不可變性與 AnnotationSet Schema Pin 機制</strong><br>
+        決定了 canonical model 必須記錄哪些元數據（<code>schema_version_ref</code> 欄位），及 SchemaStore 的 immutability 設計。若不在設計階段確定，migration script 將難以撰寫。
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- Section 23: 簡易版架構總覽圖                                      -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>23. 簡易版架構總覽圖（供討論用）</h2>
+      <p>
+        以下圖表以「由外而內」的方向呈現系統邊界與各層關係。
+        <span style="background:#fff8eb;border:1px solid #fcd34d;border-radius:4px;padding:1px 6px;font-size:13px;">⚠️ 灰色虛線框</span> 標示目前尚未實作、需優先決策的元件。
+      </p>
+
+      <h3>23.1 系統層次概覽（左→右 = 外部→整合→核心→工具）</h3>
+      <div class="diagram-panel">
+        <pre class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#dbeafe',
+  'primaryTextColor': '#172033',
+  'primaryBorderColor': '#3b82f6',
+  'lineColor': '#374151',
+  'secondaryColor': '#f0fdf4',
+  'tertiaryColor': '#fff8eb',
+  'background': '#f5f8ff',
+  'mainBkg': '#dbeafe',
+  'nodeBorder': '#3b82f6',
+  'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#94a3b8',
+  'titleColor': '#172033',
+  'edgeLabelBackground': '#f5f8ff'
+}}}%%
+graph LR
+  subgraph EXT["🏭 外部系統"]
+    direction TB
+    ORA["Oracle MES\n(V_CIM_TASKS\nV_CIM_LABELS)"]
+    RAPI["REST API\n(JSON / XML)"]
+    FS["File Share\n(UNC / S3)"]
+  end
+
+  subgraph INT["🔌 Integration Layer"]
+    direction TB
+    PROF["IntegrationProfile\n(DSN · field_mapping\nschema_mapping)"]
+    CRED["CredentialStore\n⚠️ 尚未實作"]:::missing
+    OC["OracleConnector"]
+    RC["RESTConnector"]
+    FC["FileConnector"]
+  end
+
+  subgraph ORCH["⚙️ Orchestration"]
+    direction TB
+    TRIG["Trigger\ncron / webhook / pull"]
+    JQ["Job Queue\n(import · export\nvalidate)"]
+    DL["Dead-letter 機制\n⚠️ 尚未實作"]:::missing
+    AUDIT["Audit Log\n⚠️ 尚未實作"]:::missing
+  end
+
+  subgraph CORE["🧠 Annotation Core"]
+    direction TB
+    AS["AnnotationService\ncreate_dataset / ingest_assets\nupsert_annotations / create_export"]
+    FR["FormatRegistry\nLabelMe · COCO · YOLO\nISAT · Oracle · XAny"]
+    TR["ToolRegistry\nX-AnyLabeling · LabelMe · ISAT"]
+    SE["StateEngine\n(Task / Job 狀態機)"]
+  end
+
+  subgraph STORE["💾 Storage"]
+    direction TB
+    SQL["SQLiteStore\n(datasets / assets\nannotations / jobs)"]
+    ART["ArtifactStore\n(images · exports\nconversion reports)"]
+  end
+
+  subgraph ENTRY2["🤖 AI Agent 入口"]
+    MCP["MCP Layer\n(唯一對外 API)"]
+  end
+
+  subgraph UI["🖥️ UI 層"]
+    direction TB
+    SUI["Streamlit Modules\n006 準備 · 009 追蹤 · 012 標注"]
+    ADM["Management UI\nOnboarding · Profile · Job Monitor"]
+  end
+
+  subgraph TOOLS["✏️ 標注工具 GUI"]
+    direction TB
+    XA["X-AnyLabeling"]
+    LM["LabelMe"]
+    IS["ISAT-SAM"]
+  end
+
+  ORA --> OC
+  RAPI --> RC
+  FS --> FC
+  PROF -.-> OC & RC & FC
+  CRED -.-> OC & RC & FC
+
+  OC & RC & FC --> TRIG
+  TRIG --> JQ
+  JQ --> AUDIT
+  JQ --> DL
+
+  MCP --> AS
+  JQ --> AS
+  SUI --> AS
+  ADM --> PROF
+  ADM --> JQ
+
+  AS --> FR & TR & SE
+  AS --> SQL & ART
+  TR --> XA & LM & IS
+
+  classDef missing fill:#f9fafb,stroke:#9ca3af,stroke-dasharray:4 4,color:#6b7280
+        </pre>
+      </div>
+
+      <h3>23.2 各層元件對照說明</h3>
+      <div class="arch-overview">
+        <div class="arch-col">
+          <div class="arch-col-header">外部入口</div>
+          <div class="arch-col-body">
+            <div class="arch-box orange">
+              <strong>Oracle MES</strong>
+              V_CIM_TASKS view<br>V_CIM_LABELS view<br>write_annotations API
+            </div>
+            <div class="arch-box orange">
+              <strong>REST API</strong>
+              JSON / XML · Token auth<br>需定義 pagination contract
+            </div>
+            <div class="arch-box orange">
+              <strong>File Share</strong>
+              UNC / S3 · PresignedURL<br>影像可達性驗證
+            </div>
+            <div class="arch-box purple">
+              <strong>AI Agent (LLM)</strong>
+              MCP tool call 唯一入口<br>annotation_* tools
+            </div>
+          </div>
+        </div>
+        <div class="arch-col">
+          <div class="arch-col-header">Integration + Orchestration</div>
+          <div class="arch-col-body">
+            <div class="arch-box">
+              <strong>IntegrationProfile</strong>
+              DSN · credentials<br>field_mapping · schema_mapping<br>format_policy · capability
+            </div>
+            <div class="arch-box gray" style="border-style:dashed;">
+              <strong>⚠️ CredentialStore</strong>
+              <span style="color:#6b7280;">尚未實作</span><br>Secret encryption · rotation<br>vault integration
+            </div>
+            <div class="arch-box">
+              <strong>Connector</strong>
+              Oracle · REST · File<br>list_tasks · resolve_asset<br>push_annotations
+            </div>
+            <div class="arch-box">
+              <strong>Job Queue</strong>
+              import · export · validate<br>狀態機：queued→running<br>→succeeded/failed/partial
+            </div>
+            <div class="arch-box gray" style="border-style:dashed;">
+              <strong>⚠️ AuditLog</strong>
+              <span style="color:#6b7280;">尚未實作</span><br>append-only · per-job record<br>不可刪除
+            </div>
+          </div>
+        </div>
+        <div class="arch-col">
+          <div class="arch-col-header">Annotation Core + Storage</div>
+          <div class="arch-col-body">
+            <div class="arch-box green">
+              <strong>AnnotationService</strong>
+              create_dataset · ingest_assets<br>upsert_annotations · create_export<br>validate_annotations
+            </div>
+            <div class="arch-box green">
+              <strong>FormatRegistry</strong>
+              <span style="color:#6b7280;">⚠️ 目前是 if/elif dispatch</span><br>LabelMe · COCO · YOLO<br>ISAT · Oracle · XAny
+            </div>
+            <div class="arch-box green">
+              <strong>ToolRegistry</strong>
+              <span style="color:#6b7280;">⚠️ 目前是 if/elif dispatch</span><br>X-AnyLabeling · LabelMe · ISAT<br>prepare / launch / detect
+            </div>
+            <div class="arch-box">
+              <strong>SQLiteStore</strong>
+              datasets · assets<br>annotations · jobs<br>⚠️ 缺 WAL / RLS
+            </div>
+            <div class="arch-box">
+              <strong>ArtifactStore</strong>
+              原始影像 · export 檔<br>ConversionReport<br>checksum 驗證
+            </div>
+          </div>
+        </div>
+        <div class="arch-col">
+          <div class="arch-col-header">UI + 標注工具</div>
+          <div class="arch-col-body">
+            <div class="arch-box">
+              <strong>Streamlit module_006</strong>
+              準備 Labeling 專案<br>ToolRegistry → prepare_project
+            </div>
+            <div class="arch-box">
+              <strong>Streamlit module_009</strong>
+              追蹤標注進度<br>AnnotationSet 狀態查詢
+            </div>
+            <div class="arch-box">
+              <strong>Streamlit module_012</strong>
+              標注會話管理<br>launch GUI · autorefresh
+            </div>
+            <div class="arch-box gray" style="border-style:dashed;">
+              <strong>⚠️ Management UI</strong>
+              <span style="color:#6b7280;">尚未實作</span><br>Onboarding 精靈<br>Profile 管理 · Job Monitor
+            </div>
+            <div class="arch-box purple">
+              <strong>X-AnyLabeling</strong>
+              ONNX 模型 · 多格式輸出<br>主要標注工具
+            </div>
+            <div class="arch-box purple">
+              <strong>LabelMe / ISAT-SAM</strong>
+              LabelMe：點選多邊形<br>ISAT：SAM 自動分割
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3>23.3 Multi-Agent 審查發現：圖表覆蓋缺口</h3>
+      <div class="risk">
+        <strong>三大 Critical 問題在 Section 22 Sequence Diagrams 中的覆蓋度不足：</strong>
+        <ul>
+          <li><strong>Tenancy Model（Q16）</strong>：三張圖完全沒有 <code>tenant_id</code>，dataset / credential 都缺 tenant context，無法反映此設計決策的影響。</li>
+          <li><strong>Credential 管理（Q9）</strong>：Diagram 3 的 <code>create_integration_profile</code> 直接帶 <code>credential_ref</code>，但 CredentialStore 作為獨立元件未出現在圖中——credential 存入、加密、取出路徑不可見。</li>
+          <li><strong>Schema Pin（Q11、Q15）</strong>：Diagram 1 的 <code>create_schema</code> 回傳 <code>schema_id</code> 後，AnnotationSet 從未出現 <code>schema_version_ref</code> 的讀取與鎖定步驟——schema pin 發生在哪一個呼叫完全看不出來。</li>
+        </ul>
+        建議：在討論完三大決策後，補畫一張「Credential 取用 + Schema Pin」的 mini sequence diagram。
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- Section 22: Sequence Diagrams                                     -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>22. Sequence Diagrams — 平台與外部服務 Handshaking</h2>
+      <p>
+        以下三張 Sequence Diagram 涵蓋標注平台與外部服務之間的完整 handshaking 流程，
+        以及其他參與方（DBA、標注員、審核員、AI Agent）需要如何配合。
+      </p>
+
+      <h3>22.1 完整主流程：Import → Labeling → Review → Export</h3>
+      <div class="note">
+        <strong>觸發者：</strong>外部 Oracle MES，透過 webhook 或 polling 通知有新批次任務。<br>
+        <strong>關鍵風險點：</strong>resolve_asset 失敗（影像路徑失效）、GUI process crash 需 watchdog timeout、
+        LossReport 有 critical loss 需人工介入調整 schema mapping、Oracle write_annotations 失敗需冪等重試。<br>
+        <strong>Oracle 需配合：</strong>暴露 V_CIM_TASKS view、V_CIM_LABELS view、write_annotations API，
+        並確認 CIM Platform Server IP 在 Oracle whitelist 內。
+      </div>
+      <div class="diagram-panel">
+        <pre class="mermaid">
+sequenceDiagram
+    participant Oracle as ExternalSystem
+    participant Conn as Connector
+    participant Core as AnnotationCore
+    participant FmtAdp as FormatAdapter
+    participant ToolAdp as ToolAdapter
+    participant GUI as LabelingTool
+    participant Orch as Orchestration
+    participant StreamUI as Annotator UI
+    participant ReviewUI as Reviewer UI
+
+    Oracle->>Conn: webhook / polling → new_task_available(batch_id)
+    Conn->>Oracle: list_tasks(batch_id, pagination_token)
+    Oracle-->>Conn: TaskList[{task_id, image_uri, metadata}]
+
+    loop For each task
+        Conn->>Oracle: resolve_asset(image_uri)
+        Oracle-->>Conn: FilePath / PresignedURL
+        alt Asset not accessible
+            Conn-->>Orch: ingest_error(task_id, reason)
+            Orch-->>StreamUI: notify — import failed
+        end
+    end
+
+    Conn->>Core: create_dataset(name, source=oracle, batch_id)
+    Core-->>Conn: dataset_id
+    Conn->>Core: ingest_assets(dataset_id, assets[])
+    Core-->>Conn: asset_ids[]
+
+    Conn->>Oracle: load_label_schema(batch_id)
+    Oracle-->>Conn: RawLabelSchema
+    Conn->>FmtAdp: convert_schema(RawLabelSchema)
+    FmtAdp-->>Conn: CanonicalSchema
+    Conn->>Core: create_schema(dataset_id, CanonicalSchema)
+    Core-->>Conn: schema_id
+    Conn->>Orch: dispatch_job(import_complete, dataset_id)
+
+    StreamUI->>Orch: start_labeling_job(dataset_id, tool=xanylabeling)
+    Orch->>ToolAdp: prepare_project(dataset_id, schema_id)
+    ToolAdp->>Core: fetch_assets(dataset_id)
+    Core-->>ToolAdp: AssetList
+    ToolAdp->>Core: fetch_schema(schema_id)
+    Core-->>ToolAdp: CanonicalSchema
+    ToolAdp->>FmtAdp: schema_to_tool_format(CanonicalSchema)
+    FmtAdp-->>ToolAdp: XAnyLabelingConfig
+    ToolAdp-->>Orch: project_ready(project_dir)
+
+    Orch->>ToolAdp: launch_gui(project_dir)
+    ToolAdp-)GUI: spawn_process(xanylabeling.exe)
+    Note over GUI: 標注員手動標注（非同步）
+    GUI-)ToolAdp: process_exit(exit_code=0)
+
+    loop For each annotated asset
+        ToolAdp->>FmtAdp: convert_annotations(raw_json, schema_id)
+        FmtAdp-->>ToolAdp: CanonicalAnnotationSet
+        ToolAdp->>Core: upsert_annotations(asset_id, annotations)
+        Core-->>ToolAdp: annotation_id
+    end
+
+    Orch->>Core: validate_annotations(dataset_id, schema_id)
+    alt Validation failed
+        Core-->>Orch: ValidationReport(errors)
+        Orch-->>StreamUI: show_validation_errors
+    else Validation passed
+        Core-->>Orch: ValidationReport(ok)
+        Orch->>Core: set_status(dataset_id, pending_review)
+    end
+
+    ReviewUI->>Core: list_pending_review(dataset_id)
+    Core-->>ReviewUI: AnnotationList
+    loop For each asset
+        ReviewUI->>Core: review_task(asset_id, verdict)
+        alt Rejected
+            Core->>Orch: dispatch_rework(asset_id)
+            Orch-->>StreamUI: notify — rework required
+        end
+    end
+
+    Orch->>FmtAdp: export_dry_run(dataset_id, oracle_annotation)
+    FmtAdp-->>Orch: LossReport
+    Orch-->>ReviewUI: show_loss_report(LossReport)
+    alt Critical losses
+        ReviewUI->>Orch: abort_export
+    else Acceptable
+        ReviewUI->>Orch: confirm_export
+    end
+
+    Orch->>FmtAdp: export(dataset_id, oracle_annotation)
+    FmtAdp-->>Orch: ExportPayload
+    Orch->>Conn: push_results(dataset_id, ExportPayload)
+    Conn->>Oracle: write_annotations(batch_id, ExportPayload)
+    alt Write success
+        Oracle-->>Conn: ack(rows_written)
+        Conn->>Core: set_status(dataset_id, exported)
+    else Write failed
+        Oracle-->>Conn: error(code, message)
+        Conn->>Orch: export_error(dataset_id, message)
+        Orch-->>ReviewUI: notify — export failed, retry?
+    end
+        </pre>
+      </div>
+
+      <h3>22.2 AI Agent 透過 MCP 進行 Annotation 的流程</h3>
+      <div class="note">
+        <strong>觸發者：</strong>外部 AI Agent（LLM pipeline / CI bot / Claude instance），完全以 MCP tool call 驅動，不需要人工介入。<br>
+        <strong>關鍵非同步點：</strong>ingest_assets 和 create_export 回傳 job_id，Agent 需主動輪詢 get_job_status 直到完成。<br>
+        <strong>主要風險：</strong>upsert_annotations schema mismatch（Agent 推論格式與 schema 不符）、export job timeout、checksum 不一致需重新觸發。
+      </div>
+      <div class="diagram-panel">
+        <pre class="mermaid">
+sequenceDiagram
+    participant Agent as AI Agent
+    participant MCP as MCP Layer
+    participant Core as AnnotationCore
+    participant Orch as Orchestration
+    participant FmtAdp as FormatAdapter
+    participant Store as ArtifactStore
+
+    Agent->>MCP: annotation_create_dataset({name, tags})
+    MCP->>Core: create_dataset(name, source=ai_agent)
+    alt Name conflict
+        Core-->>MCP: error(409, name_exists)
+        MCP-->>Agent: tool_error
+    else OK
+        Core-->>MCP: {dataset_id}
+        MCP-->>Agent: tool_result({dataset_id})
+    end
+
+    Agent->>MCP: annotation_create_schema({dataset_id, schema_def})
+    MCP->>Core: create_schema(dataset_id, CanonicalSchema)
+    Core-->>MCP: {schema_id}
+    MCP-->>Agent: tool_result({schema_id})
+
+    Agent->>MCP: annotation_ingest_assets({dataset_id, asset_uris[]})
+    MCP->>Orch: dispatch_job(ingest, dataset_id, asset_uris)
+    MCP-->>Agent: tool_result({job_id, status=queued})
+
+    Orch-)Store: fetch_assets(asset_uris[])
+    Store-->>Orch: asset_bytes[]
+    Orch->>Core: ingest_assets(dataset_id, assets)
+    Core-->>Orch: asset_ids[]
+    Orch->>Core: set_job_status(job_id, completed)
+
+    loop Poll until done
+        Agent->>MCP: annotation_get_job_status({job_id})
+        MCP->>Core: get_job_status(job_id)
+        Core-->>MCP: {status, ingested_count}
+        MCP-->>Agent: tool_result({status})
+    end
+
+    loop For each asset
+        Agent->>Agent: run_inference(asset_uri)
+        Agent->>MCP: annotation_upsert_annotations({asset_id, annotations[], source=ai_model})
+        MCP->>Core: validate_annotations(annotations, schema_id)
+        alt Schema mismatch
+            Core-->>MCP: error(422, mismatch_details)
+            MCP-->>Agent: tool_error
+            Note over Agent: Fix format and retry
+        else Valid
+            Core->>Core: upsert_annotations(asset_id, annotations)
+            Core-->>MCP: {annotation_id}
+            MCP-->>Agent: tool_result({annotation_id})
+        end
+    end
+
+    opt Submit for human review
+        Agent->>MCP: annotation_submit_for_review({dataset_id})
+        MCP->>Core: set_status(dataset_id, pending_review)
+        MCP-->>Agent: tool_result({status=pending_review})
+    end
+
+    Agent->>MCP: annotation_create_export({dataset_id, format=coco_json})
+    MCP->>Orch: dispatch_job(export, dataset_id, format)
+    MCP-->>Agent: tool_result({export_job_id, status=queued})
+
+    Orch->>FmtAdp: export(dataset_id, coco_json)
+    FmtAdp->>Core: fetch_all_annotations(dataset_id)
+    Core-->>FmtAdp: CanonicalAnnotationSets
+    FmtAdp->>Store: write_export_file(coco.json)
+    Store-->>FmtAdp: export_uri
+    FmtAdp->>Core: set_job_status(export_job_id, completed, {export_uri})
+
+    loop Poll until done
+        Agent->>MCP: annotation_get_job_status({job_id: export_job_id})
+        MCP-->>Agent: tool_result({status, progress_pct})
+    end
+
+    Agent->>MCP: annotation_get_export({export_job_id})
+    MCP->>Core: get_export(export_job_id)
+    Core-->>MCP: {download_url, checksum}
+    MCP-->>Agent: tool_result({download_url, checksum})
+
+    Agent->>Store: GET download_url
+    Store-->>Agent: coco.json
+    Agent->>Agent: verify_checksum(file, checksum)
+    alt Checksum mismatch
+        Agent->>MCP: annotation_create_export(...)
+        Note over Agent: Re-trigger export
+    else OK
+        Note over Agent: Export complete
+    end
+        </pre>
+      </div>
+
+      <h3>22.3 新客戶 Oracle Onboarding 流程</h3>
+      <div class="note">
+        <strong>觸發者：</strong>Platform Admin，手動透過 Management UI 驅動，每個階段都需要 Admin 確認才進下一步。<br>
+        <strong>最常見卡關點：</strong>Oracle TNS 連線失敗（防火牆封鎖）、V_CIM_TASKS view 不存在、影像路徑無法存取、oracle_schema 沒有對應 FormatAdapter。<br>
+        <strong>Oracle DBA 需配合：</strong>建立 V_CIM_TASKS / V_CIM_LABELS view、提供 write_annotations 接受端、將 CIM Server IP 加入 whitelist、若用 File Share 需授予 read-only 存取權。
+      </div>
+      <div class="diagram-panel">
+        <pre class="mermaid">
+sequenceDiagram
+    participant Admin as Platform Admin
+    participant Profile as ProfileStore
+    participant Conn as Connector
+    participant Oracle as Customer Oracle
+    participant FmtAdp as FormatAdapter
+    participant Core as AnnotationCore
+    participant Orch as Orchestration
+
+    Note over Admin: 客戶提供 Oracle DSN, credentials, schema info
+    Admin->>Profile: create_integration_profile({customer_id, dsn, username, credential_ref, image_root_path})
+    Profile->>Profile: encrypt_credentials()
+    Profile-->>Admin: {profile_id, status=created}
+
+    Admin->>Conn: test_connection(profile_id)
+    Conn->>Profile: load_profile(profile_id)
+    Profile-->>Conn: IntegrationProfile
+    Conn->>Oracle: SELECT 1 FROM DUAL
+    alt Connection failed
+        Oracle-->>Conn: ORA-12541 / timeout
+        Conn-->>Admin: {status=failed, error}
+        Note over Admin: Fix DSN / credential and retry
+    else OK
+        Oracle-->>Conn: OK
+        Conn-->>Admin: {status=connected, oracle_version, latency_ms}
+    end
+
+    Admin->>Conn: smoke_test_list_tasks(profile_id, limit=5)
+    Conn->>Oracle: SELECT * FROM V_CIM_TASKS WHERE ROWNUM <= 5
+    alt View not found
+        Oracle-->>Conn: ORA-00942 table/view does not exist
+        Conn-->>Admin: {status=failed, suggestion=create V_CIM_TASKS}
+        Note over Admin: Notify customer DBA to create view
+    else OK
+        Oracle-->>Conn: TaskRows[5]
+        Conn-->>Admin: {status=ok, sample_tasks, column_map_suggestion}
+    end
+
+    Admin->>Conn: test_resolve_asset(profile_id, sample_image_uri)
+    alt UNC File Share
+        Conn->>Conn: check UNC path accessible
+        alt UNC not reachable
+            Conn-->>Admin: {status=failed, error=unc_unreachable}
+        else OK
+            Conn-->>Admin: {status=ok, file_size_kb}
+        end
+    else S3 / HTTP
+        Conn->>Oracle: get_presigned_url(image_uri)
+        Oracle-->>Conn: presigned_url
+        Conn->>Conn: HTTP HEAD presigned_url
+        alt 403 / 404
+            Conn-->>Admin: {status=failed, http_code}
+        else 200
+            Conn-->>Admin: {status=ok, content_length}
+        end
+    end
+
+    Admin->>Conn: load_label_schema(profile_id)
+    Conn->>Oracle: SELECT * FROM V_CIM_LABELS
+    Oracle-->>Conn: RawLabelSchema
+    Conn->>FmtAdp: convert_schema(RawLabelSchema)
+    alt No adapter for oracle_schema
+        FmtAdp-->>Conn: error(no_adapter)
+        Conn-->>Admin: {status=failed, suggestion=register OracleSchemaAdapter}
+        Note over Admin: Developer implements and registers adapter
+    else OK
+        FmtAdp-->>Conn: CanonicalSchema (draft)
+        Conn-->>Admin: {status=ok, canonical_schema_preview, unmapped_fields[]}
+    end
+
+    opt Fix unmapped fields
+        Admin->>Conn: set_schema_mapping(profile_id, mappings)
+        Conn->>Profile: save_schema_mapping(profile_id, mappings)
+        Conn->>FmtAdp: re_convert_schema(RawLabelSchema, mappings)
+        FmtAdp-->>Conn: CanonicalSchema (updated)
+        Conn-->>Admin: {status=ok, remaining_unmapped[]}
+    end
+
+    Admin->>Core: create_schema(CanonicalSchema, source=onboarding)
+    Core-->>Admin: {schema_id}
+    Admin->>Profile: link_schema(profile_id, schema_id)
+    Profile-->>Admin: {profile_updated}
+
+    Admin->>Orch: dry_run_import(profile_id, sample_limit=10)
+    Orch->>Conn: list_tasks(profile_id, limit=10)
+    Conn->>Oracle: SELECT * FROM V_CIM_TASKS WHERE ROWNUM <= 10
+    Oracle-->>Conn: TaskRows[10]
+    loop For each sample task
+        Conn->>Oracle: resolve_asset(task.image_uri)
+        Oracle-->>Conn: resolved_path
+        Conn->>Core: ingest_asset(dry_run=true, asset_uri)
+        Core-->>Conn: {would_create: asset_id, conflicts[]}
+        opt Has existing annotations
+            Conn->>FmtAdp: convert_annotations(ExistingAnnotations, schema_id)
+            alt Conversion errors
+                Conn->>Orch: log_dry_run_error(task_id, errors)
+            else OK
+                Conn->>Orch: log_dry_run_ok(task_id, annotation_count)
+            end
+        end
+    end
+    Orch-->>Admin: DryRunReport{total_sampled, would_ingest, errors[], estimated_count}
+
+    alt DryRunReport has errors
+        Note over Admin: Review errors, fix mapping, re-run dry_run
+    else Clean
+        Admin->>Profile: set_profile_status(profile_id, active)
+        Profile-->>Admin: {status=active, activated_at}
+        Note over Admin: Onboarding complete — Connector 開始正式排程
+    end
+        </pre>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        /* 節點與背景 */
+        primaryColor: '#dbeafe',
+        primaryTextColor: '#172033',
+        primaryBorderColor: '#3b82f6',
+        secondaryColor: '#f0fdf4',
+        tertiaryColor: '#fff8eb',
+        background: '#f5f8ff',
+        mainBkg: '#dbeafe',
+        nodeBorder: '#3b82f6',
+        /* 箭頭與線條 */
+        lineColor: '#374151',
+        edgeLabelBackground: '#f0f4ff',
+        /* Subgraph */
+        clusterBkg: '#f1f5f9',
+        clusterBorder: '#94a3b8',
+        titleColor: '#172033',
+        /* Sequence diagram 專用 */
+        actorBkg: '#1d4ed8',
+        actorBorder: '#1e3a8a',
+        actorTextColor: '#ffffff',
+        actorLineColor: '#374151',
+        signalColor: '#374151',
+        signalTextColor: '#172033',
+        labelBoxBkgColor: '#e0f2fe',
+        labelBoxBorderColor: '#0284c7',
+        labelTextColor: '#172033',
+        loopTextColor: '#172033',
+        noteBorderColor: '#d97706',
+        noteBkgColor: '#fff8eb',
+        noteTextColor: '#92400e',
+        activationBorderColor: '#3b82f6',
+        activationBkgColor: '#bfdbfe',
+        sequenceNumberColor: '#ffffff'
+      },
+      sequence: { actorMargin: 70, width: 170, useMaxWidth: false }
+    });
+  </script>
+</body>
+</html>
