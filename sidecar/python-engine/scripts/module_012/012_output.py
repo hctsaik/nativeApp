@@ -18,6 +18,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1038,6 +1039,18 @@ def render_output(result: dict) -> None:
     # ── 標題 ─────────────────────────────────────────────────────────────────
     st.markdown(f"## 🏷️ {manifest_name}")
 
+    # 顯示上次操作留下的錯誤（st.rerun 前無法即時顯示，改用 session_state 跨 rerun）
+    if _launch_err := st.session_state.pop("m012_launch_error", None):
+        st.error(f"啟動失敗：{_launch_err}")
+
+    # pre-flight：ISAT 選為標注工具但 isat-sam 找不到時提早警告
+    if annotation_tool == "isat" and not shutil.which(isat_exe):
+        st.warning(
+            f"⚠️ 找不到 ISAT 執行檔（`{isat_exe}`）。"
+            " 請先安裝：`pip install isat-sam`，"
+            "或在環境變數 `ISAT_EXE` 指定路徑後重新啟動 App。"
+        )
+
     # ── metrics + 進度條 ─────────────────────────────────────────────────────
     pct = annotated / total if total else 0
     if classification_labels:
@@ -1322,7 +1335,7 @@ def render_output(result: dict) -> None:
                                 ann_path=item["ann_path"],
                             )
                             if err:
-                                st.error(f"啟動失敗：{err}")
+                                st.session_state["m012_launch_error"] = err
                             else:
                                 st.toast(f"{tool_name} 已開啟：{fname}", icon="🖊")
                             st.rerun()
