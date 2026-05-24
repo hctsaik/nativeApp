@@ -101,54 +101,166 @@ function ToolError({ message }) {
   );
 }
 
-function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode }) {
+// ── Vision DIY help modal ─────────────────────────────────────────────────────
+
+function VisionDiyHelpModal({ onClose }) {
   return (
-    <header className="toolbar">
-      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-        <span className="top-bar-brand">CIM Platform</span>
-        <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
-          {devMode ? "DEV" : "PROD"}
-        </span>
-        <div className="toolbar-title">
-          <p>{status}</p>
-        </div>
+    <div className="vd-overlay" onClick={onClose}>
+      <div className="vd-modal" onClick={e => e.stopPropagation()}>
+        <button className="vd-close" onClick={onClose} title="關閉">✕</button>
+        <h2 className="vd-title">🔭 Vision DIY 1.0 — 整合指南</h2>
+        <p className="vd-lead">將外部 React / Web 應用透過 iframe 嵌入 CIM Platform，並讓它能直接觸發本地標注工具。</p>
+
+        <h3>1. 設定 URL</h3>
+        <p>點擊 TopBar 的 <strong>✏️</strong> 圖示，輸入你的 HTTPS 應用網址後按確認。網址會存在 localStorage，重開後自動載入。</p>
+
+        <h3>2. 在你的 React App 裡傳送指令</h3>
+        <p>使用 <code>window.parent.postMessage</code>，格式如下：</p>
+
+        <pre className="vd-code">{`// ① 直接開啟 X-AnyLabeling 標記指定圖片
+window.parent.postMessage({
+  cim: "v1",
+  action: "open_xanylabeling",
+  imageUrl: "https://your-server.com/images/sample.jpg"
+}, "*");
+
+// ② 將圖片加入標注佇列（批次處理）
+window.parent.postMessage({
+  cim: "v1",
+  action: "queue_image",
+  imageUrl: "https://your-server.com/images/sample.jpg",
+  metadata: { label: "defect", source: "inspection" }  // 選填
+}, "*");`}</pre>
+
+        <h3>3. 執行流程</h3>
+        <table className="vd-table">
+          <thead><tr><th>Action</th><th>Platform 做了什麼</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>open_xanylabeling</code></td>
+              <td>Engine 從 URL 下載圖片 → 存至本機 <code>external-queue/</code> → 直接啟動 X-AnyLabeling 並載入該圖，標注結果（.json）存在同目錄</td>
+            </tr>
+            <tr>
+              <td><code>queue_image</code></td>
+              <td>Engine 下載圖片 → 加入記憶體佇列 → TopBar 顯示紅色計數徽章，點 🗑️ 清空</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>4. 安全性注意</h3>
+        <ul>
+          <li>只支援 <strong>HTTPS</strong> 圖片 URL（Engine 用 urllib 下載，需可公開存取或帶 Token）</li>
+          <li>你的 k8s App 需允許被 iframe 嵌入（移除 <code>X-Frame-Options: DENY</code> 或設 <code>frame-ancestors 'self' *</code>）</li>
+          <li>postMessage target 設 <code>"*"</code> 即可，Platform 端不檢查來源</li>
+        </ul>
+
+        <h3>5. 本機存放路徑</h3>
+        <pre className="vd-code">{`{CIM_LOG_DIR}/external-queue/          ← 下載的圖片
+{CIM_LOG_DIR}/xanylabeling_state/external/  ← xanylabeling GUI 狀態`}</pre>
+
+        <p className="vd-footer">CIM Platform · Vision DIY 1.0 Bridge Protocol v1</p>
       </div>
-      <div className="actions">
-        <div className="toolSelectGroup">
-          <label className="toolSelectLabel">Portal 功能下拉選擇</label>
-          <select
-            className="toolSelect"
-            value={selectedToolId}
-            onChange={(e) => onToolChange(e.target.value)}
-            disabled={sidecarDown || !!activeTool}
-          >
-            {(() => {
-              const groups = groupTools(tools);
-              return CATEGORY_ORDER
-                .filter(cat => groups[cat]?.length)
-                .map(cat => (
-                  <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
-                    {groups[cat].map(t => (
-                      <option key={t.tool_id} value={t.tool_id}>{t.name}</option>
-                    ))}
-                  </optgroup>
-                ));
-            })()}
-          </select>
+    </div>
+  );
+}
+
+function TopBar({
+  tools, selectedToolId, onToolChange, activeTool, onStart, onStop,
+  status, sidecarDown, devMode,
+  webAppUrl, setWebAppUrl, showWebApp, onToggleWebApp, queueCount, onClearQueue,
+}) {
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState(webAppUrl);
+  const [showHelp, setShowHelp] = useState(false);
+
+  function saveUrl() {
+    setWebAppUrl(urlDraft.trim());
+    setEditingUrl(false);
+  }
+
+  return (
+    <>
+      {showHelp && <VisionDiyHelpModal onClose={() => setShowHelp(false)} />}
+      <header className="toolbar">
+        <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+          <span className="top-bar-brand">CIM Platform</span>
+          <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
+            {devMode ? "DEV" : "PROD"}
+          </span>
+          <div className="toolbar-title">
+            <p>{status}</p>
+          </div>
         </div>
-        {activeTool ? (
-          <button onClick={onStop} className="btn-danger">
-            <Square size={17} />
-            Stop {activeTool.name}
-          </button>
-        ) : (
-          <button onClick={onStart} disabled={!selectedToolId || sidecarDown}>
-            <RefreshCw size={17} />
-            Start Tool
-          </button>
-        )}
-      </div>
-    </header>
+        <div className="actions">
+          <div className="toolSelectGroup">
+            <label className="toolSelectLabel">Portal 功能下拉選擇</label>
+            <select
+              className="toolSelect"
+              value={selectedToolId}
+              onChange={(e) => onToolChange(e.target.value)}
+              disabled={sidecarDown || !!activeTool}
+            >
+              {(() => {
+                const groups = groupTools(tools);
+                return CATEGORY_ORDER
+                  .filter(cat => groups[cat]?.length)
+                  .map(cat => (
+                    <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
+                      {groups[cat].map(t => (
+                        <option key={t.tool_id} value={t.tool_id}>{t.name}</option>
+                      ))}
+                    </optgroup>
+                  ));
+              })()}
+            </select>
+          </div>
+          {activeTool ? (
+            <button onClick={onStop} className="btn-danger">
+              <Square size={17} />
+              Stop {activeTool.name}
+            </button>
+          ) : (
+            <button onClick={onStart} disabled={!selectedToolId || sidecarDown}>
+              <RefreshCw size={17} />
+              Start Tool
+            </button>
+          )}
+
+          <div className="vd-divider" />
+
+          {editingUrl ? (
+            <>
+              <input
+                className="web-app-url-input"
+                value={urlDraft}
+                onChange={e => setUrlDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
+                placeholder="https://your-k8s-app.example.com"
+                autoFocus
+              />
+              <button onClick={saveUrl}>確認</button>
+              <button onClick={() => setEditingUrl(false)}>取消</button>
+            </>
+          ) : (
+            <>
+              <button
+                className={`btn-web-app${showWebApp ? " active" : ""}`}
+                onClick={onToggleWebApp}
+                title={webAppUrl || "請先設定 URL（點 ✏️）"}
+              >
+                🔭 Vision DIY 1.0
+                {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
+              </button>
+              <button className="btn-ghost" onClick={() => { setUrlDraft(webAppUrl); setEditingUrl(true); }} title="設定 URL">✏️</button>
+              {queueCount > 0 && (
+                <button className="btn-ghost" onClick={onClearQueue} title="清空標注佇列">🗑️</button>
+              )}
+              <button className="btn-ghost vd-help-btn" onClick={() => setShowHelp(true)} title="整合指南">?</button>
+            </>
+          )}
+        </div>
+      </header>
+    </>
   );
 }
 
@@ -360,50 +472,6 @@ function WebAppView({ webAppUrl, queueCount }) {
         className="web-app-iframe"
         allow="camera; microphone"
       />
-    </div>
-  );
-}
-
-function WebAppToolbar({ webAppUrl, setWebAppUrl, showWebApp, onToggle, queueCount, onClearQueue }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(webAppUrl);
-
-  function handleSave() {
-    setWebAppUrl(draft.trim());
-    setEditing(false);
-  }
-
-  return (
-    <div className="web-app-toolbar">
-      {editing ? (
-        <>
-          <input
-            className="web-app-url-input"
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }}
-            placeholder="https://your-k8s-app.example.com"
-            autoFocus
-          />
-          <button onClick={handleSave}>確認</button>
-          <button onClick={() => setEditing(false)}>取消</button>
-        </>
-      ) : (
-        <>
-          <button
-            className={`btn-web-app${showWebApp ? " active" : ""}`}
-            onClick={onToggle}
-            title={webAppUrl || "請先設定 Web App URL"}
-          >
-            🌐 Web App
-            {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
-          </button>
-          <button className="btn-ghost" onClick={() => { setDraft(webAppUrl); setEditing(true); }} title="設定 Web App URL">✏️</button>
-          {queueCount > 0 && (
-            <button className="btn-ghost" onClick={onClearQueue} title="清空佇列">🗑️</button>
-          )}
-        </>
-      )}
     </div>
   );
 }
@@ -823,12 +891,10 @@ function App() {
         status={status}
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
-      />
-      <WebAppToolbar
         webAppUrl={webAppUrl}
         setWebAppUrl={setWebAppUrl}
         showWebApp={showWebApp}
-        onToggle={() => setShowWebApp(v => !v)}
+        onToggleWebApp={() => setShowWebApp(v => !v)}
         queueCount={extQueue.length}
         onClearQueue={handleClearQueue}
       />
