@@ -12,9 +12,12 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -1246,11 +1249,49 @@ def configure_logging(log_dir: Path) -> None:
     )
 
 
+# ── External image bridge ─────────────────────────────────────────────────────
+
+_ext_queue: list[dict] = []
+_ext_queue_lock = threading.Lock()
+
+
+def _ext_download_image(image_url: str, queue_dir: Path) -> Path:
+    parsed = urllib.parse.urlparse(image_url)
+    raw_name = Path(parsed.path).name or "image.jpg"
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in raw_name)
+    dest = queue_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(image_url, headers={"User-Agent": "CIM-Bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
+        f.write(resp.read())
+    return dest
+
+
+def _ext_launch_xanylabeling(local_path: Path, log_dir: Path) -> None:
+    xany_exe = os.environ.get("XANYLABELING_EXE", "")
+    if not xany_exe or not Path(xany_exe).exists():
+        raise RuntimeError("xanylabeling 未設定（XANYLABELING_EXE 環境變數未指向有效執行檔）")
+    xany_work_dir = log_dir / "xanylabeling_state" / "external"
+    xany_work_dir.mkdir(parents=True, exist_ok=True)
+    venv_root = Path(xany_exe).parents[1]
+    venv_sp = str(venv_root / "Lib" / "site-packages")
+    launch_stmt = f"import sys; sys.path.insert(0, r'{venv_sp}'); from anylabeling.app import main; main()"
+    python_exe = Path(xany_exe).parent / "python.exe"
+    python_cmd = [str(python_exe)] if python_exe.exists() else ["py", "-3.11"]
+    cmd = python_cmd + ["-c", launch_stmt,
+                        "--filename", str(local_path),
+                        "--output", str(local_path.parent),
+                        "--work-dir", str(xany_work_dir),
+                        "--nodata", "--autosave", "--no-auto-update-check"]
+    subprocess.Popen(cmd)
+
+
 def create_app(
     manager: ToolProcessManager,
     registry: ToolRegistry,
     selected_paths: SelectedPathStore,
     db_path: Path,
+    log_dir: Path = Path("logs"),
 ) -> FastAPI:
     app = FastAPI(title="CIM Python Sidecar", version="0.1.0")
 
@@ -1503,6 +1544,61 @@ def create_app(
         selected_paths.set_paths(request.paths)
         return SelectedPathsResponse(paths=selected_paths.get_paths())
 
+    # ── External image bridge endpoints ──────────────────────────────────────
+
+    class ExternalImageRequest(BaseModel):
+        image_url: str
+        metadata: dict = {}
+
+    @app.post("/external/open-xanylabeling")
+    def external_open_xanylabeling(request: ExternalImageRequest) -> dict:
+        queue_dir = log_dir / "external-queue"
+        try:
+            local_path = _ext_download_image(request.image_url, queue_dir)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"圖片下載失敗: {exc}") from exc
+        try:
+            _ext_launch_xanylabeling(local_path, log_dir)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"xanylabeling 啟動失敗: {exc}") from exc
+        return {"status": "launched", "local_path": str(local_path)}
+
+    @app.post("/external/queue-image")
+    def external_queue_image(request: ExternalImageRequest) -> dict:
+        queue_dir = log_dir / "external-queue"
+        try:
+            local_path = _ext_download_image(request.image_url, queue_dir)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"圖片下載失敗: {exc}") from exc
+        entry = {
+            "id": uuid.uuid4().hex,
+            "local_path": str(local_path),
+            "original_url": request.image_url,
+            "metadata": request.metadata,
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+            "status": "pending",
+        }
+        with _ext_queue_lock:
+            _ext_queue.append(entry)
+        return {"id": entry["id"], "local_path": str(local_path), "queue_size": len(_ext_queue)}
+
+    @app.get("/external/queue")
+    def external_get_queue() -> dict:
+        with _ext_queue_lock:
+            return {"items": list(_ext_queue), "count": len(_ext_queue)}
+
+    @app.delete("/external/queue/{item_id}")
+    def external_dequeue(item_id: str) -> dict:
+        with _ext_queue_lock:
+            before = len(_ext_queue)
+            _ext_queue[:] = [e for e in _ext_queue if e["id"] != item_id]
+            removed = before - len(_ext_queue)
+        if not removed:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return {"status": "removed", "queue_size": len(_ext_queue)}
+
     @app.post("/shutdown")
     def shutdown() -> dict[str, str]:
         manager.stop()
@@ -1544,7 +1640,7 @@ def main() -> None:
     selected_paths = SelectedPathStore(args.log_dir / "selected_paths.json")
     registry = ToolRegistry(SQLiteToolAdapter(db_path))
     manager = ToolProcessManager(args.log_dir, args.log_dir / "selected_paths.json", db_path)
-    app = create_app(manager, registry, selected_paths, db_path)
+    app = create_app(manager, registry, selected_paths, db_path, args.log_dir)
     uvicorn.run(app, host="127.0.0.1", port=args.control_port, log_level="info")
 
 

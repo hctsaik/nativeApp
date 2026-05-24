@@ -459,3 +459,87 @@ select {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── External Web App ─────────────────────────────────────── */
+
+.web-app-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.btn-web-app {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-web-app.active {
+  background: #1a73e8;
+  color: #fff;
+  border-color: #1a73e8;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 15px;
+  border-radius: 4px;
+  min-height: unset;
+}
+
+.btn-ghost:hover { background: #e2e8f0; }
+
+.queue-badge {
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9px;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+
+.web-app-url-input {
+  flex: 1;
+  min-width: 320px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.web-app-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+.web-app-queue-bar {
+  background: #fef9c3;
+  border-bottom: 1px solid #fde047;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #713f12;
+}
+
+.web-app-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  height: 100%;
+}

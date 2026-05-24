@@ -24,5 +24,9 @@ contextBridge.exposeInMainWorld("cimHost", {
   startSheetTab: (pluginId) => ipcRenderer.invoke("start-sheet-tab", pluginId),
   getRuntimeStatus: () => ipcRenderer.invoke("get-runtime-status"),
   getDiagnostics: () => ipcRenderer.invoke("get-diagnostics"),
-  log: (level, message) => ipcRenderer.send("renderer-log", level, message)
+  log: (level, message) => ipcRenderer.send("renderer-log", level, message),
+  externalOpenXanylabeling: (imageUrl, metadata) => ipcRenderer.invoke("external-open-xanylabeling", imageUrl, metadata),
+  externalQueueImage: (imageUrl, metadata) => ipcRenderer.invoke("external-queue-image", imageUrl, metadata),
+  externalGetQueue: () => ipcRenderer.invoke("external-get-queue"),
+  externalDequeue: (itemId) => ipcRenderer.invoke("external-dequeue", itemId),
 });

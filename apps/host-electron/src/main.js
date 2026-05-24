@@ -398,6 +398,22 @@ ipcMain.handle("get-diagnostics", async () => {
   return requestJson("GET", "/diagnostics");
 });
 
+ipcMain.handle("external-open-xanylabeling", async (_event, imageUrl, metadata) => {
+  return requestJson("POST", "/external/open-xanylabeling", { image_url: imageUrl, metadata: metadata ?? {} });
+});
+
+ipcMain.handle("external-queue-image", async (_event, imageUrl, metadata) => {
+  return requestJson("POST", "/external/queue-image", { image_url: imageUrl, metadata: metadata ?? {} });
+});
+
+ipcMain.handle("external-get-queue", async () => {
+  return requestJson("GET", "/external/queue");
+});
+
+ipcMain.handle("external-dequeue", async (_event, itemId) => {
+  return requestJson("DELETE", `/external/queue/${encodeURIComponent(itemId)}`);
+});
+
 ipcMain.handle("restart-sidecar", async () => {
   appendLog("Manual sidecar restart requested");
   if (sidecarProcess && !sidecarProcess.killed) {

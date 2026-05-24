@@ -32,6 +32,10 @@ const fallbackApi = {
   async getDiagnostics() {
     return { ok: true, active_tool: { active: false } };
   },
+  async externalOpenXanylabeling() { return {}; },
+  async externalQueueImage() { return { queue_size: 0 }; },
+  async externalGetQueue() { return { items: [], count: 0 }; },
+  async externalDequeue() { return {}; },
 };
 
 const nativeApi = window.cimHost ?? fallbackApi;
@@ -338,6 +342,72 @@ function ExternalToolPanel({ activeTool, isStarting, runtimeStatus }) {
   );
 }
 
+// ── External Web App (iframe bridge) ─────────────────────────────────────────
+
+function WebAppView({ webAppUrl, queueCount }) {
+  const iframeRef = useRef(null);
+  return (
+    <div className="web-app-view">
+      {queueCount > 0 && (
+        <div className="web-app-queue-bar">
+          <span>📥 {queueCount} 張圖片已加入標注佇列</span>
+        </div>
+      )}
+      <iframe
+        ref={iframeRef}
+        title="External Web App"
+        src={webAppUrl}
+        className="web-app-iframe"
+        allow="camera; microphone"
+      />
+    </div>
+  );
+}
+
+function WebAppToolbar({ webAppUrl, setWebAppUrl, showWebApp, onToggle, queueCount, onClearQueue }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(webAppUrl);
+
+  function handleSave() {
+    setWebAppUrl(draft.trim());
+    setEditing(false);
+  }
+
+  return (
+    <div className="web-app-toolbar">
+      {editing ? (
+        <>
+          <input
+            className="web-app-url-input"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }}
+            placeholder="https://your-k8s-app.example.com"
+            autoFocus
+          />
+          <button onClick={handleSave}>確認</button>
+          <button onClick={() => setEditing(false)}>取消</button>
+        </>
+      ) : (
+        <>
+          <button
+            className={`btn-web-app${showWebApp ? " active" : ""}`}
+            onClick={onToggle}
+            title={webAppUrl || "請先設定 Web App URL"}
+          >
+            🌐 Web App
+            {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
+          </button>
+          <button className="btn-ghost" onClick={() => { setDraft(webAppUrl); setEditing(true); }} title="設定 Web App URL">✏️</button>
+          {queueCount > 0 && (
+            <button className="btn-ghost" onClick={onClearQueue} title="清空佇列">🗑️</button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [config, setConfig] = useState(null);
   const [tools, setTools] = useState([]);
@@ -367,6 +437,12 @@ function App() {
   useEffect(() => { sheetTabsRef.current = sheetTabs; }, [sheetTabs]);
   // Suppress poller-driven nav after EXECUTE_START / SWITCH_TAB to avoid race condition
   const suppressPollerNavUntilRef = useRef(0);
+
+  // External Web App state
+  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem("cim_web_app_url") ?? "");
+  const [showWebApp, setShowWebApp] = useState(false);
+  const [extQueue, setExtQueue] = useState([]);
+  useEffect(() => { if (webAppUrl) localStorage.setItem("cim_web_app_url", webAppUrl); }, [webAppUrl]);
 
   useEffect(() => {
     nativeApi.getAppConfig().then(setConfig).catch((err) => {
@@ -511,6 +587,32 @@ function App() {
     }, 2000);
     return () => clearInterval(id);
   }, [activeTool]);
+
+  // ── External Web App bridge ───────────────────────────────────────────────
+  useEffect(() => {
+    function onExtMessage(event) {
+      const data = event.data;
+      if (!data || data.cim !== "v1") return;
+      const { action, imageUrl, metadata } = data;
+      if (!imageUrl) return;
+      cimLog("info", `[ext-bridge] action=${action} url=${imageUrl}`);
+
+      if (action === "open_xanylabeling") {
+        nativeApi.externalOpenXanylabeling(imageUrl, metadata ?? {})
+          .then(() => setStatus("xanylabeling 已開啟"))
+          .catch(err => setStatus(`xanylabeling 啟動失敗: ${err.message}`));
+      } else if (action === "queue_image") {
+        nativeApi.externalQueueImage(imageUrl, metadata ?? {})
+          .then(res => {
+            setExtQueue(prev => [...prev, { id: res.id, local_path: res.local_path, original_url: imageUrl }]);
+            setStatus(`圖片已加入標注佇列（共 ${res.queue_size} 張）`);
+          })
+          .catch(err => setStatus(`圖片佇列失敗: ${err.message}`));
+      }
+    }
+    window.addEventListener("message", onExtMessage);
+    return () => window.removeEventListener("message", onExtMessage);
+  }, []);
 
   useEffect(() => {
     function onMessage(event) {
@@ -691,6 +793,13 @@ function App() {
     setStatus("Tool stopped");
   }
 
+  async function handleClearQueue() {
+    for (const item of extQueue) {
+      try { await nativeApi.externalDequeue(item.id); } catch { /* best-effort */ }
+    }
+    setExtQueue([]);
+  }
+
   const outputUrl = outputBaseUrl
     ? `${outputBaseUrl}${outputNonce > 0 ? `?_r=${outputNonce}` : ""}`
     : "";
@@ -715,8 +824,18 @@ function App() {
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
       />
+      <WebAppToolbar
+        webAppUrl={webAppUrl}
+        setWebAppUrl={setWebAppUrl}
+        showWebApp={showWebApp}
+        onToggle={() => setShowWebApp(v => !v)}
+        queueCount={extQueue.length}
+        onClearQueue={handleClearQueue}
+      />
       <div className="workspace-body">
-        {activeTool?.category === "external" ? (
+        {showWebApp && webAppUrl ? (
+          <WebAppView webAppUrl={webAppUrl} queueCount={extQueue.length} />
+        ) : activeTool?.category === "external" ? (
           <ExternalToolPanel activeTool={activeTool} isStarting={isStarting} runtimeStatus={runtimeStatus} />
         ) : sheetTabs.length > 0 ? (
           <SheetLayout
