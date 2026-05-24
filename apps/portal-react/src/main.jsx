@@ -167,7 +167,7 @@ window.parent.postMessage({
 function TopBar({
   tools, selectedToolId, onToolChange, activeTool, onStart, onStop,
   status, sidecarDown, devMode,
-  webAppUrl, setWebAppUrl, showWebApp, onToggleWebApp, queueCount, onClearQueue,
+  webAppUrl, setWebAppUrl, queueCount, onClearQueue,
 }) {
   const [editingUrl, setEditingUrl] = useState(false);
   const [urlDraft, setUrlDraft] = useState(webAppUrl);
@@ -243,19 +243,11 @@ function TopBar({
             </>
           ) : (
             <>
-              <button
-                className={`btn-web-app${showWebApp ? " active" : ""}`}
-                onClick={onToggleWebApp}
-                title={webAppUrl || "請先設定 URL（點 ✏️）"}
-              >
-                🔭 Vision DIY 1.0
-                {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
-              </button>
-              <button className="btn-ghost" onClick={() => { setUrlDraft(webAppUrl); setEditingUrl(true); }} title="設定 URL">✏️</button>
+              <button className="btn-ghost" onClick={() => { setUrlDraft(webAppUrl); setEditingUrl(true); }} title={`Vision DIY URL${webAppUrl ? `: ${webAppUrl}` : " — 點擊設定"}`}>🔭✏️</button>
               {queueCount > 0 && (
-                <button className="btn-ghost" onClick={onClearQueue} title="清空標注佇列">🗑️</button>
+                <button className="btn-ghost" onClick={onClearQueue} title="清空標注佇列">🗑️ {queueCount}</button>
               )}
-              <button className="btn-ghost vd-help-btn" onClick={() => setShowHelp(true)} title="整合指南">?</button>
+              <button className="btn-ghost vd-help-btn" onClick={() => setShowHelp(true)} title="Vision DIY 整合指南">?</button>
             </>
           )}
         </div>
@@ -311,6 +303,8 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
 
+const VISION_DIY_IDX = -1;  // sentinel: Vision DIY tab is active
+
 function SheetLayout({
   sheetTabs,
   activeSheetTabIdx,
@@ -322,13 +316,16 @@ function SheetLayout({
   sheetOutputNonces = {},
   tabStartingSet = new Set(),
   visitedTabIndices = new Set([0]),
+  webAppUrl = "",
+  queueCount = 0,
 }) {
-  const selectedSheetTab = sheetTabs[activeSheetTabIdx];
+  const visionDiyActive = activeSheetTabIdx === VISION_DIY_IDX;
+  const selectedSheetTab = visionDiyActive ? null : sheetTabs[activeSheetTabIdx];
   const activeTabStarting = selectedSheetTab ? tabStartingSet.has(selectedSheetTab.plugin_id) : false;
 
   return (
     <div className="left-panel">
-      {/* Sheet module tabs */}
+      {/* Sheet module tabs + Vision DIY tab */}
       <div className="sheet-module-bar">
         {sheetTabs.map((tab, i) => {
           const isActive = i === activeSheetTabIdx;
@@ -346,42 +343,65 @@ function SheetLayout({
             </button>
           );
         })}
-      </div>
-
-      {/* Input / Output sub-tabs */}
-      <div className="tab-bar">
-        <button className={`tab${activeTab === "input" ? " active" : ""}`} onClick={() => onTabChange("input")}>
-          Input
-        </button>
-        <button className={`tab${activeTab === "output" ? " active" : ""}`} onClick={() => onTabChange("output")}>
-          Output
+        <button
+          className={`sheet-module-tab vd-sheet-tab${visionDiyActive ? " active" : ""}`}
+          onClick={() => onSheetTabChange(VISION_DIY_IDX)}
+          title="Vision DIY 1.0 — 外部 Web App"
+        >
+          🔭 Vision DIY 1.0
+          {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
         </button>
       </div>
 
-      {/* Iframes: mount only visited, ready tabs so startup stays responsive. */}
-      <div className="tab-content">
-        {sheetTabs.map((tab, i) => {
-          const isActive = i === activeSheetTabIdx;
-          const hasBeenVisited = visitedTabIndices.has(i);
-          const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
-          const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
-          if (!hasBeenVisited || !tab.ready) return null;
-          return (
-            <React.Fragment key={tab.plugin_id}>
-              <iframe
-                title={`${tab.plugin_id}-input`}
-                src={tab.input_url}
-                style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
-              />
-              <iframe
-                title={`${tab.plugin_id}-output`}
-                src={outputSrc}
-                style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
-              />
-            </React.Fragment>
-          );
-        })}
-      </div>
+      {visionDiyActive ? (
+        /* Vision DIY: 外部 iframe，不顯示 Input/Output sub-tabs */
+        <div className="tab-content">
+          {webAppUrl
+            ? <iframe title="Vision DIY" src={webAppUrl} className="web-app-iframe" allow="camera; microphone" />
+            : <div className="tab-empty">請在 TopBar 點擊 ✏️ 設定 Vision DIY URL</div>
+          }
+          {queueCount > 0 && (
+            <div className="vd-queue-overlay">📥 {queueCount} 張圖片已加入標注佇列</div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Input / Output sub-tabs */}
+          <div className="tab-bar">
+            <button className={`tab${activeTab === "input" ? " active" : ""}`} onClick={() => onTabChange("input")}>
+              Input
+            </button>
+            <button className={`tab${activeTab === "output" ? " active" : ""}`} onClick={() => onTabChange("output")}>
+              Output
+            </button>
+          </div>
+
+          {/* Iframes: mount only visited, ready tabs so startup stays responsive. */}
+          <div className="tab-content">
+            {sheetTabs.map((tab, i) => {
+              const isActive = i === activeSheetTabIdx;
+              const hasBeenVisited = visitedTabIndices.has(i);
+              const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
+              const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
+              if (!hasBeenVisited || !tab.ready) return null;
+              return (
+                <React.Fragment key={tab.plugin_id}>
+                  <iframe
+                    title={`${tab.plugin_id}-input`}
+                    src={tab.input_url}
+                    style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
+                  />
+                  <iframe
+                    title={`${tab.plugin_id}-output`}
+                    src={outputSrc}
+                    style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
+                  />
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {isStarting && (
         <div className="loading-overlay">
@@ -456,25 +476,6 @@ function ExternalToolPanel({ activeTool, isStarting, runtimeStatus }) {
 
 // ── External Web App (iframe bridge) ─────────────────────────────────────────
 
-function WebAppView({ webAppUrl, queueCount }) {
-  const iframeRef = useRef(null);
-  return (
-    <div className="web-app-view">
-      {queueCount > 0 && (
-        <div className="web-app-queue-bar">
-          <span>📥 {queueCount} 張圖片已加入標注佇列</span>
-        </div>
-      )}
-      <iframe
-        ref={iframeRef}
-        title="External Web App"
-        src={webAppUrl}
-        className="web-app-iframe"
-        allow="camera; microphone"
-      />
-    </div>
-  );
-}
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -508,7 +509,7 @@ function App() {
 
   // External Web App state
   const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem("cim_web_app_url") ?? "");
-  const [showWebApp, setShowWebApp] = useState(false);
+
   const [extQueue, setExtQueue] = useState([]);
   useEffect(() => { if (webAppUrl) localStorage.setItem("cim_web_app_url", webAppUrl); }, [webAppUrl]);
 
@@ -768,6 +769,10 @@ function App() {
   }
 
   async function handleSheetTabChange(i) {
+    if (i === VISION_DIY_IDX) {
+      setActiveSheetTabIdx(VISION_DIY_IDX);
+      return;
+    }
     const tab = sheetTabsRef.current[i];
     if (!tab) return;
     setActiveSheetTabIdx(i);
@@ -893,15 +898,11 @@ function App() {
         devMode={config?.devMode ?? true}
         webAppUrl={webAppUrl}
         setWebAppUrl={setWebAppUrl}
-        showWebApp={showWebApp}
-        onToggleWebApp={() => setShowWebApp(v => !v)}
         queueCount={extQueue.length}
         onClearQueue={handleClearQueue}
       />
       <div className="workspace-body">
-        {showWebApp && webAppUrl ? (
-          <WebAppView webAppUrl={webAppUrl} queueCount={extQueue.length} />
-        ) : activeTool?.category === "external" ? (
+        {activeTool?.category === "external" ? (
           <ExternalToolPanel activeTool={activeTool} isStarting={isStarting} runtimeStatus={runtimeStatus} />
         ) : sheetTabs.length > 0 ? (
           <SheetLayout
@@ -915,6 +916,8 @@ function App() {
             sheetOutputNonces={sheetOutputNonces}
             tabStartingSet={tabStartingSet}
             visitedTabIndices={visitedTabIndices}
+            webAppUrl={webAppUrl}
+            queueCount={extQueue.length}
           />
         ) : (
           <LeftPanel
