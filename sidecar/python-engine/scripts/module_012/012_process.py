@@ -9,6 +9,7 @@ import importlib.util as _ilu
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 # ─── Logger 設定 ──────────────────────────────────────────────────────────────
@@ -114,6 +115,12 @@ def get_isat_exe() -> str:
     env_exe = os.environ.get("ISAT_EXE", "")
     if env_exe and Path(env_exe).exists():
         return env_exe
+    # Streamlit 子程序的 PATH 不一定含 Scripts；直接查 python 同層的 Scripts 目錄
+    scripts_dir = Path(sys.executable).parent / "Scripts"
+    for name in ("isat-sam.exe", "isat-sam"):
+        candidate = scripts_dir / name
+        if candidate.exists():
+            return str(candidate)
     return "isat-sam"
 
 

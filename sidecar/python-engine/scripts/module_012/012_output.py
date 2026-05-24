@@ -1044,7 +1044,7 @@ def render_output(result: dict) -> None:
         st.error(f"啟動失敗：{_launch_err}")
 
     # pre-flight：ISAT 選為標注工具但 isat-sam 找不到時提早警告
-    if annotation_tool == "isat" and not shutil.which(isat_exe):
+    if annotation_tool == "isat" and not Path(isat_exe).exists() and not shutil.which(isat_exe):
         st.warning(
             f"⚠️ 找不到 ISAT 執行檔（`{isat_exe}`）。"
             " 請先安裝：`pip install isat-sam`，"
