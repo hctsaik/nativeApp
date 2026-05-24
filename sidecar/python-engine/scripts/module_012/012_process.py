@@ -22,7 +22,7 @@ _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s
 _log = logging.getLogger("module_012")
 if not _log.handlers:
     _log.addHandler(_handler)
-_log.setLevel(logging.DEBUG)
+_log.setLevel(logging.INFO)
 
 # ─── 動態載入 _config + _manifest_db ─────────────────────────────────────────
 
@@ -180,9 +180,6 @@ def execute_logic(params: dict) -> dict:
     # ── 3. 讀取所有圖片項目 ────────────────────────────────────────────────────
     all_db_items = _mdb.get_manifest_items(db_path, manifest_id)
     _log.info("[012] manifest 圖片數: %d", len(all_db_items))
-    if all_db_items:
-        _log.debug("[012] 前 3 筆 file_path: %s",
-                   [it.get("file_path", "") for it in all_db_items[:3]])
 
     same_dir_ann_count = sum(
         1
@@ -203,8 +200,6 @@ def execute_logic(params: dict) -> dict:
         sc = _count_shapes(ann_path) if has_ann else 0
         if has_ann:
             annotated += 1
-            _log.debug("[012] ✅ %s → shapes=%d ann=%s",
-                       Path(fp).name, sc, ann_path)
         items.append({
             "item_id":     it.get("item_id", ""),
             "file_path":   fp,

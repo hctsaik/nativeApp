@@ -20,7 +20,6 @@ import logging
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 logging.basicConfig(
@@ -490,10 +489,7 @@ def _right_panel_img(fp: str, enhance: bool, item_id: str = "") -> None:
 
 def _draw_annotations(img_path: str, label_data: dict, enhance: bool = False) -> bytes:
     from PIL import Image, ImageDraw, ImageEnhance, ImageOps
-    _t0 = time.perf_counter()
     img = ImageOps.exif_transpose(Image.open(img_path)).convert("RGB")
-    orig_w, orig_h = img.size
-    _t_open = time.perf_counter()
     if enhance:
         img = ImageEnhance.Contrast(img).enhance(2.2)
         img = ImageEnhance.Color(img).enhance(1.8)
@@ -521,20 +517,9 @@ def _draw_annotations(img_path: str, label_data: dict, enhance: bool = False) ->
             draw.polygon(flat, outline=c)
             draw.text((flat[0][0] + 2, flat[0][1] - fs - 2), label, fill=c, font=font)
 
-    _t_draw = time.perf_counter()
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    _t_enc = time.perf_counter()
-    result = buf.getvalue()
-    _log.info(
-        "[draw_annotations] %s  orig=%dx%d  open=%.0fms draw=%.0fms png_encode=%.0fms  output=%.1fKB",
-        Path(img_path).name, orig_w, orig_h,
-        (_t_open - _t0) * 1000,
-        (_t_draw - _t_open) * 1000,
-        (_t_enc - _t_draw) * 1000,
-        len(result) / 1024,
-    )
-    return result
+    return buf.getvalue()
 
 
 @st.cache_data(show_spinner=False, max_entries=200)
@@ -544,28 +529,14 @@ def _cached_ann_image(img_path: str, ann_path: str, ann_mtime: float, enhance: b
     """
     try:
         from PIL import Image
-        _t0 = time.perf_counter()
         label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-        _t_json = time.perf_counter()
         png_bytes = _draw_annotations(img_path, label_data, enhance=enhance)
-        _t_draw = time.perf_counter()
         # 縮圖 + 轉 JPEG，大幅減少 WebSocket payload（PNG 全圖可達 5MB，JPEG 約 200-400KB）
         img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
         img.thumbnail((1920, 1440), Image.LANCZOS)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=90)
-        result = buf.getvalue()
-        _t_done = time.perf_counter()
-        _log.info(
-            "[cached_ann_image] %s  json=%.0fms draw=%.0fms jpeg_resize=%.0fms  total=%.0fms  output=%.1fKB",
-            Path(img_path).name,
-            (_t_json - _t0) * 1000,
-            (_t_draw - _t_json) * 1000,
-            (_t_done - _t_draw) * 1000,
-            (_t_done - _t0) * 1000,
-            len(result) / 1024,
-        )
-        return result
+        return buf.getvalue()
     except Exception:
         return None
 
@@ -681,25 +652,11 @@ def _make_full_jpeg(file_path: str) -> bytes | None:
     """高解析度原圖（lightbox 用），上限 1920×1440，JPEG。"""
     try:
         from PIL import Image, ImageOps
-        _t0 = time.perf_counter()
         img = ImageOps.exif_transpose(Image.open(file_path)).convert("RGB")
-        orig_w, orig_h = img.size
-        _t_open = time.perf_counter()
         img.thumbnail((1920, 1440), Image.LANCZOS)
-        _t_thumb = time.perf_counter()
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=92)
-        _t_enc = time.perf_counter()
-        result = buf.getvalue()
-        _log.info(
-            "[make_full_jpeg] %s  orig=%dx%d  open=%.0fms thumb=%.0fms jpeg_encode=%.0fms  output=%.1fKB",
-            Path(file_path).name, orig_w, orig_h,
-            (_t_open - _t0) * 1000,
-            (_t_thumb - _t_open) * 1000,
-            (_t_enc - _t_thumb) * 1000,
-            len(result) / 1024,
-        )
-        return result
+        return buf.getvalue()
     except Exception:
         return None
 
@@ -976,7 +933,7 @@ def render_output(result: dict) -> None:
                 "labels": _fallback_cfg.get("annotation_labels", []),
                 "classification_labels": _fallback_cfg.get("classification_labels", []),
                 "autorefresh_enabled": _fallback_cfg.get("autorefresh_enabled", True),
-                "autorefresh_seconds": _fallback_cfg.get("autorefresh_seconds", 30),
+                "autorefresh_seconds": _fallback_cfg.get("autorefresh_seconds", 10),
             })
             mode = result.get("mode", "idle")
         if mode != "ready":
@@ -994,7 +951,7 @@ def render_output(result: dict) -> None:
     xany_work_dir          = result.get("xany_work_dir", "")
     cfg                    = _cfg.load_config()
     autorefresh_enabled    = bool(result.get("autorefresh_enabled", cfg.get("autorefresh_enabled", True)))
-    autorefresh_seconds    = int(result.get("autorefresh_seconds", cfg.get("autorefresh_seconds", 30)) or 30)
+    autorefresh_seconds    = int(result.get("autorefresh_seconds", cfg.get("autorefresh_seconds", 10)) or 10)
     autorefresh_seconds    = max(5, min(300, autorefresh_seconds))
 
     if autorefresh_enabled:
@@ -1556,17 +1513,11 @@ setTimeout(function() {
             st.divider()
 
             # 圖片顯示
-            _rp_t0 = time.perf_counter()
-            _rp_timing: dict[str, float] = {}
-            _rp_sizes: dict[str, int] = {}
-
             if not fp or not Path(fp).exists():
                 st.warning(f"找不到影像：{fp}")
             elif has_ann and ann_path:
                 try:
-                    _t = time.perf_counter()
                     label_data = json.loads(Path(ann_path).read_text(encoding="utf-8"))
-                    _rp_timing["json_read"] = (time.perf_counter() - _t) * 1000
                     shapes = label_data.get("shapes", [])
                 except Exception:
                     label_data = {}
@@ -1576,28 +1527,18 @@ setTimeout(function() {
                     orig_c, ann_c = st.columns(2)
                     with orig_c:
                         st.caption("**原圖**（點擊放大）")
-                        _t = time.perf_counter()
                         orig_full = _make_full_jpeg(fp)
-                        _rp_timing["make_full_jpeg"] = (time.perf_counter() - _t) * 1000
                         if orig_full:
-                            _rp_sizes["orig_jpeg"] = len(orig_full)
-                            _t = time.perf_counter()
                             st.markdown(_zoomable_img_html(orig_full, "jpeg"), unsafe_allow_html=True)
-                            _rp_timing["render_orig_html"] = (time.perf_counter() - _t) * 1000
                         else:
                             st.image(fp, use_container_width=True)
                     with ann_c:
                         st.caption("**標注結果**（點擊放大）")
                         try:
                             _ann_mtime = Path(ann_path).stat().st_mtime if ann_path else 0.0
-                            _t = time.perf_counter()
                             ann_bytes = _cached_ann_image(fp, ann_path, _ann_mtime, enhance)
-                            _rp_timing["cached_ann_image"] = (time.perf_counter() - _t) * 1000
                             if ann_bytes:
-                                _rp_sizes["ann_png"] = len(ann_bytes)
-                                _t = time.perf_counter()
                                 st.markdown(_zoomable_img_html(ann_bytes, "jpeg"), unsafe_allow_html=True)
-                                _rp_timing["render_ann_html"] = (time.perf_counter() - _t) * 1000
                             else:
                                 st.image(fp, use_container_width=True)
                         except Exception as e:
@@ -1616,62 +1557,12 @@ setTimeout(function() {
                         st.dataframe(rows, use_container_width=True, hide_index=True)
                 else:
                     # ann_path 存在但 shapes 為空（可能是 AI 推論後未偵測到物件）
-                    _t = time.perf_counter()
                     _right_panel_img(fp, enhance, item_id=item_id)
-                    _rp_timing["right_panel_img"] = (time.perf_counter() - _t) * 1000
                     st.info("此圖尚無標注框。若剛執行過 AI Pre-label，表示模型在此圖未偵測到物件（可嘗試降低 Confidence 門檻）。如需手動標注，請使用「🖊 標注工具」。")
             else:
                 # 無標注
-                _t = time.perf_counter()
                 _right_panel_img(fp, enhance, item_id=item_id)
-                _rp_timing["right_panel_img"] = (time.perf_counter() - _t) * 1000
                 st.info("此圖尚無標注，點擊左側「🖊 標注工具」開始標注。")
-
-            _rp_total = (time.perf_counter() - _rp_t0) * 1000
-            _rp_timing["total"] = _rp_total
-
-            # ── 效能診斷面板 ─────────────────────────────────────────────
-            _orig_kb = _rp_sizes.get("orig_jpeg", 0) / 1024
-            _ann_kb  = _rp_sizes.get("ann_png", 0) / 1024
-            _b64_kb  = (_rp_sizes.get("orig_jpeg", 0) + _rp_sizes.get("ann_png", 0)) * 4 / 3 / 1024
-            _log.info(
-                "[right_panel] %s  timing=%s  orig=%.1fKB ann=%.1fKB b64_payload=%.1fKB",
-                Path(fp).name if fp else "?",
-                {k: f"{v:.0f}ms" for k, v in _rp_timing.items()},
-                _orig_kb, _ann_kb, _b64_kb,
-            )
-            with st.expander(f"📊 效能診斷（總計 {_rp_total:.0f} ms）", expanded=(_rp_total > 500)):
-                _diag_rows = []
-                label_map = {
-                    "json_read":        "① 讀取標注 JSON",
-                    "make_full_jpeg":   "② 生成原圖 JPEG",
-                    "cached_ann_image": "③ 生成標注大圖（含畫框）",
-                    "render_orig_html": "④ 嵌入原圖 HTML",
-                    "render_ann_html":  "⑤ 嵌入標注 HTML",
-                    "right_panel_img":  "② 載入圖片",
-                }
-                for k, label in label_map.items():
-                    if k in _rp_timing:
-                        _diag_rows.append({"步驟": label, "耗時 (ms)": f"{_rp_timing[k]:.0f}"})
-                _diag_rows.append({"步驟": "合計", "耗時 (ms)": f"{_rp_total:.0f}"})
-                st.dataframe(_diag_rows, use_container_width=True, hide_index=True)
-                if _rp_sizes:
-                    note_parts = []
-                    if "orig_jpeg" in _rp_sizes:
-                        note_parts.append(f"原圖 JPEG {_orig_kb:.0f} KB")
-                    if "ann_png" in _rp_sizes:
-                        note_parts.append(f"標注 JPEG {_ann_kb:.0f} KB")
-                    if _b64_kb > 0:
-                        note_parts.append(f"base64 WebSocket payload ≈ {_b64_kb:.0f} KB")
-                    st.caption("　".join(note_parts))
-                    if _b64_kb > 800:
-                        st.warning(
-                            f"⚠️ WebSocket payload {_b64_kb:.0f} KB — 主要耗時在瀏覽器收資料 + decode base64，"
-                            "Python 端即使 cache hit 也會感覺慢。"
-                        )
-                    if _rp_timing.get("make_full_jpeg", 0) < 5 and _rp_timing.get("cached_ann_image", 0) < 5:
-                        st.success("✅ 快取命中（cache hit）— Python 計算極快，"
-                                   "若 UI 仍有延遲，瓶頸在 WebSocket 傳輸 + 瀏覽器 decode。")
 
             # ── 幽靈按鈕（最底部，JS 隱藏，鍵盤快捷鍵用） ───────────────────
             if st.button("← 上一張", key="m012_prev_btn"):
