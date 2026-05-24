@@ -17,6 +17,12 @@ pip install -r sidecar/python-engine/requirements.txt
 start-dev.bat
 ```
 
+## 協作規則
+
+- **語言**：一律使用繁體中文對話與撰寫說明（commit message 除外）
+- **完成功能後**：同步更新對應文件（`docs/`、README），並新增或更新單元測試；
+  確認 `npm run test:python` 與 `npm test` 全過後再 commit
+
 ## 架構關鍵點
 
 ### 啟動鏈
@@ -41,6 +47,13 @@ start-dev.bat
 | `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
 | `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
+
+## 架構地雷（容易踩的坑）
+
+- **新增 postMessage 類型**：`packages/shared-protocol/src/index.js` 的 `MessageTypes` 和
+  `index.test.js` 必須同步更新，否則 `isProtocolMessage` 會過濾掉新訊息
+- **Portal 導航觸發**：任何會切換 tab 或 route 的邏輯，都要確認不會被
+  `suppressPollerNavUntilRef`（2s poller 防覆蓋機制）或 `EXECUTE_START` suppress 蓋掉
 
 ## 工具開發規則
 
