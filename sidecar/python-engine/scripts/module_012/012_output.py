@@ -443,14 +443,29 @@ def _launch_labelme(file_path: str, classes_path: str, labelme_exe: str) -> str 
 
 def _launch_isat(file_path: str, isat_exe: str) -> str | None:
     """Launch ISAT. Current ISAT-SAM console script opens the GUI without file args."""
+    import time
     cmd = [isat_exe]
     exe_path = Path(isat_exe)
     if isat_exe != "isat-sam" and exe_path.suffix.lower() == ".py":
         cmd = [sys.executable, str(exe_path)]
+    _log.info("[012] _launch_isat cmd=%s cwd=%s", cmd, str(Path(file_path).parent))
     try:
-        subprocess.Popen(cmd, cwd=str(Path(file_path).parent))
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(Path(file_path).parent),
+            stderr=subprocess.PIPE,
+        )
+        time.sleep(1.5)
+        ret = proc.poll()
+        if ret is not None:
+            stderr_out = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
+            _log.error("[012] _launch_isat exited immediately ret=%s stderr=%s", ret, stderr_out)
+            short = stderr_out[-300:] if len(stderr_out) > 300 else stderr_out
+            return f"ISAT 啟動後立即結束（exit={ret}）。\n{short}"
+        _log.info("[012] _launch_isat launched pid=%s", proc.pid)
         return None
     except Exception as e:
+        _log.error("[012] _launch_isat failed: %s", e)
         return str(e)
 
 
@@ -466,6 +481,8 @@ def _launch_annotation_tool(
     ann_path: str = "",
 ) -> tuple[str, str | None]:
     """Launch selected annotation tool. Returns (display_name, error)."""
+    _log.info("[012] _launch_annotation_tool tool=%s isat_exe=%s file=%s",
+              annotation_tool, isat_exe, file_path)
     if annotation_tool == "labelme":
         return "LabelMe", _launch_labelme(file_path, classes_path, labelme_exe)
     if annotation_tool == "isat":
@@ -965,6 +982,8 @@ def render_output(result: dict) -> None:
     xany_exe               = result.get("xany_exe", "xanylabeling")
     labelme_exe            = result.get("labelme_exe", "labelme")
     isat_exe               = result.get("isat_exe", "isat-sam")
+    _log.info("[012] output render: annotation_tool=%s isat_exe=%s manifest=%s",
+              annotation_tool, isat_exe, manifest_id)
     classes_path           = result.get("classes_path", "")
     xany_work_dir          = result.get("xany_work_dir", "")
     cfg                    = _cfg.load_config()

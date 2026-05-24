@@ -75,6 +75,32 @@ start-dev.bat
 
 完整說明與程式碼範例見 `docs/patterns/streamlit_output_perf.md`
 
+## GUI 除錯流程（MCP + Log）
+
+當 GUI 出現錯誤、或新增/修改功能後需要驗證行為時，標準流程：
+
+### 1. 用 MCP 截圖確認畫面狀態
+```
+mcp__cim-gui__browser_screenshot   → 確認目前 UI 呈現
+mcp__cim-gui__assert_text          → 確認特定文字出現
+mcp__cim-gui__assert_visible       → 確認元件可見
+mcp__cim-gui__browser_click        → 觸發按鈕（注意：原生 <select> 無法用 MCP 操作）
+```
+
+### 2. 讀 Log 確認後端實際執行路徑
+| 層級 | Log 檔位置 |
+|------|-----------|
+| Streamlit module input | `apps/host-electron/logs/streamlit-module_XXX-input.log` |
+| Streamlit module output | `apps/host-electron/logs/streamlit-module_XXX-output.log` |
+| Python process/business logic | `tmp/cim_log/module_XXX_process.log` |
+| FastAPI engine | `apps/host-electron/logs/engine.log` |
+
+### 3. 除錯準則
+- **MCP 無法操作原生 `<select>`**（Glide Data Grid canvas 格亦無法點擊）；需改用鍵盤或驗證邏輯
+- **`st.error()` 在 `st.rerun()` 前呼叫會被清除**：錯誤訊息必須存入 `session_state`，下次 render 再顯示
+- **Streamlit subprocess 不繼承 PATH 的 Scripts/**：用 `Path(sys.executable).parent / "Scripts"` 直接查，不依賴 `shutil.which`
+- 新功能完成後，**必須用 MCP screenshot 跑過 golden path**，確認畫面符合預期再 commit
+
 ## 測試
 
 ```powershell

@@ -11,4 +11,5 @@ for /f "tokens=5" %%a in ('netstat -aon ^| find "127.0.0.1:8765 "') do taskkill 
 timeout /t 2 /nobreak >nul
 
 echo [DEV] Launching Electron...
+set PYTHON=C:\Users\hctsa\AppData\Local\Python\pythoncore-3.11-64\python.exe
 start "CIM Electron DEV" cmd /k "cd /d %~dp0apps\host-electron && set CIM_DEV_MODE=1&&npm run dev"
