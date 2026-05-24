@@ -1,4 +1,5 @@
 id: module_011
+slug: result-sink
 vendor: cimcore
 domain: pipeline
 name: Result Sink

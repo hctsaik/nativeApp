@@ -101,70 +101,13 @@ function ToolError({ message }) {
   );
 }
 
-// ── Vision DIY help modal ─────────────────────────────────────────────────────
 
-function VisionDiyHelpModal({ onClose }) {
-  return (
-    <div className="vd-overlay" onClick={onClose}>
-      <div className="vd-modal" onClick={e => e.stopPropagation()}>
-        <button className="vd-close" onClick={onClose} title="關閉">✕</button>
-        <h2 className="vd-title">🔭 Vision DIY 1.0 — 整合指南</h2>
-        <p className="vd-lead">將外部 React / Web 應用透過 iframe 嵌入 CIM Platform，並讓它能直接觸發本地標注工具。</p>
-
-        <h3>1. 設定 URL</h3>
-        <p>點擊 TopBar 的 <strong>✏️</strong> 圖示，輸入你的 HTTPS 應用網址後按確認。網址會存在 localStorage，重開後自動載入。</p>
-
-        <h3>2. 在你的 React App 裡傳送指令</h3>
-        <p>使用 <code>window.parent.postMessage</code>，格式如下：</p>
-
-        <pre className="vd-code">{`// ① 直接開啟 X-AnyLabeling 標記指定圖片
-window.parent.postMessage({
-  cim: "v1",
-  action: "open_xanylabeling",
-  imageUrl: "https://your-server.com/images/sample.jpg"
-}, "*");
-
-// ② 將圖片加入標注佇列（批次處理）
-window.parent.postMessage({
-  cim: "v1",
-  action: "queue_image",
-  imageUrl: "https://your-server.com/images/sample.jpg",
-  metadata: { label: "defect", source: "inspection" }  // 選填
-}, "*");`}</pre>
-
-        <h3>3. 執行流程</h3>
-        <table className="vd-table">
-          <thead><tr><th>Action</th><th>Platform 做了什麼</th></tr></thead>
-          <tbody>
-            <tr>
-              <td><code>open_xanylabeling</code></td>
-              <td>Engine 從 URL 下載圖片 → 存至本機 <code>external-queue/</code> → 直接啟動 X-AnyLabeling 並載入該圖，標注結果（.json）存在同目錄</td>
-            </tr>
-            <tr>
-              <td><code>queue_image</code></td>
-              <td>Engine 下載圖片 → 加入記憶體佇列 → TopBar 顯示紅色計數徽章，點 🗑️ 清空</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3>4. 安全性注意</h3>
-        <ul>
-          <li>只支援 <strong>HTTPS</strong> 圖片 URL（Engine 用 urllib 下載，需可公開存取或帶 Token）</li>
-          <li>你的 k8s App 需允許被 iframe 嵌入（移除 <code>X-Frame-Options: DENY</code> 或設 <code>frame-ancestors 'self' *</code>）</li>
-          <li>postMessage target 設 <code>"*"</code> 即可，Platform 端不檢查來源</li>
-        </ul>
-
-        <h3>5. 本機存放路徑</h3>
-        <pre className="vd-code">{`{CIM_LOG_DIR}/external-queue/          ← 下載的圖片
-{CIM_LOG_DIR}/xanylabeling_state/external/  ← xanylabeling GUI 狀態`}</pre>
-
-        <p className="vd-footer">CIM Platform · Vision DIY 1.0 Bridge Protocol v1</p>
-      </div>
-    </div>
-  );
-}
+// Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用
+const PORTAL_VISIBLE_CATEGORIES = ["sheet", "management"];
 
 function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode }) {
+  const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
+
   return (
     <header className="toolbar">
       <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
@@ -178,7 +121,7 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
       </div>
       <div className="actions">
         <div className="toolSelectGroup">
-          <label className="toolSelectLabel">Portal 功能下拉選擇</label>
+          <label className="toolSelectLabel">工作流程</label>
           <select
             className="toolSelect"
             value={selectedToolId}
@@ -187,7 +130,7 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
           >
             {(() => {
               const groups = groupTools(tools);
-              return CATEGORY_ORDER
+              return visibleOrder
                 .filter(cat => groups[cat]?.length)
                 .map(cat => (
                   <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
@@ -207,7 +150,7 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
         ) : (
           <button onClick={onStart} disabled={!selectedToolId || sidecarDown}>
             <RefreshCw size={17} />
-            Start Tool
+            Start
           </button>
         )}
       </div>
@@ -262,8 +205,6 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
 
-const VISION_DIY_IDX = -1;  // sentinel: Vision DIY tab is active
-
 function SheetLayout({
   sheetTabs,
   activeSheetTabIdx,
@@ -275,16 +216,12 @@ function SheetLayout({
   sheetOutputNonces = {},
   tabStartingSet = new Set(),
   visitedTabIndices = new Set([0]),
-  webAppUrl = "",
-  queueCount = 0,
 }) {
-  const visionDiyActive = activeSheetTabIdx === VISION_DIY_IDX;
-  const selectedSheetTab = visionDiyActive ? null : sheetTabs[activeSheetTabIdx];
+  const selectedSheetTab = sheetTabs[activeSheetTabIdx];
   const activeTabStarting = selectedSheetTab ? tabStartingSet.has(selectedSheetTab.plugin_id) : false;
 
   return (
     <div className="left-panel">
-      {/* Sheet module tabs + Vision DIY tab */}
       <div className="sheet-module-bar">
         {sheetTabs.map((tab, i) => {
           const isActive = i === activeSheetTabIdx;
@@ -302,65 +239,42 @@ function SheetLayout({
             </button>
           );
         })}
-        <button
-          className={`sheet-module-tab vd-sheet-tab${visionDiyActive ? " active" : ""}`}
-          onClick={() => onSheetTabChange(VISION_DIY_IDX)}
-          title="Vision DIY 1.0 — 外部 Web App"
-        >
-          🔭 Vision DIY 1.0
-          {queueCount > 0 && <span className="queue-badge">{queueCount}</span>}
-        </button>
       </div>
 
-      {visionDiyActive ? (
-        /* Vision DIY: 外部 iframe，不顯示 Input/Output sub-tabs */
-        <div className="tab-content">
-          {webAppUrl
-            ? <iframe title="Vision DIY" src={webAppUrl} className="web-app-iframe" allow="camera; microphone" />
-            : <div className="tab-empty">請在 TopBar 點擊 ✏️ 設定 Vision DIY URL</div>
-          }
-          {queueCount > 0 && (
-            <div className="vd-queue-overlay">📥 {queueCount} 張圖片已加入標注佇列</div>
-          )}
+      <>
+        <div className="tab-bar">
+          <button className={`tab${activeTab === "input" ? " active" : ""}`} onClick={() => onTabChange("input")}>
+            Input
+          </button>
+          <button className={`tab${activeTab === "output" ? " active" : ""}`} onClick={() => onTabChange("output")}>
+            Output
+          </button>
         </div>
-      ) : (
-        <>
-          {/* Input / Output sub-tabs */}
-          <div className="tab-bar">
-            <button className={`tab${activeTab === "input" ? " active" : ""}`} onClick={() => onTabChange("input")}>
-              Input
-            </button>
-            <button className={`tab${activeTab === "output" ? " active" : ""}`} onClick={() => onTabChange("output")}>
-              Output
-            </button>
-          </div>
 
-          {/* Iframes: mount only visited, ready tabs so startup stays responsive. */}
-          <div className="tab-content">
-            {sheetTabs.map((tab, i) => {
-              const isActive = i === activeSheetTabIdx;
-              const hasBeenVisited = visitedTabIndices.has(i);
-              const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
-              const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
-              if (!hasBeenVisited || !tab.ready) return null;
-              return (
-                <React.Fragment key={tab.plugin_id}>
-                  <iframe
-                    title={`${tab.plugin_id}-input`}
-                    src={tab.input_url}
-                    style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
-                  />
-                  <iframe
-                    title={`${tab.plugin_id}-output`}
-                    src={outputSrc}
-                    style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
-                  />
-                </React.Fragment>
-              );
-            })}
-          </div>
-        </>
-      )}
+        <div className="tab-content">
+          {sheetTabs.map((tab, i) => {
+            const isActive = i === activeSheetTabIdx;
+            const hasBeenVisited = visitedTabIndices.has(i);
+            const nonce = sheetOutputNonces[tab.plugin_id] ?? 0;
+            const outputSrc = nonce > 0 ? `${tab.output_url}?_r=${nonce}` : tab.output_url;
+            if (!hasBeenVisited || !tab.ready) return null;
+            return (
+              <React.Fragment key={tab.plugin_id}>
+                <iframe
+                  title={`${tab.plugin_id}-input`}
+                  src={tab.input_url}
+                  style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
+                />
+                <iframe
+                  title={`${tab.plugin_id}-output`}
+                  src={outputSrc}
+                  style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
+                />
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </>
 
       {isStarting && (
         <div className="loading-overlay">
@@ -380,6 +294,21 @@ function SheetLayout({
           <span>執行中…</span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Preview Modal ─────────────────────────────────────────
+
+function PreviewModal({ url, toolName, onClose }) {
+  return (
+    <div className="preview-modal-overlay">
+      <div className="preview-modal-header">
+        <span className="preview-modal-title">{toolName}</span>
+        <span className="preview-modal-badge">Read-only Preview</span>
+        <button className="preview-modal-close" onClick={onClose} title="Close preview">✕</button>
+      </div>
+      <iframe className="preview-modal-iframe" src={url} title="Module Preview" />
     </div>
   );
 }
@@ -453,6 +382,7 @@ function App() {
   const [sidecarRestarting, setSidecarRestarting] = useState(false);
   const [toolError, setToolError] = useState(null);
   const [runtimeStatus, setRuntimeStatus] = useState(null);
+  const [previewModal, setPreviewModal] = useState(null); // { url, toolName }
 
   // Sheet-specific state
   const [sheetTabs, setSheetTabs] = useState([]);
@@ -466,11 +396,6 @@ function App() {
   // Suppress poller-driven nav after EXECUTE_START / SWITCH_TAB to avoid race condition
   const suppressPollerNavUntilRef = useRef(0);
 
-  // External Web App state
-  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem("cim_web_app_url") ?? "");
-
-  const [extQueue, setExtQueue] = useState([]);
-  useEffect(() => { if (webAppUrl) localStorage.setItem("cim_web_app_url", webAppUrl); }, [webAppUrl]);
 
   useEffect(() => {
     nativeApi.getAppConfig().then(setConfig).catch((err) => {
@@ -480,7 +405,9 @@ function App() {
     nativeApi.listTools().then((items) => {
       cimLog("info", `listTools: ${items.map(t => t.tool_id).join(", ")}`);
       setTools(items);
-      if (items[0]?.tool_id) setSelectedToolId(items[0].tool_id);
+      // 預設選第一個 Sheet；找不到才 fallback 到第一個工具
+      const first = items.find(t => t.category === "sheet") ?? items[0];
+      if (first?.tool_id) setSelectedToolId(first.tool_id);
     }).catch((err) => {
       cimLog("error", `listTools failed: ${err.message}`);
       setStatus(`Tool list error: ${err.message}`);
@@ -699,6 +626,10 @@ function App() {
           cimLog("info", `DISPLAY_UPDATE imageUrl=${payload.imageUrl}`);
           setDisplayImageUrl(payload.imageUrl);
           break;
+        case MessageTypes.OPEN_PREVIEW:
+          cimLog("info", `OPEN_PREVIEW url=${payload.url} toolName=${payload.toolName}`);
+          setPreviewModal({ url: payload.url, toolName: payload.toolName });
+          break;
       }
     }
     window.addEventListener("message", onMessage);
@@ -728,10 +659,6 @@ function App() {
   }
 
   async function handleSheetTabChange(i) {
-    if (i === VISION_DIY_IDX) {
-      setActiveSheetTabIdx(VISION_DIY_IDX);
-      return;
-    }
     const tab = sheetTabsRef.current[i];
     if (!tab) return;
     setActiveSheetTabIdx(i);
@@ -739,6 +666,13 @@ function App() {
     setVisitedTabIndices(prev => new Set(prev).add(i));
     if (!tab.ready) {
       await ensureTabStarted(tab.plugin_id);
+    }
+  }
+
+  async function handleClosePreview() {
+    setPreviewModal(null);
+    if (config?.sidecarControlUrl) {
+      try { await fetch(`${config.sidecarControlUrl}/tools/preview/stop`, { method: "DELETE" }); } catch {}
     }
   }
 
@@ -825,19 +759,19 @@ function App() {
     setStatus("Tool stopped");
   }
 
-  async function handleClearQueue() {
-    for (const item of extQueue) {
-      try { await nativeApi.externalDequeue(item.id); } catch { /* best-effort */ }
-    }
-    setExtQueue([]);
-  }
-
   const outputUrl = outputBaseUrl
     ? `${outputBaseUrl}${outputNonce > 0 ? `?_r=${outputNonce}` : ""}`
     : "";
 
   return (
     <div className="workspace">
+      {previewModal && (
+        <PreviewModal
+          url={previewModal.url}
+          toolName={previewModal.toolName}
+          onClose={handleClosePreview}
+        />
+      )}
       {sidecarDown && (
         <SidecarError
           restarting={sidecarRestarting}
@@ -871,8 +805,6 @@ function App() {
             sheetOutputNonces={sheetOutputNonces}
             tabStartingSet={tabStartingSet}
             visitedTabIndices={visitedTabIndices}
-            webAppUrl={webAppUrl}
-            queueCount={extQueue.length}
           />
         ) : (
           <LeftPanel

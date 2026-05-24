@@ -1,4 +1,5 @@
 id: module_010
+slug: data-feeder
 vendor: cimcore
 domain: pipeline
 name: Data Feeder

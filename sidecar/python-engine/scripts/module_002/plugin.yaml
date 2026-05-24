@@ -1,4 +1,5 @@
 id: module_002
+slug: image-info-reader
 vendor: cimcore
 domain: cv
 name: 影像資訊讀取

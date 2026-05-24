@@ -8,6 +8,8 @@ tabs:
     label: 📦 Data Feeder
   - plugin_id: module_012
     label: 🏷️ Annotation
+  - plugin_id: module_008
+    label: 🎬 Video Annotation
   - plugin_id: module_013
     label: 🔄 Sync Back
   - plugin_id: module_020
@@ -20,3 +22,5 @@ tabs:
     label: 📊 管理中心
   - plugin_id: module_018
     label: 🖼️ Review Gallery
+  - plugin_id: module_021
+    label: 🔭 Vision DIY

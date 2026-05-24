@@ -1,4 +1,5 @@
 id: module_015
+slug: annotation-dashboard
 vendor: cimcore
 domain: pipeline
 name: Dashboard

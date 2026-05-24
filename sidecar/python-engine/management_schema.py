@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
 _ALTER_MIGRATIONS = [
     "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE tools ADD COLUMN description TEXT",
+    "ALTER TABLE tools ADD COLUMN slug TEXT",
 ]
 
 _SEED_SQL = """

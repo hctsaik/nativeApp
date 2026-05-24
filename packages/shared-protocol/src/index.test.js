@@ -15,6 +15,8 @@ describe("MessageTypes", () => {
     expect(MessageTypes.EXECUTE_START).toBe("EXECUTE_START");
     expect(MessageTypes.EXECUTE_COMPLETE).toBe("EXECUTE_COMPLETE");
     expect(MessageTypes.DISPLAY_UPDATE).toBe("DISPLAY_UPDATE");
+    expect(MessageTypes.SWITCH_TAB).toBe("SWITCH_TAB");
+    expect(MessageTypes.OPEN_PREVIEW).toBe("OPEN_PREVIEW");
   });
 
   it("is frozen and cannot be mutated", () => {

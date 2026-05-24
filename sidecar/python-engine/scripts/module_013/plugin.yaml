@@ -1,4 +1,5 @@
 id: module_013
+slug: sync-back
 vendor: cimcore
 domain: pipeline
 name: Sync Back

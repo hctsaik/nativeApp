@@ -60,6 +60,7 @@ class ToolDefinition:
     source_commit: Optional[str] = None
     author: Optional[str] = None
     approved_at: Optional[str] = None
+    slug: Optional[str] = None
 
 
 class SheetTabInfo(BaseModel):
@@ -94,6 +95,7 @@ class ToolInfo(BaseModel):
     name: str
     version: str
     category: str = "tool"
+    slug: Optional[str] = None
 
 
 class SelectedPathsRequest(BaseModel):
@@ -304,12 +306,12 @@ class SQLiteToolAdapter(ToolAdapter):
             (0, "module_019", "\U0001f310 Data Downloader"),
             (1, "module_010", "\U0001f4e6 Data Feeder"),
             (2, "module_012", "\U0001f3f7\ufe0f Annotation"),
-            (3, "module_013", "\U0001f504 Sync Back"),
-            (4, "module_020", "\U0001f4e5 Download"),
-            (5, "module_015", "\U0001f4ca Dashboard"),
+            (3, "module_008", "\U0001f3ac Video Annotation"),
+            (4, "module_013", "\U0001f504 Sync Back"),
+            (5, "module_020", "\U0001f4e5 Download"),
             (6, "module_014", "\U0001f4e4 Export"),
             (7, "module_016", "\U0001f916 AI Pre-labeling"),
-            (8, "module_017", "\U0001f3f7\ufe0f Label Manager"),
+            (8, "module_017", "\U0001f4ca \u7ba1\u7406\u4e2d\u5fc3"),
             (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
             (10, "module_021", "\U0001f52d Vision DIY"),
         ]
@@ -433,14 +435,16 @@ class SQLiteToolAdapter(ToolAdapter):
             deprecated_at = data.get("deprecated_at")
             author  = data.get("author", "system")
 
+            slug = data.get("slug") or None
+
             connection.execute(
                 """
                 INSERT OR IGNORE INTO tools (
                     tool_id, name, script_relative_path, version,
-                    source_commit, author, enabled, vendor, domain, deprecated_at
-                ) VALUES (?, ?, ?, ?, 'plugin.yaml', ?, ?, ?, ?, ?)
+                    source_commit, author, enabled, vendor, domain, deprecated_at, slug
+                ) VALUES (?, ?, ?, ?, 'plugin.yaml', ?, ?, ?, ?, ?, ?)
                 """,
-                (tool_id, name, script, version, author, enabled, vendor, domain, deprecated_at),
+                (tool_id, name, script, version, author, enabled, vendor, domain, deprecated_at, slug),
             )
             # Sync mutable dev/catalog fields from yaml on every startup.
             # Prod visibility is controlled only by publish/management workflows.
@@ -448,10 +452,10 @@ class SQLiteToolAdapter(ToolAdapter):
                 """
                 UPDATE tools
                 SET name=?, script_relative_path=?, version=?, enabled=?,
-                    vendor=?, domain=?, deprecated_at=?
+                    vendor=?, domain=?, deprecated_at=?, slug=?
                 WHERE tool_id=?
                 """,
-                (name, script, version, enabled, vendor, domain, deprecated_at, tool_id),
+                (name, script, version, enabled, vendor, domain, deprecated_at, slug, tool_id),
             )
 
     def list_tools(self) -> list[ToolDefinition]:
@@ -480,6 +484,7 @@ class SQLiteToolAdapter(ToolAdapter):
             source_commit=row["source_commit"],
             author=row["author"],
             approved_at=row["approved_at"],
+            slug=row.get("slug"),
         )
 
 
@@ -504,6 +509,7 @@ class ToolRegistry:
                 name=tool.name,
                 version=tool.version,
                 category=_derive_category(tool.tool_id),
+                slug=tool.slug,
             )
             for tool in self._adapter.list_tools()
         ]
@@ -581,6 +587,11 @@ class ToolProcessManager:
         self._sheet_output_script: Optional[Path] = None
         self._tool_id: Optional[str] = None
         self._run_id: Optional[str] = None
+        self._input_port: int = 0
+        self._output_port: int = 0
+        self._preview_process: Optional[subprocess.Popen] = None
+        self._preview_tool_id: Optional[str] = None
+        self._preview_port: int = 0
 
     def _make_env(self, tool: ToolDefinition, plugin_id: str = "") -> dict[str, str]:
         env = os.environ.copy()
@@ -1008,6 +1019,8 @@ class ToolProcessManager:
             pid=self._input_process.pid if self._input_process else None,
         )
         self._run_id = run_id
+        self._input_port = input_port
+        self._output_port = output_port
         return ToolStartResponse(
             tool_id=tool.tool_id,
             input_url=f"http://127.0.0.1:{input_port}",
@@ -1161,6 +1174,47 @@ class ToolProcessManager:
             self._sheet_input_script = None
             self._sheet_output_script = None
             self._tool_id = None
+            self._input_port = 0
+            self._output_port = 0
+
+    def start_preview(self, tool: ToolDefinition) -> dict:
+        """Start the module's input page as a side process without stopping the current tool."""
+        self.stop_preview()
+        input_script, _ = _split_scripts(tool)
+        if not input_script.exists():
+            raise FileNotFoundError(input_script)
+        port = find_free_port()
+        self._preview_process = self._spawn(input_script, tool, port, "preview")
+        self._preview_tool_id = tool.tool_id
+        self._preview_port = port
+        if not wait_for_port(port):
+            self.stop_preview()
+            raise RuntimeError(f"Preview for {tool.tool_id} did not start in time")
+        return {
+            "tool_id": tool.tool_id,
+            "input_url": f"http://127.0.0.1:{port}",
+            "input_port": port,
+        }
+
+    def stop_preview(self) -> None:
+        if self._preview_process is not None:
+            if self._preview_process.poll() is None:
+                _terminate_process(self._preview_process, f"{self._preview_tool_id}-preview")
+            self._preview_process = None
+        self._preview_tool_id = None
+        self._preview_port = 0
+
+    def preview_status(self) -> dict:
+        if self._preview_process is None:
+            return {"active": False}
+        alive = self._preview_process.poll() is None
+        port = self._preview_port
+        return {
+            "active": alive,
+            "tool_id": self._preview_tool_id,
+            "input_url": f"http://127.0.0.1:{port}" if alive and port else "",
+            "input_alive": alive,
+        }
 
 
 class SelectedPathStore:
@@ -1428,6 +1482,28 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.post("/tools/{tool_id}/preview/start")
+    def preview_start(tool_id: str) -> dict:
+        try:
+            tool = registry.get(tool_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            return manager.start_preview(tool)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.delete("/tools/preview/stop")
+    def preview_stop() -> dict:
+        manager.stop_preview()
+        return {"ok": True}
+
+    @app.get("/tools/preview/status")
+    def preview_status_route() -> dict:
+        return manager.preview_status()
+
     @app.get("/tools/active/status")
     def active_tool_status() -> dict:
         tool_id = manager._tool_id
@@ -1503,6 +1579,8 @@ def create_app(
             result_mtime = result_file.stat().st_mtime
         except FileNotFoundError:
             result_mtime = -1
+        in_port = manager._input_port
+        out_port = manager._output_port
         return {
             "active": True,
             "tool_id": tool_id,
@@ -1510,6 +1588,8 @@ def create_app(
             "output_alive": output_alive,
             "result_mtime": result_mtime,
             "run_id": manager._run_id,
+            "input_url": f"http://127.0.0.1:{in_port}" if in_port else "",
+            "output_url": f"http://127.0.0.1:{out_port}" if out_port else "",
         }
 
     @app.post("/tools/active/sheet-tab/{plugin_id}/start")

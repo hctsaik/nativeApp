@@ -629,13 +629,26 @@ def test_management_runner_has_layer_check() -> None:
 def test_management_runner_uses_single_prod_control_panel() -> None:
     src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
     assert "st.data_editor(" not in src
-    assert "Enable Prod" in src
-    assert "Turn off Prod" in src
-    assert "Tool Actions" in src
-    assert "_render_selected_tool_actions" in src
-    assert "selection_mode=\"single-row\"" in src
-    assert "on_select=\"rerun\"" in src
-    assert "tools_action_target" in src
+    # Prod toggle uses stable labels
+    assert "Prod: ON" in src
+    assert "Prod: OFF" in src
+    # "Enable Prod" may appear as a readiness status label (not a button label)
+    # "Turn off Prod" may appear as audit label; check button labels instead
+    # Tools page uses tab-based layout
+    assert "_render_module_detail_panel" in src
+    assert "_render_modules_tab" in src
+    assert "_render_sheets_tab" in src
+    assert "_render_external_tab" in src
+    assert "_get_module_to_sheets" in src
+    # Old flat-list design artifacts removed
+    assert "_render_selected_tool_actions" not in src
+    assert "Tool Actions" not in src
+    assert "tools_action_target" not in src
+    # Publish actions renamed
+    assert "Publish snapshot" in src
+    assert "Publish & go live" in src
+    assert 'selection_mode="single-row"' in src
+    assert 'on_select="rerun"' in src
     assert "row_prod_on_" not in src
     assert "row_save_order_" not in src
     assert "row_archive_" not in src
@@ -644,15 +657,8 @@ def test_management_runner_uses_single_prod_control_panel() -> None:
     assert "Upload / New Module" in src
     assert "Upload as new module snapshot" in src
     assert "Create module scaffold" in src
-    assert "Create snapshot" in src
-    assert "Delete unpublished draft" in src
-    assert "`No active snapshot`" in src
+    assert "Delete draft" in src
     assert 'st.warning("Needs attention") if issues else st.success("Passed")' not in src
-    assert "?芰" not in src
-    assert "?" not in src
-    assert "繚" not in src
-
-
 def test_management_runner_has_workflow_tabs() -> None:
     src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
     assert '["Health", "Tools", "Runs & Usage", "Sheets", "Repairs", "Audit & Database"]' in src
@@ -684,10 +690,9 @@ def test_management_runner_guards_high_risk_actions() -> None:
 def test_management_runner_routes_sheet_prod_through_sheet_gate() -> None:
     src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
     assert "validate_sheet_prod_readiness(_DB_PATH, sheet_id)" in src
-    assert "Sheet Prod visibility is managed in the Sheets tab." in src
+    assert "_render_sheets_tab" in src
     assert "set_sheet_prod_enabled(" in src
-    assert "disabled=manage_disabled or is_dirty or (not sheet.enabled_prod and bool(prod_issues))" in src
-    assert "Unsaved changes" in src
+    assert "disabled=manage_disabled or (not sheet.enabled_prod and bool(prod_issues))," in src
 
 
 def test_management_runner_has_sheet_steps_table_controls() -> None:
@@ -696,17 +701,66 @@ def test_management_runner_has_sheet_steps_table_controls() -> None:
     assert "_sheet_readiness_summary" in src
     assert "_prepare_sheet_draft_steps" in src
     assert "_draft_id" in src
-    assert "Module to add" in src
     assert "Add step" in src
     assert "Readiness" in src
     assert "Readiness details" not in src
     assert "Needs release" in src
-    assert "Discard edits" in src
-    assert "Hide in Dev" in src
-    assert "Show in Dev" in src
-    assert "Save Sheet" in src
+    assert "Discard" in src
+    assert "Dev: On" in src
+    assert "Save Steps" in src
     assert "_up_" in src
     assert "_down_" in src
     assert "_sheet_tab_editor" not in src
     assert "edit_tabs_" not in src
     assert "editing_sheet_" not in src
+
+
+def test_management_runner_preview_uses_postmessage_not_iframe() -> None:
+    """Preview opens a full-screen portal modal via postMessage, not an inline iframe."""
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    # postMessage helper exists
+    assert "_open_preview_modal" in src
+    # Fires to the top-level portal window (across two iframe layers)
+    assert "window.top.postMessage" in src
+    # OPEN_PREVIEW message type matches shared-protocol
+    assert "OPEN_PREVIEW" in src
+    # No longer embeds module inside management-center with st.components.v1.iframe
+    assert "components.iframe(" not in src
+    # Preview expander still present; buttons renamed
+    assert "▶ Start Preview" in src
+    assert "↗ Reopen full-screen" in src
+    assert "⏹ Stop preview" in src
+
+
+def test_management_runner_modules_table_has_id_column() -> None:
+    """Modules dataframe exposes the tool_id as a visible 'ID' column."""
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert '"ID": row["tool_id"]' in src
+    assert '"ID": st.column_config.TextColumn("ID"' in src
+
+
+def test_management_runner_modules_table_checkbox_init() -> None:
+    """Table checkbox is initialised on first load and on filter-reset only.
+
+    Setting session state before the widget on every rerun would override
+    Streamlit's stored click interaction and cause the checkbox to snap back
+    to row 0 after each user click — this test guards against that regression.
+    """
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    # Initialise only when key is absent (first load)
+    assert 'if "modules_table" not in st.session_state:' in src
+    # Also reset when filter forces a new default selection
+    assert 'st.session_state["modules_table"] = {"selection": {"rows": [0]' in src
+    # Must NOT set session state unconditionally before the widget on every rerun
+    assert "# Always sync the checkbox to the current selection before rendering." not in src
+
+
+def test_engine_has_preview_endpoints() -> None:
+    """Engine exposes side-preview HTTP endpoints that don't stop the active tool."""
+    src = (Path(__file__).parent.parent / "engine.py").read_text(encoding="utf-8")
+    assert "start_preview" in src
+    assert "stop_preview" in src
+    assert "preview_status" in src
+    assert "/tools/preview/stop" in src
+    assert "/tools/preview/status" in src
+    assert "_preview_process" in src

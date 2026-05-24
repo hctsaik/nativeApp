@@ -132,6 +132,43 @@ def _get_active_tool() -> dict | None:
         return None
 
 
+def _get_preview_status() -> dict | None:
+    if not _CONTROL_PORT:
+        return None
+    try:
+        import json as _json  # noqa: PLC0415
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{_CONTROL_PORT}/tools/preview/status", timeout=2
+        ) as resp:
+            return _json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _start_preview(tool_id: str) -> dict:
+    import json as _json  # noqa: PLC0415
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{_CONTROL_PORT}/tools/{urllib.parse.quote(tool_id)}/preview/start",
+        method="POST",
+        headers={"Content-Type": "application/json"},
+        data=b"",
+    )
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        return _json.loads(resp.read())
+
+
+def _stop_preview() -> None:
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{_CONTROL_PORT}/tools/preview/stop",
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            pass
+    except Exception:
+        pass
+
+
 def _control_get_json(path: str, timeout: float = 3.0) -> dict | None:
     if not _CONTROL_PORT:
         return None
@@ -566,161 +603,435 @@ def _tool_header(row: dict[str, Any]) -> str:
     return f"{badge} **{row['name']}**  `{row['tool_id']}`  -  {ver_chip}{prod_chip}"
 
 
-def _render_selected_tool_actions(
+def _open_preview_modal(input_url: str, tool_name: str) -> None:
+    """Fire a postMessage to the portal React to open the full-screen preview modal."""
+    import streamlit.components.v1 as _components  # noqa: PLC0415
+    # Sanitise values for safe JS string embedding
+    safe_url = input_url.replace("\\", "").replace("'", "")
+    safe_name = tool_name.replace("\\", "").replace("'", "").replace('"', "")
+    _components.html(
+        f"""
+        <script>
+        (function() {{
+          window.top.postMessage({{
+            source: 'cim-platform',
+            type: 'OPEN_PREVIEW',
+            payload: {{ url: '{safe_url}', toolName: '{safe_name}' }},
+            timestamp: new Date().toISOString()
+          }}, '*');
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _render_module_preview(plugin_id: str, tool_id: str, manage_disabled: bool, tool_name: str = "") -> None:
+    import yaml as _yaml  # noqa: PLC0415
+
+    yaml_path = _SCRIPTS_DIR / plugin_id / "plugin.yaml"
+    meta: dict[str, Any] = {}
+    if yaml_path.exists():
+        try:
+            with open(yaml_path, encoding="utf-8") as _f:
+                meta = _yaml.safe_load(_f) or {}
+        except Exception:
+            pass
+
+    # Fire postMessage BEFORE the expander so it triggers even when expander is collapsed.
+    trigger_key = f"_preview_trigger_{tool_id}"
+    url_key = f"_preview_url_{tool_id}"
+    if st.session_state.pop(trigger_key, False):
+        _open_preview_modal(
+            st.session_state.pop(url_key, ""),
+            tool_name or tool_id,
+        )
+
+    with st.expander("Preview", expanded=False):
+        desc = meta.get("description") or ""
+        slug = meta.get("slug") or ""
+        if desc:
+            st.caption(desc)
+        if slug:
+            st.caption(f"Slug: `{slug}`")
+
+        preview = _get_preview_status()
+        is_this = bool(preview and preview.get("active") and preview.get("tool_id") == tool_id)
+        other_running = bool(preview and preview.get("active") and not is_this)
+        input_url = preview.get("input_url", "") if is_this else ""
+        input_alive = preview.get("input_alive", False) if is_this else False
+
+        if is_this and input_url and input_alive:
+            st.success("Preview running in full-screen panel.", icon=":material/open_in_full:")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("↗ Reopen full-screen", key=f"reopen_preview_{tool_id}", use_container_width=True):
+                    st.session_state[trigger_key] = True
+                    st.session_state[url_key] = input_url
+                    st.rerun()
+            with col2:
+                if st.button("⏹ Stop preview", key=f"stop_preview_{tool_id}", use_container_width=True):
+                    _stop_preview()
+                    st.rerun()
+        elif other_running:
+            other_id = (preview or {}).get("tool_id", "")
+            st.info(f"Another preview is active (`{other_id}`). Stop it first.")
+            if st.button("⏹ Stop current preview", key=f"stop_other_{tool_id}", use_container_width=True):
+                _stop_preview()
+                st.rerun()
+        else:
+            if _CONTROL_PORT and st.button(
+                "▶ Start Preview",
+                key=f"preview_launch_{tool_id}",
+                disabled=manage_disabled,
+                use_container_width=True,
+            ):
+                try:
+                    result = _start_preview(tool_id)
+                    st.session_state[trigger_key] = True
+                    st.session_state[url_key] = result.get("input_url", "")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Preview failed: {exc}")
+            else:
+                st.caption("Opens the module's input page in a full-screen panel.")
+
+
+def _get_module_to_sheets() -> dict[str, str]:
+    """Return {plugin_id: 'Sheet A, Sheet B'} for modules used in sheets."""
+    import sqlite3 as _sq  # noqa: PLC0415
+    if not _DB_PATH.exists():
+        return {}
+    try:
+        conn = _sq.connect(_DB_PATH)
+        conn.row_factory = _sq.Row
+        rows = conn.execute("""
+            SELECT st.plugin_id, GROUP_CONCAT(s.name, ', ') AS sheet_names
+            FROM sheet_tabs st
+            JOIN sheets s ON s.sheet_id = st.sheet_id
+            GROUP BY st.plugin_id
+        """).fetchall()
+        conn.close()
+        return {row["plugin_id"]: row["sheet_names"] for row in rows}
+    except Exception:
+        return {}
+
+
+def _prod_toggle_button(
+    reg: PluginRegistry,
+    tool_id: str,
+    is_prod: bool,
+    can_enable: bool,
+    manage_disabled: bool,
+    *,
+    key_suffix: str = "",
+) -> None:
+    key = f"prod_toggle_{tool_id}{key_suffix}"
+    if is_prod:
+        if st.button("Prod: ON  ⏻", key=key, disabled=manage_disabled, use_container_width=True):
+            _use_cases(reg).set_tool_prod_enabled(tool_id, False, actor=_actor(), source="prod_control")
+            st.toast("Hidden from Prod.", icon=":material/visibility_off:")
+            st.rerun()
+    else:
+        if st.button("Prod: OFF  ⏺", key=key, disabled=manage_disabled or not can_enable, use_container_width=True):
+            _use_cases(reg).set_tool_prod_enabled(tool_id, True, actor=_actor(), source="prod_control")
+            st.toast("Now visible in Prod.", icon=":material/check_circle:")
+            st.rerun()
+
+
+def _render_module_detail_panel(
     reg: PluginRegistry,
     selected_row: dict[str, Any],
-    active_rows: list[dict[str, Any]],
     readiness_by_id: dict[str, Any],
     manage_disabled: bool,
 ) -> None:
-    selected_tool_id = str(selected_row["tool_id"])
-    selected_readiness = readiness_by_id.get(selected_tool_id)
-    plugin_id = selected_tool_id if selected_tool_id.startswith("module_") else None
-    sheet_id = selected_tool_id[len("sheet-"):] if selected_tool_id.startswith("sheet-") else None
-    selected_sheet_issues = validate_sheet_prod_readiness(_DB_PATH, sheet_id) if sheet_id else []
-    is_prod_visible = bool(selected_row["enabled_prod"])
+    plugin_id = selected_row["tool_id"]
+    readiness = readiness_by_id.get(plugin_id)
+    is_prod = bool(selected_row["enabled_prod"])
 
-    st.markdown(_tool_header(selected_row))
-    status_cols = st.columns(4)
-    status_cols[0].metric("Category", selected_readiness.category if selected_readiness else "unknown")
-    status_cols[1].metric("Prod visibility", "On" if is_prod_visible else "Off")
-    status_cols[2].metric("Active snapshot", "N/A" if sheet_id else (selected_row["active_version"] or "None"))
-    status_cols[3].metric(
-        "Checks",
-        "Needs attention" if selected_sheet_issues or (selected_readiness and selected_readiness.issues) else "Passed",
-    )
+    st.markdown(f"#### {selected_row['name']}")
+    ver_text = selected_row.get("active_version") or "No snapshot"
+    prod_badge = "🟢 PROD ON" if is_prod else "⚫ PROD OFF"
+    checks_badge = "⚠ Needs attention" if (readiness and readiness.issues) else "✓ Checks passed"
+    st.caption(f"{prod_badge}  ·  {ver_text}  ·  {checks_badge}")
 
-    if sheet_id and selected_sheet_issues:
-        st.warning("This Sheet needs attention before it should be visible in Prod.")
-        for issue in selected_sheet_issues:
-            st.caption(f"- {issue.label} ({issue.plugin_id}): {issue.issue}")
-    elif selected_readiness and selected_readiness.issues:
-        st.warning("This tool needs attention before it should be visible in Prod.")
-        for issue in selected_readiness.issues:
+    if readiness and readiness.issues:
+        for issue in readiness.issues:
+            st.caption(f"⚠ {issue}")
+
+    preflight = module_preflight(_SCRIPTS_DIR, plugin_id)
+    snapshot_diff = module_snapshot_diff(_SCRIPTS_DIR, _DB_PATH, plugin_id)
+
+    if preflight.ok:
+        if snapshot_diff.has_active_snapshot:
+            change_count = len(snapshot_diff.added) + len(snapshot_diff.changed) + len(snapshot_diff.removed)
+            st.caption(f"{change_count} file(s) changed since last snapshot." if change_count else "No file changes since last snapshot.")
+        else:
+            st.caption(f"No snapshot yet — {snapshot_diff.current_file_count} file(s) ready to publish.")
+    else:
+        st.error("Publish checks failed.")
+        for issue in preflight.issues:
             st.caption(f"- {issue}")
 
-    if plugin_id:
-        preflight = module_preflight(_SCRIPTS_DIR, plugin_id)
-        snapshot_diff = module_snapshot_diff(_SCRIPTS_DIR, _DB_PATH, plugin_id)
-
-        if preflight.ok:
-            st.success("Publish checks passed.")
-        else:
-            st.error("Publish checks failed. Fix these before publishing a snapshot.")
-            for issue in preflight.issues:
-                st.caption(f"- {issue}")
-
-        if snapshot_diff.has_active_snapshot:
-            st.caption(
-                f"Compared with active snapshot: {len(snapshot_diff.added)} added, "
-                f"{len(snapshot_diff.changed)} changed, {len(snapshot_diff.removed)} removed."
-            )
-        else:
-            st.caption(f"No active snapshot yet. {snapshot_diff.current_file_count} files would be published.")
-
-        with st.expander("Changed files", expanded=False):
-            st.json(snapshot_diff.summary())
-
-    action_cols = st.columns([1, 1, 1, 1, 1])
-    with action_cols[0]:
-        if plugin_id and st.button(
-            "Create snapshot",
-            key=f"create_snapshot_{selected_tool_id}",
+    pub_col1, pub_col2 = st.columns(2)
+    with pub_col1:
+        if st.button(
+            "Publish snapshot",
+            key=f"publish_{plugin_id}",
             type="primary",
-            disabled=manage_disabled or not module_preflight(_SCRIPTS_DIR, plugin_id).ok,
+            disabled=manage_disabled or not preflight.ok,
             use_container_width=True,
         ):
-            _create_snapshot_dialog(reg, plugin_id, selected_tool_id)
-    with action_cols[1]:
-        if plugin_id and st.button(
-            "Snapshot + Prod",
-            key=f"publish_prod_{selected_tool_id}",
-            disabled=manage_disabled or not module_preflight(_SCRIPTS_DIR, plugin_id).ok,
+            _create_snapshot_dialog(reg, plugin_id, plugin_id)
+    with pub_col2:
+        if st.button(
+            "Publish & go live",
+            key=f"pub_live_{plugin_id}",
+            disabled=manage_disabled or not preflight.ok,
             use_container_width=True,
         ):
-            _publish_dialog(reg, plugin_id, selected_tool_id)
-    with action_cols[2]:
-        if sheet_id:
-            st.info("Sheet Prod visibility is managed in the Sheets tab.")
-        else:
-            can_enable_prod = bool(
-                selected_readiness
-                and selected_readiness.prod_ready
-                and (
-                    selected_readiness.category != "module"
-                    or selected_readiness.has_active_version
-                )
+            _publish_dialog(reg, plugin_id, plugin_id)
+
+    st.divider()
+
+    can_enable_prod = bool(
+        readiness and readiness.prod_ready and readiness.has_active_version
+    )
+    prod_col, hint_col = st.columns([1, 2])
+    with prod_col:
+        _prod_toggle_button(reg, plugin_id, is_prod, can_enable_prod, manage_disabled)
+    with hint_col:
+        if not can_enable_prod and not is_prod:
+            st.caption("Need a valid snapshot & passing checks first.")
+
+    _render_module_preview(plugin_id, plugin_id, manage_disabled, tool_name=selected_row.get("name", plugin_id))
+
+    try:
+        versions = reg.list_versions(plugin_id)
+    except Exception:
+        versions = []
+    with st.expander("Version history", expanded=False):
+        if not versions:
+            st.caption("No snapshots yet.")
+        for ver in versions:
+            active_badge = "  **active**" if ver.is_active else ""
+            st.markdown(
+                f"`v{ver.version}` #{ver.version_id}{active_badge}"
+                f" — {ver.created_at[:16]}"
+                + (f" — {ver.changelog}" if ver.changelog else "")
             )
-            if is_prod_visible:
-                if st.button("Turn off Prod", key=f"disable_prod_{selected_tool_id}", disabled=manage_disabled, use_container_width=True):
-                    _use_cases(reg).set_tool_prod_enabled(selected_tool_id, False, actor=_actor(), source="prod_control")
-                    st.toast("Tool is hidden from Prod. Active snapshot is unchanged.", icon=":material/visibility_off:")
-                    st.rerun()
-            else:
-                if st.button("Enable Prod", key=f"enable_prod_{selected_tool_id}", disabled=manage_disabled or not can_enable_prod, use_container_width=True):
-                    _use_cases(reg).set_tool_prod_enabled(selected_tool_id, True, actor=_actor(), source="prod_control")
-                    st.toast("Tool is visible in Prod.", icon=":material/check_circle:")
-                    st.rerun()
-                if not can_enable_prod:
-                    st.caption("Create a valid snapshot and resolve readiness issues before enabling Prod visibility.")
-    with action_cols[3]:
-        if _CONTROL_PORT and st.button("Launch", key=f"launch_{selected_tool_id}", use_container_width=True):
-            try:
-                _start_tool(selected_tool_id)
-                st.toast("Tool launched.", icon=":material/rocket_launch:")
-            except Exception as exc:
-                st.error(f"Launch failed: {exc}")
-        elif not _CONTROL_PORT:
-            st.caption("Portal only")
-    with action_cols[4]:
-        if st.button("Archive", key=f"archive_{selected_tool_id}", disabled=manage_disabled, use_container_width=True):
-            _confirm_archive_dialog(reg, selected_tool_id, selected_row["name"])
+            if not ver.is_active and st.button(
+                f"Rollback to #{ver.version_id}",
+                key=f"rollback_{plugin_id}_{ver.version_id}",
+                disabled=manage_disabled,
+            ):
+                _confirm_rollback_dialog(reg, plugin_id, ver.version_id)
 
-    order_cols = st.columns([1, 1, 3])
-    with order_cols[0]:
-        next_order = st.number_input(
-            "Order",
-            value=int(selected_row["order_index"]),
-            min_value=0,
-            step=1,
-            key=f"order_{selected_tool_id}",
+    with st.expander("⚠ Danger zone", expanded=False):
+        st.caption("Archive hides without deleting snapshots. Delete draft only works on unpublished tools.")
+        danger_cols = st.columns(2)
+        with danger_cols[0]:
+            if st.button("Archive", key=f"archive_{plugin_id}", disabled=manage_disabled, use_container_width=True):
+                _confirm_archive_dialog(reg, plugin_id, selected_row["name"])
+        with danger_cols[1]:
+            if st.button(
+                "Delete draft",
+                key=f"delete_draft_{plugin_id}",
+                disabled=manage_disabled or bool(selected_row["active_version"]) or bool(selected_row["enabled_prod"]),
+                use_container_width=True,
+            ):
+                _confirm_delete_draft_tool_dialog(reg, plugin_id, selected_row["name"])
+
+
+def _render_modules_tab(
+    reg: PluginRegistry,
+    module_rows: list[dict[str, Any]],
+    readiness_by_id: dict[str, Any],
+    module_to_sheets: dict[str, str],
+    manage_disabled: bool,
+) -> None:
+    _render_module_import_and_scaffold(reg, manage_disabled)
+
+    if not module_rows:
+        st.info("No modules registered yet. Use Upload / New Module above.")
+        return
+
+    search_col, filter_col = st.columns([2, 1])
+    with search_col:
+        search = st.text_input("Search", placeholder="Name or ID", label_visibility="collapsed", key="module_search")
+    with filter_col:
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "Prod: ON", "Needs attention", "No snapshot"],
+            key="module_status_filter",
+            label_visibility="collapsed",
         )
-    with order_cols[1]:
-        if st.button("Save order", key=f"save_order_{selected_tool_id}", disabled=manage_disabled, use_container_width=True):
-            _store().update_tool_order({selected_tool_id: int(next_order)})
-            st.toast("Order saved.", icon=":material/check_circle:")
-            st.rerun()
 
-    if plugin_id:
-        try:
-            versions = reg.list_versions(plugin_id)
-        except Exception:
-            versions = []
-        with st.expander("Version history", expanded=False):
-            if not versions:
-                st.caption("No snapshots yet.")
-            for ver in versions:
-                active_badge = "  **active**" if ver.is_active else ""
-                st.markdown(
-                    f"`v{ver.version}` #{ver.version_id}{active_badge}"
-                    f" - {ver.created_at[:16]}"
-                    + (f" - {ver.changelog}" if ver.changelog else "")
-                )
-                if not ver.is_active and st.button(
-                    f"Rollback to #{ver.version_id}",
-                    key=f"rollback_{plugin_id}_{ver.version_id}",
-                    disabled=manage_disabled,
-                ):
-                    _confirm_rollback_dialog(reg, plugin_id, ver.version_id)
+    filtered = module_rows
+    if search.strip():
+        q = search.strip().lower()
+        filtered = [r for r in filtered if q in r["name"].lower() or q in r["tool_id"].lower()]
+    if status_filter == "Prod: ON":
+        filtered = [r for r in filtered if r["enabled_prod"]]
+    elif status_filter == "Needs attention":
+        filtered = [r for r in filtered if readiness_by_id.get(r["tool_id"]) and readiness_by_id[r["tool_id"]].issues]
+    elif status_filter == "No snapshot":
+        filtered = [r for r in filtered if not r.get("active_version")]
 
-    with st.expander("Lifecycle", expanded=False):
-        st.caption("Archive hides a tool without deleting snapshots. Delete draft is only for unpublished tools.")
-        if plugin_id and st.button(
-            "Delete unpublished draft",
-            key=f"delete_draft_{selected_tool_id}",
-            disabled=manage_disabled or bool(selected_row["active_version"]) or bool(selected_row["enabled_prod"]),
-        ):
-            _confirm_delete_draft_tool_dialog(reg, selected_tool_id, selected_row["name"])
+    if not filtered:
+        st.info("No modules match the filter.")
+        return
+
+    detail_options = [r["tool_id"] for r in filtered]
+    if st.session_state.get("module_selected") not in detail_options:
+        st.session_state["module_selected"] = detail_options[0]
+        # Filter changed and pushed the selection out — reset table checkbox too
+        st.session_state["modules_table"] = {"selection": {"rows": [0], "columns": []}}
+
+    sel_id = st.session_state["module_selected"]
+    sel_idx = next((i for i, r in enumerate(filtered) if r["tool_id"] == sel_id), 0)
+    # Only initialise on first load. Do NOT overwrite on every rerun — that would
+    # clobber the click Streamlit already stored in the session state, causing the
+    # selection to snap back to row 0 after each click.
+    if "modules_table" not in st.session_state:
+        st.session_state["modules_table"] = {"selection": {"rows": [sel_idx], "columns": []}}
+
+    left_col, right_col = st.columns([0.55, 0.45])
+
+    with left_col:
+        table_data = [
+            {
+                "Name": row["name"],
+                "ID": row["tool_id"],
+                "Prod": "ON" if row["enabled_prod"] else "off",
+                "Version": row.get("active_version") or "—",
+                "Used in": module_to_sheets.get(row["tool_id"], "—"),
+                "_id": row["tool_id"],
+            }
+            for row in filtered
+        ]
+        df = pd.DataFrame([{k: v for k, v in r.items() if k != "_id"} for r in table_data])
+        event = st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="modules_table",
+            column_config={
+                "Name": st.column_config.TextColumn("Name"),
+                "ID": st.column_config.TextColumn("ID", width="small"),
+                "Prod": st.column_config.TextColumn("Prod", width="small"),
+                "Version": st.column_config.TextColumn("Version", width="small"),
+                "Used in": st.column_config.TextColumn("Used in"),
+            },
+        )
+        # Update selection — no extra st.rerun(); on_select already triggered one
+        if event.selection.rows:
+            st.session_state["module_selected"] = table_data[event.selection.rows[0]]["_id"]
+
+    with right_col:
+        sel_id = st.session_state["module_selected"]
+        sel_row = next((r for r in module_rows if r["tool_id"] == sel_id), None)
+        if sel_row:
+            _render_module_detail_panel(reg, sel_row, readiness_by_id, manage_disabled)
+
+
+def _render_sheets_tab(
+    reg: PluginRegistry,
+    sheet_rows: list[dict[str, Any]],
+    readiness_by_id: dict[str, Any],
+    manage_disabled: bool,
+) -> None:
+    if not sheet_rows:
+        st.info("No sheets registered. Create one in the Sheets page.")
+        return
+
+    detail_options = [r["tool_id"] for r in sheet_rows]
+    if st.session_state.get("tools_sheet_selected") not in detail_options:
+        st.session_state["tools_sheet_selected"] = detail_options[0]
+
+    left_col, right_col = st.columns([0.5, 0.5])
+
+    with left_col:
+        table_data = []
+        for row in sheet_rows:
+            sheet_id = row["tool_id"][len("sheet-"):]
+            issues = validate_sheet_prod_readiness(_DB_PATH, sheet_id)
+            table_data.append({
+                "Name": row["name"],
+                "Prod": "ON" if row["enabled_prod"] else "off",
+                "Checks": "⚠" if issues else "✓",
+                "_id": row["tool_id"],
+            })
+        df = pd.DataFrame([{k: v for k, v in r.items() if k != "_id"} for r in table_data])
+        event = st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="sheets_tools_table",
+            column_config={
+                "Name": st.column_config.TextColumn("Name"),
+                "Prod": st.column_config.TextColumn("Prod", width="small"),
+                "Checks": st.column_config.TextColumn("Checks", width="small"),
+            },
+        )
+        if event.selection.rows:
+            picked = table_data[event.selection.rows[0]]["_id"]
+            if picked != st.session_state.get("tools_sheet_selected"):
+                st.session_state["tools_sheet_selected"] = picked
+                st.rerun()
+
+    with right_col:
+        sel_id = st.session_state["tools_sheet_selected"]
+        sel_row = next((r for r in sheet_rows if r["tool_id"] == sel_id), None)
+        if sel_row:
+            sheet_id = sel_id[len("sheet-"):]
+            st.markdown(f"#### {sel_row['name']}")
+            is_prod = bool(sel_row["enabled_prod"])
+            issues = validate_sheet_prod_readiness(_DB_PATH, sheet_id)
+            if issues:
+                st.warning("Readiness issues — resolve before enabling Prod.")
+                for issue in issues:
+                    st.caption(f"⚠ {issue.label} ({issue.plugin_id}): {issue.issue}")
+            else:
+                st.success("All checks passed.", icon=":material/check_circle:")
+            prod_col, _ = st.columns([1, 1])
+            with prod_col:
+                _prod_toggle_button(reg, sel_id, is_prod, not bool(issues), manage_disabled, key_suffix="_sheet")
+            with st.expander("⚠ Danger zone", expanded=False):
+                if st.button("Archive sheet", key=f"archive_sheet_{sel_id}", disabled=manage_disabled, use_container_width=True):
+                    _confirm_archive_dialog(reg, sel_id, sel_row["name"])
+
+
+def _render_external_tab(
+    reg: PluginRegistry,
+    external_rows: list[dict[str, Any]],
+    readiness_by_id: dict[str, Any],
+    manage_disabled: bool,
+) -> None:
+    if not external_rows:
+        st.info("No external tools registered.")
+        return
+    for row in external_rows:
+        tool_id = row["tool_id"]
+        is_prod = bool(row["enabled_prod"])
+        c1, c2, c3 = st.columns([3, 1, 1])
+        with c1:
+            st.markdown(f"**{row['name']}**  `{tool_id}`")
+            st.caption("Opens as a native window (not an iframe).")
+        with c2:
+            st.caption("PROD ON" if is_prod else "PROD OFF")
+        with c3:
+            if _CONTROL_PORT and st.button("Launch", key=f"ext_launch_{tool_id}", use_container_width=True):
+                try:
+                    _start_tool(tool_id)
+                    st.toast("External tool launched.", icon=":material/rocket_launch:")
+                except Exception as exc:
+                    st.error(f"Launch failed: {exc}")
+        st.divider()
 
 
 def _page_tools(reg: PluginRegistry) -> None:
@@ -731,12 +1042,6 @@ def _page_tools(reg: PluginRegistry) -> None:
         st.warning("Database has not been created yet. Start the sidecar first.")
         return
 
-    _render_module_import_and_scaffold(reg, manage_disabled)
-
-    active = _get_active_tool()
-    if active and active.get("active"):
-        st.info(f"Currently running: `{active['tool_id']}`", icon=":material/play_circle:")
-
     try:
         rows = _load_tool_rows()
         archived = _load_archived_rows()
@@ -744,116 +1049,40 @@ def _page_tools(reg: PluginRegistry) -> None:
         st.error(f"Could not load tools: {exc}")
         return
 
-    if not rows:
-        st.info("No active tools are registered yet. Inactive tools are listed below.")
-
     readiness_by_id = {item.tool_id: item for item in collect_tool_readiness(_DB_PATH)}
+    module_to_sheets = _get_module_to_sheets()
 
-    st.subheader("Tool Actions")
-    action_panel = st.container()
+    module_rows = [
+        r for r in rows
+        if readiness_by_id.get(r["tool_id"]) and readiness_by_id[r["tool_id"]].category == "module"
+    ]
+    sheet_rows = [r for r in rows if r["tool_id"].startswith("sheet-")]
+    external_rows = [
+        r for r in rows
+        if readiness_by_id.get(r["tool_id"]) and readiness_by_id[r["tool_id"]].category == "external"
+    ]
 
-    st.subheader("Active Tools")
-    active_rows = rows
-    search = st.text_input("Search active tools", placeholder="Name or ID", label_visibility="collapsed")
-    if search.strip():
-        q = search.strip().lower()
-        active_rows = [r for r in active_rows if q in r["name"].lower() or q in r["tool_id"].lower()]
+    active = _get_active_tool()
+    if active and active.get("active"):
+        st.info(f"Running: `{active['tool_id']}`", icon=":material/play_circle:")
 
-    col_category, col_status = st.columns(2)
-    with col_category:
-        category_filter = st.selectbox(
-            "Category",
-            ["All", "module", "sheet", "external"],
-            key="tool_category_filter",
-        )
-    with col_status:
-        status_filter = st.selectbox(
-            "Status",
-            ["All", "Visible in Prod", "Checks passed", "Needs attention", "No active snapshot"],
-            key="tool_status_filter",
-        )
+    tab_modules, tab_sheets, tab_external = st.tabs([
+        f"Modules ({len(module_rows)})",
+        f"Sheets ({len(sheet_rows)})",
+        f"External ({len(external_rows)})",
+    ])
 
-    if category_filter != "All":
-        active_rows = [
-            r for r in active_rows
-            if readiness_by_id.get(r["tool_id"]) and readiness_by_id[r["tool_id"]].category == category_filter
-        ]
+    with tab_modules:
+        _render_modules_tab(reg, module_rows, readiness_by_id, module_to_sheets, manage_disabled)
 
-    if status_filter != "All":
-        def _matches_status(row: dict[str, Any]) -> bool:
-            readiness = readiness_by_id.get(row["tool_id"])
-            if readiness is None:
-                return False
-            if status_filter == "Visible in Prod":
-                return readiness.enabled_prod
-            if status_filter == "Checks passed":
-                return readiness.prod_ready
-            if status_filter == "Needs attention":
-                return bool(readiness.issues)
-            if status_filter == "No active snapshot":
-                return readiness.category == "module" and not readiness.has_active_version
-            return True
+    with tab_sheets:
+        _render_sheets_tab(reg, sheet_rows, readiness_by_id, manage_disabled)
 
-        active_rows = [r for r in active_rows if _matches_status(r)]
-
-    if not active_rows:
-        st.info("No active tools match the current filters.")
-        _render_inactive_tools(reg, archived, manage_disabled)
-        return
-
-    overview_rows = []
-    for row in active_rows:
-        readiness = readiness_by_id.get(row["tool_id"])
-        category = readiness.category if readiness else ""
-        sheet_issues = validate_sheet_prod_readiness(_DB_PATH, row["tool_id"][len("sheet-"):]) if category == "sheet" else []
-        issues = sheet_issues if category == "sheet" else (readiness.issues if readiness else [])
-        overview_rows.append({
-            "tool_id": row["tool_id"],
-            "name": row["name"],
-            "category": category,
-            "prod_visibility": "On" if row["enabled_prod"] else "Off",
-            "active_snapshot": "N/A" if category == "sheet" else (row["active_version"] or ""),
-            "checks": "Needs attention" if issues else "Passed",
-            "issues": "; ".join(
-                f"{issue.label} ({issue.plugin_id}): {issue.issue}" for issue in sheet_issues
-            ) if sheet_issues else ("; ".join(readiness.issues) if readiness else ""),
-        })
-
-    detail_options = [str(row["tool_id"]) for row in overview_rows]
-    if st.session_state.get("tools_action_target") not in detail_options:
-        st.session_state["tools_action_target"] = detail_options[0]
-
-    table_event = st.dataframe(
-        pd.DataFrame(overview_rows),
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="tools_table",
-        column_config={
-            "tool_id": st.column_config.TextColumn("ID"),
-            "name": st.column_config.TextColumn("Name"),
-            "category": st.column_config.TextColumn("Category"),
-            "prod_visibility": st.column_config.TextColumn("Prod visibility"),
-            "active_snapshot": st.column_config.TextColumn("Active snapshot"),
-            "checks": st.column_config.TextColumn("Checks"),
-            "issues": st.column_config.TextColumn("Issues"),
-        },
-    )
-
-    selected_rows = table_event.selection.rows if table_event.selection.rows else []
-    if selected_rows:
-        picked_tool_id = str(overview_rows[selected_rows[0]]["tool_id"])
-        if picked_tool_id != st.session_state.get("tools_action_target"):
-            st.session_state["tools_action_target"] = picked_tool_id
-            st.rerun()
-
-    selected_tool_id = st.session_state["tools_action_target"]
-    selected_row = next(row for row in active_rows if row["tool_id"] == selected_tool_id)
-    with action_panel:
-        _render_selected_tool_actions(reg, selected_row, active_rows, readiness_by_id, manage_disabled)
+    with tab_external:
+        _render_external_tab(reg, external_rows, readiness_by_id, manage_disabled)
 
     _render_inactive_tools(reg, archived, manage_disabled)
+
 
 
 def _render_module_import_and_scaffold(reg: PluginRegistry, manage_disabled: bool) -> None:
@@ -1081,26 +1310,30 @@ def _sheet_steps_editor(
     plugin_ids = [p.plugin_id for p in plugins]
     plugin_names = {p.plugin_id: p.name for p in plugins}
     readiness_by_step = readiness_by_step or {}
+    show_readiness = bool(readiness_by_step)
 
     if not plugin_ids:
         st.warning("No modules are available to add to this Sheet.")
         return _sheet_public_steps(steps)
 
+    col_ratios = [0.5, 2.5, 3.2, 1.2, 1.8] if show_readiness else [0.5, 2.5, 3.2, 1.8]
+    header_labels = ["#", "Label", "Module", "Readiness", "Actions"] if show_readiness else ["#", "Label", "Module", "Actions"]
+
     st.markdown("**Steps**")
-    header = st.columns([0.5, 2.2, 3.0, 1.4, 1.8])
-    for col, label in zip(header, ["#", "Label", "Module", "Readiness", "Actions"]):
+    header = st.columns(col_ratios)
+    for col, label in zip(header, header_labels):
         col.markdown(f"**{label}**")
 
     remove_idx: int | None = None
     move: tuple[int, int] | None = None
     for i, step in enumerate(steps):
         draft_id = step.setdefault("_draft_id", _sheet_draft_id(key, i))
-        cols = st.columns([0.5, 2.2, 3.0, 1.4, 1.8])
+        cols = st.columns(col_ratios)
         with cols[0]:
             st.markdown(str(i + 1))
         with cols[1]:
             steps[i]["label"] = st.text_input(
-                "Step label",
+                "Label",
                 value=step.get("label", ""),
                 key=f"{key}_label_{draft_id}",
                 label_visibility="collapsed",
@@ -1116,13 +1349,16 @@ def _sheet_steps_editor(
                 key=f"{key}_plugin_{draft_id}",
                 label_visibility="collapsed",
             )
-        with cols[3]:
-            status = readiness_by_step.get(
-                (steps[i].get("plugin_id", ""), steps[i].get("label", "")),
-                {"status": "Ready"},
-            )["status"]
-            st.caption(status)
-        with cols[4]:
+        action_col_idx = 3
+        if show_readiness:
+            with cols[3]:
+                status = readiness_by_step.get(
+                    (steps[i].get("plugin_id", ""), steps[i].get("label", "")),
+                    {"status": "Ready"},
+                )["status"]
+                st.caption(status)
+            action_col_idx = 4
+        with cols[action_col_idx]:
             a, b, c = st.columns(3)
             if a.button("Up", key=f"{key}_up_{draft_id}", disabled=i == 0):
                 move = (i, i - 1)
@@ -1139,26 +1375,14 @@ def _sheet_steps_editor(
         steps.pop(remove_idx)
         st.rerun()
 
-    st.divider()
-    add_cols = st.columns([3, 3, 1.4])
-    with add_cols[0]:
-        add_plugin = st.selectbox(
-            "Module to add",
-            options=plugin_ids,
-            format_func=lambda plugin_id: f"{plugin_names.get(plugin_id, plugin_id)} ({plugin_id})",
-            key=f"{key}_add_plugin",
-        )
-    with add_cols[1]:
-        add_label = st.text_input("Step label", value=plugin_names.get(add_plugin, add_plugin), key=f"{key}_add_label")
-    with add_cols[2]:
-        st.write("")
-        if st.button("Add step", key=f"{key}_add_step", use_container_width=True):
-            steps.append({
-                "_draft_id": _sheet_draft_id(key, len(steps)),
-                "plugin_id": add_plugin,
-                "label": add_label.strip() or plugin_names.get(add_plugin, add_plugin),
-            })
-            st.rerun()
+    if st.button("＋ Add step", key=f"{key}_add_step"):
+        default_plugin = plugin_ids[0]
+        steps.append({
+            "_draft_id": _sheet_draft_id(key, len(steps)),
+            "plugin_id": default_plugin,
+            "label": plugin_names.get(default_plugin, default_plugin),
+        })
+        st.rerun()
 
     return _sheet_public_steps(steps)
 
@@ -1166,129 +1390,125 @@ def _sheet_steps_editor(
 def _page_sheets(reg: PluginRegistry) -> None:
     st.header(":material/dashboard: Sheets")
     manage_disabled = not _can_manage()
-
     plugins = reg.list_plugins()
 
-    with st.expander("Create Sheet", expanded=st.session_state.get("expand_new_sheet", False)):
-        new_name = st.text_input("Sheet name", key="new_sheet_name_v2")
-        new_desc = st.text_input("Description", key="new_sheet_desc_v2")
-        new_steps = _sheet_steps_editor("new_sheet_steps_v2", plugins)
-        if st.button("Create Sheet", type="primary", key="save_new_sheet_v2", disabled=manage_disabled):
-            if not new_name.strip():
-                st.error("Sheet name is required.")
-            elif not new_steps:
-                st.error("Add at least one step before saving the Sheet.")
-            else:
+    # ── 上半部：新增 Sheet ────────────────────────────────────────
+    with st.expander("＋ New Sheet", expanded=st.session_state.get("expand_new_sheet", False)):
+        nc = st.columns([2, 3, 1])
+        with nc[0]:
+            new_name = st.text_input("Sheet name", key="new_sheet_name_v2", placeholder="e.g. Defect Inspection", label_visibility="collapsed")
+        with nc[1]:
+            new_desc = st.text_input("Description", key="new_sheet_desc_v2", placeholder="Description (optional)", label_visibility="collapsed")
+        with nc[2]:
+            if st.button("Create", type="primary", key="save_new_sheet_v2",
+                         disabled=manage_disabled or not new_name.strip(),
+                         use_container_width=True):
                 sheet_id = new_name.strip().lower().replace(" ", "_")
                 try:
                     _use_cases(reg).create_or_update_sheet(
-                        sheet_id,
-                        new_name.strip(),
-                        new_desc.strip(),
-                        new_steps,
-                        actor=_actor(),
-                        action="create",
+                        sheet_id, new_name.strip(), new_desc.strip(), [],
+                        actor=_actor(), action="create",
                     )
-                    st.toast(f"Created Sheet {new_name.strip()}.", icon=":material/check_circle:")
-                    st.session_state.pop("new_sheet_steps_v2", None)
+                    st.toast(f"Created Sheet '{new_name.strip()}'.", icon=":material/check_circle:")
                     st.session_state["expand_new_sheet"] = False
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Create Sheet failed: {exc}")
 
-    sync_col, _ = st.columns([1.6, 5])
-    with sync_col:
-        if st.button("Sync sheet.yaml", icon=":material/sync:", key="sync_sheets_v2", disabled=manage_disabled, use_container_width=True):
-            try:
-                synced = reg.sync_sheets()
-                st.toast(f"Synced: {', '.join(synced)}" if synced else "No sheet.yaml changes found.", icon=":material/check_circle:")
-                st.rerun()
-            except Exception as exc:
-                st.toast(f"Sync failed: {exc}", icon=":material/error:")
-
+    # ── 上半部：Sheet 列表 ────────────────────────────────────────
     sheets = reg.list_sheets()
     if not sheets:
-        st.info("No Sheets yet. Create one above or sync from scripts/sheets/*.yaml.")
+        st.info("No Sheets yet. Create one above.")
         return
 
-    selected_sheet_id = st.selectbox(
-        "Sheet",
-        options=[sheet.sheet_id for sheet in sheets],
-        format_func=lambda sheet_id: next(f"{s.name} ({s.sheet_id})" for s in sheets if s.sheet_id == sheet_id),
-        key="selected_sheet_id",
-    )
-    sheet = next(s for s in sheets if s.sheet_id == selected_sheet_id)
-    prod_issues = validate_sheet_prod_readiness(_DB_PATH, sheet.sheet_id)
-    draft_key = f"sheet_steps_{sheet.sheet_id}"
-    initial_tabs = [{"plugin_id": tab.plugin_id, "label": tab.label} for tab in sheet.tabs]
+    df = pd.DataFrame([{
+        "Name": s.name,
+        "Dev": "On" if s.enabled_dev else "Off",
+        "Prod": "On" if s.enabled_prod else "Off",
+        "Steps": len(s.tabs),
+        "_id": s.sheet_id,
+    } for s in sheets])
 
+    evt = st.dataframe(
+        df[["Name", "Dev", "Prod", "Steps"]],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="sheets_table",
+    )
+
+    sel_rows = evt.selection.rows
+    if not sel_rows:
+        st.caption("選擇上方的 Sheet 來編輯其 Steps。")
+        return
+
+    sheet = next(s for s in sheets if s.sheet_id == df.iloc[sel_rows[0]]["_id"])
+    prod_issues = validate_sheet_prod_readiness(_DB_PATH, sheet.sheet_id)
     summary, readiness_by_step, _ = _sheet_readiness_summary(prod_issues)
 
-    st.subheader(sheet.name)
-    action_panel = st.container()
+    st.divider()
 
-    edit_cols = st.columns([2, 3])
-    with edit_cols[0]:
-        edit_name = st.text_input("Name", value=sheet.name, key=f"sheet_name_v2_{sheet.sheet_id}")
-    with edit_cols[1]:
-        edit_desc = st.text_input("Description", value=sheet.description, key=f"sheet_desc_v2_{sheet.sheet_id}")
-
-    steps = _sheet_steps_editor(
-        draft_key,
-        plugins,
-        initial_tabs=initial_tabs,
-        readiness_by_step=readiness_by_step,
-    )
-    draft_steps = st.session_state.get(draft_key, [])
-    is_dirty = _sheet_draft_is_dirty(edit_name, edit_desc, draft_steps, sheet, initial_tabs)
-
-    with action_panel:
-        meta_cols = st.columns(5)
-        meta_cols[0].metric("Sheet ID", sheet.sheet_id)
-        meta_cols[1].metric("Steps", len(steps))
-        meta_cols[2].metric("Dev", "On" if sheet.enabled_dev else "Off")
-        meta_cols[3].metric("Prod", "On" if sheet.enabled_prod else "Off")
-        meta_cols[4].metric("Readiness", "Blocked" if prod_issues else "Ready")
-
-        if is_dirty:
-            st.warning("Unsaved changes. Save or reset the draft before changing Prod visibility.")
-        elif prod_issues:
-            st.warning(summary)
-        else:
-            st.success("Prod ready.")
-
-        action_cols = st.columns([1, 1, 1, 1, 1])
-        with action_cols[0]:
-            if st.button("Save Sheet", type="primary", key=f"sheet_save_v2_{sheet.sheet_id}", disabled=manage_disabled, use_container_width=True):
+    # ── 下半部：Sheet 操作列 ──────────────────────────────────────
+    rename_key = f"renaming_{sheet.sheet_id}"
+    if st.session_state.get(rename_key):
+        rc = st.columns([2, 3, 1, 1])
+        with rc[0]:
+            edit_name = st.text_input("Name", value=sheet.name,
+                                      key=f"rename_name_{sheet.sheet_id}",
+                                      label_visibility="collapsed")
+        with rc[1]:
+            edit_desc = st.text_input("Description", value=sheet.description,
+                                      key=f"rename_desc_{sheet.sheet_id}",
+                                      label_visibility="collapsed",
+                                      placeholder="Description (optional)")
+        with rc[2]:
+            if st.button("Save", type="primary", key=f"rename_save_{sheet.sheet_id}", use_container_width=True):
                 if not edit_name.strip():
-                    st.error("Sheet name is required.")
-                elif not steps:
-                    st.error("Add at least one step before saving the Sheet.")
+                    st.error("Name is required.")
                 else:
                     try:
-                        _use_cases(reg).create_or_update_sheet(
-                            sheet.sheet_id,
-                            edit_name.strip(),
-                            edit_desc.strip(),
-                            steps,
-                            actor=_actor(),
-                            action="update",
+                        draft_key = f"sheet_steps_{sheet.sheet_id}"
+                        current_steps = _sheet_public_steps(
+                            st.session_state.get(draft_key,
+                                _prepare_sheet_draft_steps(draft_key,
+                                    [{"plugin_id": t.plugin_id, "label": t.label} for t in sheet.tabs]))
                         )
-                        st.toast("Sheet saved.", icon=":material/check_circle:")
+                        _use_cases(reg).create_or_update_sheet(
+                            sheet.sheet_id, edit_name.strip(), edit_desc.strip(),
+                            current_steps, actor=_actor(), action="update",
+                        )
+                        st.session_state.pop(rename_key, None)
+                        st.toast("Saved.", icon=":material/check_circle:")
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"Save Sheet failed: {exc}")
-        with action_cols[1]:
-            if st.button("Hide in Dev" if sheet.enabled_dev else "Show in Dev", key=f"sheet_dev_v2_{sheet.sheet_id}", disabled=manage_disabled, use_container_width=True):
+                        st.error(str(exc))
+        with rc[3]:
+            if st.button("Cancel", key=f"rename_cancel_{sheet.sheet_id}", use_container_width=True):
+                st.session_state.pop(rename_key, None)
+                st.rerun()
+    else:
+        st.subheader(sheet.name)
+        if sheet.description:
+            st.caption(sheet.description)
+
+        ac = st.columns([1, 1, 1, 1, 4])
+        with ac[0]:
+            if st.button("Rename", key=f"rename_btn_{sheet.sheet_id}",
+                         disabled=manage_disabled, use_container_width=True):
+                st.session_state[rename_key] = True
+                st.rerun()
+        with ac[1]:
+            dev_label = "Dev: On" if sheet.enabled_dev else "Dev: Off"
+            if st.button(dev_label, key=f"dev_btn_{sheet.sheet_id}",
+                         disabled=manage_disabled, use_container_width=True):
                 _use_cases(reg).set_sheet_dev_enabled(sheet.sheet_id, not sheet.enabled_dev, actor=_actor())
                 st.rerun()
-        with action_cols[2]:
-            if st.button(
-                "Prod off" if sheet.enabled_prod else "Prod on",
-                key=f"sheet_prod_v2_{sheet.sheet_id}",
-                disabled=manage_disabled or is_dirty or (not sheet.enabled_prod and bool(prod_issues)),
-                use_container_width=True,
-            ):
+        with ac[2]:
+            prod_label = "Prod: On" if sheet.enabled_prod else "Prod: Off"
+            if st.button(prod_label, key=f"prod_btn_{sheet.sheet_id}",
+                         disabled=manage_disabled or (not sheet.enabled_prod and bool(prod_issues)),
+                         use_container_width=True):
                 try:
                     _use_cases(reg).set_sheet_prod_enabled(sheet.sheet_id, not sheet.enabled_prod, actor=_actor())
                     st.rerun()
@@ -1297,36 +1517,148 @@ def _page_sheets(reg: PluginRegistry) -> None:
                     st.error(failed_summary)
                     if failed_details:
                         st.dataframe(pd.DataFrame(failed_details), use_container_width=True, hide_index=True)
-        with action_cols[3]:
-            if st.button("Discard edits", key=f"sheet_reset_v2_{sheet.sheet_id}", use_container_width=True):
-                st.session_state[draft_key] = _prepare_sheet_draft_steps(draft_key, initial_tabs)
-                st.rerun()
-        with action_cols[4]:
-            if st.button("Delete Sheet", key=f"sheet_delete_v2_{sheet.sheet_id}", disabled=manage_disabled, use_container_width=True):
+        with ac[3]:
+            if st.button("Delete", key=f"delete_btn_{sheet.sheet_id}",
+                         disabled=manage_disabled, use_container_width=True):
                 _confirm_delete_sheet_dialog(reg, sheet.sheet_id, sheet.name)
-    return
 
+        if prod_issues:
+            st.warning(summary)
+
+    # ── 下半部：Steps 編輯 ────────────────────────────────────────
+    draft_key = f"sheet_steps_{sheet.sheet_id}"
+    initial_tabs = [{"plugin_id": tab.plugin_id, "label": tab.label} for tab in sheet.tabs]
+    steps = _sheet_steps_editor(draft_key, plugins,
+                                initial_tabs=initial_tabs,
+                                readiness_by_step=readiness_by_step)
+
+    draft_steps = st.session_state.get(draft_key, [])
+    steps_dirty = _sheet_public_steps(draft_steps) != initial_tabs
+
+    sc = st.columns([1, 1, 5])
+    with sc[0]:
+        if st.button("Save Steps", type="primary", key=f"sheet_save_{sheet.sheet_id}",
+                     disabled=manage_disabled or not steps_dirty, use_container_width=True):
+            if not steps:
+                st.error("Add at least one step before saving.")
+            else:
+                try:
+                    _use_cases(reg).create_or_update_sheet(
+                        sheet.sheet_id, sheet.name, sheet.description, steps,
+                        actor=_actor(), action="update",
+                    )
+                    st.toast("Steps saved.", icon=":material/check_circle:")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Save failed: {exc}")
+    with sc[1]:
+        if st.button("Discard", key=f"sheet_discard_{sheet.sheet_id}", use_container_width=True):
+            st.session_state[draft_key] = _prepare_sheet_draft_steps(draft_key, initial_tabs)
+            st.rerun()
+
+
+
+def _fmt_ms(ms: float | None) -> str:
+    if ms is None:
+        return "—"
+    s = int(ms) // 1000
+    if s < 60:
+        return f"{s}s"
+    return f"{s // 60}m {s % 60}s"
 
 
 def _page_runs(reg: PluginRegistry) -> None:
     st.header(":material/monitoring: Runs & Usage")
     store = _store()
-    days = st.slider("Usage window", min_value=1, max_value=90, value=30, step=1)
 
-    st.subheader("Usage Summary")
+    # 工具名稱對照表
+    tool_names = {p.plugin_id: p.name for p in reg.list_plugins()}
+
+    # ── 時間範圍選擇 ──────────────────────────────────────────────
+    days_map = {"7 天": 7, "30 天": 30, "90 天": 90}
+    period = st.radio("時間範圍", list(days_map.keys()), index=1,
+                      horizontal=True, label_visibility="collapsed")
+    days = days_map[period]
+
     usage_rows = store.usage_summary(days=days)
-    if usage_rows:
-        st.dataframe(pd.DataFrame(usage_rows), use_container_width=True, hide_index=True)
-    else:
-        st.info("No tool runs have been recorded yet. Launch a tool from the Portal or Tools tab.")
+    if not usage_rows:
+        st.info("目前沒有執行記錄。請從 Portal 或 Tools 頁面啟動工具。")
+        return
 
-    st.subheader("Recent Runs")
-    tool_filter = st.text_input("Filter by tool ID", placeholder="Optional", key="run_tool_filter")
-    runs = store.list_tool_run_rows(limit=100, tool_id=tool_filter.strip() or None)
-    if runs:
-        st.dataframe(pd.DataFrame(runs), use_container_width=True, hide_index=True)
-    else:
-        st.caption("No matching runs.")
+    # ── KPI 總覽 ─────────────────────────────────────────────────
+    total_runs = sum(r["run_count"] for r in usage_rows)
+    total_failed = sum(r["failed_count"] for r in usage_rows)
+    total_completed = sum(r["completed_count"] for r in usage_rows)
+    success_rate = f"{total_completed / total_runs * 100:.0f}%" if total_runs else "—"
+    active_tools = len(usage_rows)
+
+    kc = st.columns(4)
+    kc[0].metric("總執行次數", total_runs)
+    kc[1].metric("成功率", success_rate)
+    kc[2].metric("失敗次數", total_failed)
+    kc[3].metric("活躍工具", active_tools)
+
+    st.divider()
+
+    # ── 工具使用排行 ──────────────────────────────────────────────
+    summary_data = []
+    for r in usage_rows:
+        tid = r["tool_id"]
+        runs = r["run_count"]
+        failed = r["failed_count"]
+        rate = (r["completed_count"] / runs * 100) if runs else 0
+        rate_str = f"{rate:.0f}% ⚠" if rate < 80 and runs >= 3 else f"{rate:.0f}%"
+        summary_data.append({
+            "工具名稱": tool_names.get(tid, tid),
+            "執行次數": runs,
+            "成功率": rate_str,
+            "最後執行": r.get("last_started_at", "—"),
+            "_tool_id": tid,
+        })
+
+    df_summary = pd.DataFrame(summary_data)
+
+    evt = st.dataframe(
+        df_summary[["工具名稱", "執行次數", "成功率", "最後執行"]],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="runs_table",
+    )
+
+    # ── 選中工具的執行記錄 ────────────────────────────────────────
+    sel_rows = evt.selection.rows
+    if not sel_rows:
+        st.caption("點選上方工具列查看執行記錄。")
+        return
+
+    selected_tool_id = df_summary.iloc[sel_rows[0]]["_tool_id"]
+    selected_tool_name = tool_names.get(selected_tool_id, selected_tool_id)
+
+    st.divider()
+    st.subheader(f"{selected_tool_name} 執行記錄")
+
+    runs = store.list_tool_run_rows(limit=50, tool_id=selected_tool_id)
+    if not runs:
+        st.caption("尚無執行記錄。")
+        return
+
+    run_data = []
+    for r in runs:
+        row = {
+            "時間": r.get("started_at", "—"),
+            "狀態": r.get("status", "—"),
+            "時長": _fmt_ms(r.get("duration_ms")),
+            "執行者": r.get("actor", "—"),
+        }
+        if r.get("status") == "failed" and r.get("error_summary"):
+            row["錯誤"] = r["error_summary"]
+        else:
+            row["錯誤"] = "—"
+        run_data.append(row)
+
+    st.dataframe(pd.DataFrame(run_data), use_container_width=True, hide_index=True)
 
 
 def _page_permissions(reg: PluginRegistry) -> None:

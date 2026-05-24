@@ -1,4 +1,5 @@
 id: module_017
+slug: label-manager
 vendor: cimcore
 domain: pipeline
 name: Label Manager

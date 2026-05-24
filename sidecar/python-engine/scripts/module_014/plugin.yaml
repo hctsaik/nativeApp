@@ -1,4 +1,5 @@
 id: module_014
+slug: annotation-export
 vendor: cimcore
 domain: pipeline
 name: Export

@@ -412,7 +412,7 @@ class SQLiteManagementStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT tool_id, name, script_relative_path, version, signature,
-                          source_commit, author, approved_at
+                          source_commit, author, approved_at, slug
                    FROM tools
                    WHERE enabled = 1
                    ORDER BY order_index, name"""
@@ -425,7 +425,7 @@ class SQLiteManagementStore:
         with self._connect() as conn:
             row = conn.execute(
                 """SELECT tool_id, name, script_relative_path, version, signature,
-                          source_commit, author, approved_at
+                          source_commit, author, approved_at, slug
                    FROM tools
                    WHERE tool_id = ? AND enabled = 1""",
                 (tool_id,),

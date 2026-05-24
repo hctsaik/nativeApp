@@ -8,6 +8,7 @@ export const MessageTypes = Object.freeze({
   EXECUTE_COMPLETE: "EXECUTE_COMPLETE",
   DISPLAY_UPDATE: "DISPLAY_UPDATE",
   SWITCH_TAB: "SWITCH_TAB",
+  OPEN_PREVIEW: "OPEN_PREVIEW",
 });
 
 export function createMessage(type, payload = {}) {

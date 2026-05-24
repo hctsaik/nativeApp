@@ -1,4 +1,5 @@
 id: module_005
+slug: edge-record-query
 vendor: cimcore
 domain: edge
 name: 邊緣記錄查詢

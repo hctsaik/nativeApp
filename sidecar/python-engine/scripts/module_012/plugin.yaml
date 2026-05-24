@@ -1,4 +1,5 @@
 id: module_012
+slug: annotation-session
 vendor: cimcore
 domain: annotation
 name: Annotation Session

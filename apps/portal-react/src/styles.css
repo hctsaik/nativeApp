@@ -715,3 +715,68 @@ select {
   color: #713f12;
   pointer-events: none;
 }
+
+/* ── Preview Modal ────────────────────────────────────────── */
+
+.preview-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.preview-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  height: 44px;
+  background: #1a1a2e;
+  flex-shrink: 0;
+}
+
+.preview-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-modal-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.preview-modal-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.preview-modal-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.preview-modal-iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+}

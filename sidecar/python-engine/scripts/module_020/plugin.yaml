@@ -1,4 +1,5 @@
 id: module_020
+slug: upload-history
 vendor: cimcore
 domain: pipeline
 name: 我的上傳記錄

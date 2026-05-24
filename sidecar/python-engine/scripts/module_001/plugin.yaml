@@ -1,4 +1,5 @@
 id: module_001
+slug: opencv-image-processor
 vendor: cimcore
 domain: cv
 name: OpenCV 影像處理
