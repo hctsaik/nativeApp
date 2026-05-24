@@ -19,8 +19,8 @@ Run manually:
 
 ```bash
 cd mcp
-set PYTHONPATH=C:/code/claude/nativeApp/mcp;C:/code/claude/nativeApp/sidecar/python-engine
-set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp/tmp/annotation-workspace
+set PYTHONPATH=C:/code/claude/nativeApp_Management/mcp;C:/code/claude/nativeApp_Management/sidecar/python-engine
+set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp_Management/tmp/annotation-workspace
 python -m annotation_mcp.server
 ```
 
@@ -173,7 +173,7 @@ The `.claude/mcp.json` at the repo root configures this server automatically:
     "cim-gui": {
       "command": "python",
       "args": ["-m", "cim_gui_mcp.server"],
-      "cwd": "C:/code/claude/nativeApp/mcp"
+      "cwd": "C:/code/claude/nativeApp_Management/mcp"
     }
   }
 }

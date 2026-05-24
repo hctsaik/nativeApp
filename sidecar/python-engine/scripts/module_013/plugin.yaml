@@ -1,13 +1,13 @@
 id: module_013
 vendor: cimcore
 domain: pipeline
-name: Update
-version: "1.0.0"
+name: Sync Back
+version: "2.0.0"
 category: module
-description: 將標注與分類結果寫回原始目錄，支援複製標注 JSON 與依分類整理圖片
+description: 將標注結果（bbox + 分類）批次推送至遠端 Service，並附帶訓練格式壓縮檔
 author: system
 enabled: true
-tags: [annotation, update, export, organize]
+tags: [annotation, sync, service, export]
 runner: cv_framework
 input_file: 013_input.py
 output_file: 013_output.py

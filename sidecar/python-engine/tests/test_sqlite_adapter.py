@@ -37,6 +37,27 @@ def test_all_active_modules_present(adapter: SQLiteToolAdapter) -> None:
     assert expected.issubset(ids)
 
 
+def test_annotation_workflow_tabs_include_dashboard_and_ai(adapter: SQLiteToolAdapter, tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT plugin_id FROM sheet_tabs WHERE sheet_id='annotation_workflow' ORDER BY tab_order"
+        ).fetchall()
+
+    assert [row[0] for row in rows] == [
+        "module_019",
+        "module_010",
+        "module_012",
+        "module_013",
+        "module_020",
+        "module_015",
+        "module_014",
+        "module_016",
+        "module_017",
+        "module_018",
+    ]
+
+
 def test_module_002_is_hidden_from_portal(adapter: SQLiteToolAdapter) -> None:
     ids = [t.tool_id for t in adapter.list_tools()]
     assert "module_002" not in ids
@@ -51,15 +72,16 @@ def test_module_002_seed_row_exists_in_db(adapter: SQLiteToolAdapter) -> None:
 def test_module_001_metadata(adapter: SQLiteToolAdapter) -> None:
     tool = adapter.get_tool("module_001")
     assert tool.tool_id == "module_001"
-    assert "001" in tool.name
-    assert tool.version == "0.1.0"
+    assert tool.name == "OpenCV 影像處理"
+    assert tool.version == "1.0.0"
     assert tool.script_path.name == "cv_framework_runner.py"
 
 
 def test_module_006_metadata(adapter: SQLiteToolAdapter) -> None:
     tool = adapter.get_tool("module_006")
     assert tool.tool_id == "module_006"
-    assert "006" in tool.name
+    assert tool.name == "動物影像標記"
+    assert tool.version == "1.0.0"
     assert tool.script_path.name == "cv_framework_runner.py"
 
 

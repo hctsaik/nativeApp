@@ -58,7 +58,7 @@ scripts/module_XXX/
 | Module 008 - 影片追蹤標注 | [module_008.md](modules/module_008.md) | [scripts/module_008/README.md](../sidecar/python-engine/scripts/module_008/README.md) | guide.html（嵌入 App）|
 | Module 010 - Data Feeder | [module_010.md](modules/module_010.md) | — | — |
 | Module 012 - Annotation Session | [module_012.md](modules/module_012.md) | — | — |
-| Module 013 - Update | [module_013.md](modules/module_013.md) | — | — |
+| Module 013 - Sync Back | [module_013.md](modules/module_013.md) | — | — |
 | Module 014 - Export | [module_014.md](modules/module_014.md) | — | — |
 | Module 015 - Dashboard | [module_015.md](modules/module_015.md) | — | — |
 | Module 016 - AI Pre-labeling | [module_016.md](modules/module_016.md) | — | — |

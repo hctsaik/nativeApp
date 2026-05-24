@@ -16,6 +16,10 @@ _cfg_spec = _ilu.spec_from_file_location("_010_config", _HERE / "_config.py")
 _cfg = _ilu.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 # ─── 預設副檔名選項 ────────────────────────────────────────────────────────────
 
 _DEFAULT_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"]
@@ -24,8 +28,12 @@ _DEFAULT_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"]
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
 def render_input() -> dict:
-    st.subheader("📦 Data Feeder — 資料來源設定")
-    st.caption("從資料夾、資料庫或 API 建立標準化圖片清單（DatasetManifest）")
+    _help.render_help_header(
+        "module_010",
+        "input",
+        "📦 Data Feeder — 資料來源設定",
+        "從資料夾、資料庫或 API 建立標準化圖片清單（DatasetManifest）",
+    )
 
     cfg = _cfg.load_config()
 
@@ -167,14 +175,5 @@ def render_input() -> dict:
         from urllib.parse import urlparse as _urlparse
         _u = params.get("api_url", "").strip()
         params["manifest_name"] = _urlparse(_u).hostname or "" if _u else ""
-
-    # ── 跳過預覽選項（預設 True；不存 config，session reset 自動回 True） ────
-    if "m010_skip_preview" not in st.session_state:
-        st.session_state["m010_skip_preview"] = True
-    skip_preview = st.checkbox(
-        "執行後直接前往 Annotation Session（跳過資料預覽）",
-        key="m010_skip_preview",
-    )
-    params["skip_preview"] = skip_preview
 
     return params

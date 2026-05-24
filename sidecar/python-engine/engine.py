@@ -19,8 +19,13 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
+
+from management_insights import validate_sheet_prod_readiness
+from management_insights import validate_module_snapshot_content
+from management_schema import SQLiteManagementSchema
+from management_store import SQLiteManagementStore
 
 
 def resource_root() -> Path:
@@ -31,6 +36,15 @@ def resource_root() -> Path:
 
 ROOT_DIR = resource_root()
 TOOLS_DIR = ROOT_DIR / "tools"
+
+
+def resolve_tools_db_path(log_dir: Path | None = None) -> Path:
+    env_path = os.environ.get("CIM_TOOLS_DB")
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+    if log_dir is not None:
+        return (log_dir / "data" / "tools.sqlite").resolve()
+    return (ROOT_DIR / "config" / "tools.sqlite").resolve()
 
 
 @dataclass(frozen=True)
@@ -52,7 +66,7 @@ class SheetTabInfo(BaseModel):
     output_url: str
     input_port: int
     output_port: int
-    ready: bool = True
+    ready: bool = False
 
 
 class ToolStartResponse(BaseModel):
@@ -85,6 +99,10 @@ class SelectedPathsRequest(BaseModel):
 
 class SelectedPathsResponse(BaseModel):
     paths: list[str]
+
+
+class ProdEnabledRequest(BaseModel):
+    enabled: bool
 
 
 class ToolAdapter(ABC):
@@ -125,6 +143,8 @@ class SQLiteToolAdapter(ToolAdapter):
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        SQLiteManagementSchema(self._db_path).ensure_current()
+        self._store = SQLiteManagementStore(self._db_path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -274,56 +294,55 @@ class SQLiteToolAdapter(ToolAdapter):
                 ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation_workflow",
                  "management-center", "labelme-dino"),
             )
-            # migration: add module_014/015/016 to annotation_workflow
-            for tab_order, plugin_id, label in [
-                (3, "module_014", "📤 Export"),
-                (4, "module_015", "📊 Dashboard"),
-                (5, "module_016", "🤖 AI Pre-labeling"),
-                (6, "module_017", "🏷️ Label Manager"),
-                (7, "module_018", "🖼️ Review Gallery"),
-            ]:
-                try:
-                    connection.execute(
-                        "INSERT OR IGNORE INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
-                        " VALUES (?, ?, ?, ?)",
-                        ("annotation_workflow", tab_order, plugin_id, label),
-                    )
-                except Exception:
-                    pass
+            self._reconcile_annotation_workflow_tabs(connection)
 
-            # migration: add module_019 (Data Downloader) as first tab
-            try:
-                exists = connection.execute(
-                    "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
-                    ("annotation_workflow", "module_019"),
-                ).fetchone()
-                if not exists:
-                    # Shift all existing annotation_workflow tabs up by 1
-                    # Two-step to avoid UNIQUE(sheet_id, tab_order) conflict
-                    connection.execute(
-                        "UPDATE sheet_tabs SET tab_order = -(tab_order + 1) WHERE sheet_id = ?",
-                        ("annotation_workflow",),
-                    )
-                    connection.execute(
-                        "UPDATE sheet_tabs SET tab_order = -tab_order WHERE sheet_id = ?",
-                        ("annotation_workflow",),
-                    )
-                    connection.execute(
-                        "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
-                        " VALUES (?, ?, ?, ?)",
-                        ("annotation_workflow", 0, "module_019", "\U0001f310 Data Downloader"),
-                    )
-            except Exception:
-                pass
+    def _reconcile_annotation_workflow_tabs(self, connection) -> None:
+        desired_tabs = [
+            (0, "module_019", "\U0001f310 Data Downloader"),
+            (1, "module_010", "\U0001f4e6 Data Feeder"),
+            (2, "module_012", "\U0001f3f7\ufe0f Annotation"),
+            (3, "module_013", "\U0001f504 Sync Back"),
+            (4, "module_020", "\U0001f4e5 Download"),
+            (5, "module_015", "\U0001f4ca Dashboard"),
+            (6, "module_014", "\U0001f4e4 Export"),
+            (7, "module_016", "\U0001f916 AI Pre-labeling"),
+            (8, "module_017", "\U0001f3f7\ufe0f Label Manager"),
+            (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
+        ]
+        plugin_ids = [plugin_id for _, plugin_id, _ in desired_tabs]
+        placeholders = ",".join("?" for _ in plugin_ids)
+        existing = {
+            row["tool_id"]
+            for row in connection.execute(
+                f"SELECT tool_id FROM tools WHERE tool_id IN ({placeholders})",
+                plugin_ids,
+            )
+        }
+        if any(plugin_id not in existing for plugin_id in plugin_ids):
+            return
 
-            # migration: update module_017 label to 管理中心
-            try:
-                connection.execute(
-                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
-                    ("\U0001f4ca 管理中心", "annotation_workflow", "module_017"),
-                )
-            except Exception:
-                pass
+        current = [
+            (row["tab_order"], row["plugin_id"], row["label"])
+            for row in connection.execute(
+                "SELECT tab_order, plugin_id, label FROM sheet_tabs "
+                "WHERE sheet_id='annotation_workflow' ORDER BY tab_order"
+            )
+        ]
+        if current == desired_tabs:
+            return
+
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO sheets (sheet_id, name, description, enabled_dev, enabled_prod)
+            VALUES ('annotation_workflow', 'Annotation Workflow',
+                    'End-to-end annotation workflow', 1, 0)
+            """
+        )
+        connection.execute("DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'")
+        connection.executemany(
+            "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label) VALUES (?, ?, ?, ?)",
+            [("annotation_workflow", tab_order, plugin_id, label) for tab_order, plugin_id, label in desired_tabs],
+        )
 
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
@@ -375,60 +394,35 @@ class SQLiteToolAdapter(ToolAdapter):
                 """,
                 (tool_id, name, script, version, author, enabled, vendor, domain, deprecated_at),
             )
-            # Sync mutable fields from yaml on every startup
+            # Sync mutable dev/catalog fields from yaml on every startup.
+            # Prod visibility is controlled only by publish/management workflows.
             connection.execute(
                 """
                 UPDATE tools
                 SET name=?, script_relative_path=?, version=?, enabled=?,
-                    enabled_prod=?, vendor=?, domain=?, deprecated_at=?
+                    vendor=?, domain=?, deprecated_at=?
                 WHERE tool_id=?
                 """,
-                (name, script, version, enabled, enabled, vendor, domain, deprecated_at, tool_id),
+                (name, script, version, enabled, vendor, domain, deprecated_at, tool_id),
             )
 
     def list_tools(self) -> list[ToolDefinition]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT tool_id, name, script_relative_path, version, signature,
-                       source_commit, author, approved_at
-                FROM tools
-                WHERE enabled = 1
-                ORDER BY order_index, name
-                """
-            ).fetchall()
+        rows = self._store.list_enabled_tool_definition_rows()
         return [self._row_to_tool(row) for row in rows]
 
     def set_prod_enabled(self, tool_id: str, enabled: bool) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                "UPDATE tools SET enabled_prod = ? WHERE tool_id = ?",
-                (1 if enabled else 0, tool_id),
-            )
+        self._store.set_tool_prod_enabled(tool_id, enabled)
 
     def list_tools_with_prod(self) -> list[tuple]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT tool_id, name, enabled, enabled_prod FROM tools ORDER BY name"
-            ).fetchall()
-        return [(r["tool_id"], r["name"], bool(r["enabled"]), bool(r["enabled_prod"])) for r in rows]
+        return self._store.list_tools_with_prod_flags()
 
     def get_tool(self, tool_id: str) -> ToolDefinition:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT tool_id, name, script_relative_path, version, signature,
-                       source_commit, author, approved_at
-                FROM tools
-                WHERE tool_id = ? AND enabled = 1
-                """,
-                (tool_id,),
-            ).fetchone()
+        row = self._store.get_enabled_tool_definition_row(tool_id)
         if row is None:
             raise KeyError(tool_id)
         return self._row_to_tool(row)
 
-    def _row_to_tool(self, row: sqlite3.Row) -> ToolDefinition:
+    def _row_to_tool(self, row) -> ToolDefinition:
         return ToolDefinition(
             tool_id=row["tool_id"],
             name=row["name"],
@@ -515,12 +509,13 @@ def _terminate_process(process: subprocess.Popen, label: str) -> None:
 
 
 class ToolProcessManager:
-    def __init__(self, log_dir: Path, selected_paths_file: Path) -> None:
-        import threading
-        self._lock = threading.RLock()
+    def __init__(self, log_dir: Path, selected_paths_file: Path, db_path: Path) -> None:
         self._log_dir = log_dir.resolve()
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._selected_paths_file = selected_paths_file.resolve()
+        self._db_path = db_path.resolve()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        SQLiteManagementSchema(self._db_path).ensure_current()
         self._input_process: Optional[subprocess.Popen] = None
         self._output_process: Optional[subprocess.Popen] = None
         self._external_process: Optional[subprocess.Popen] = None
@@ -530,13 +525,14 @@ class ToolProcessManager:
         self._external_run_id: Optional[str] = None
         self._external_started_at: Optional[float] = None
         self._external_last_probe: Optional[dict] = None
+        self._lock = threading.RLock()
         self._sheet_processes: dict[str, tuple[subprocess.Popen, subprocess.Popen]] = {}
         self._sheet_tab_info: list[dict] = []
-        # For lazy tab start: stores the ToolDefinition + scripts needed to spawn remaining tabs
-        self._sheet_tool_def: Optional["ToolDefinition"] = None
+        self._sheet_tool_def: Optional[ToolDefinition] = None
         self._sheet_input_script: Optional[Path] = None
         self._sheet_output_script: Optional[Path] = None
         self._tool_id: Optional[str] = None
+        self._run_id: Optional[str] = None
 
     def _make_env(self, tool: ToolDefinition, plugin_id: str = "") -> dict[str, str]:
         env = os.environ.copy()
@@ -553,24 +549,7 @@ class ToolProcessManager:
             env["CIM_SHEET_ID"] = tool.tool_id[len("sheet-"):]
         if plugin_id:
             env["CIM_PLUGIN_ID"] = plugin_id
-        env["CIM_TOOLS_DB"] = str(ROOT_DIR / "config" / "tools.sqlite")
-        # Inject connector.yaml path so modules can call ConnectorFactory.build()
-        # without hard-coding paths.  Each plugin may optionally ship a connector.yaml
-        # in its script directory; if absent the factory falls back to LocalFileConnector.
-        if plugin_id:
-            connector_yaml = ROOT_DIR / "scripts" / plugin_id / "connector.yaml"
-            env["CIM_CONNECTOR_CONFIG"] = str(connector_yaml)
-        # Inject connector credentials from secrets file (never stored in DB or YAML)
-        secrets_path = self._log_dir / "secrets" / "connector_creds.json"
-        if secrets_path.exists():
-            try:
-                import json as _json
-                creds = _json.loads(secrets_path.read_text(encoding="utf-8"))
-                env["CIM_CONNECTOR_DSN"]      = creds.get("dsn", "")
-                env["CIM_CONNECTOR_TOKEN"]    = creds.get("token", "")
-                env["CIM_CONNECTOR_BASE_URL"] = creds.get("base_url", "")
-            except Exception:
-                pass
+        env["CIM_TOOLS_DB"] = str(self._db_path)
         return env
 
     def _spawn(self, script: Path, tool: ToolDefinition, port: int, label: str,
@@ -591,14 +570,9 @@ class ToolProcessManager:
         )
 
     def _get_sheet_tabs(self, sheet_id: str) -> list[dict]:
-        db_path = ROOT_DIR / "config" / "tools.sqlite"
+        db_path = self._db_path
         def _query_tabs() -> list[dict]:
-            with sqlite3.connect(db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT plugin_id, label FROM sheet_tabs WHERE sheet_id = ? ORDER BY tab_order",
-                    (sheet_id,),
-                ).fetchall()
+            rows = SQLiteManagementStore(db_path).list_sheet_tab_rows(sheet_id)
             return [{"plugin_id": r["plugin_id"], "label": r["label"]} for r in rows]
 
         try:
@@ -887,7 +861,7 @@ class ToolProcessManager:
                     "ready_file": str(self._external_ready_file) if self._external_ready_file else None,
                 }
             else:
-                status = {"active": True, "tool_id": self._tool_id, "category": "module"}
+                status = {"active": True, "tool_id": self._tool_id, "category": "module", "run_id": self._run_id}
         return {
             "ok": True,
             "sidecar_pid": os.getpid(),
@@ -921,11 +895,21 @@ class ToolProcessManager:
         self._external_log_path = log_path
         self._external_ready_file = ready_file
         self._external_run_id = run_id
+        self._run_id = run_id
         self._external_started_at = time.time()
         ready_payload = self._wait_for_ready_file(ready_file)
         if not ready_payload.get("ok", False):
             self.stop()
             raise RuntimeError(f"video_annotator did not become ready: {ready_payload.get('error', 'unknown error')}")
+        SQLiteManagementStore(self._db_path).start_tool_run(
+            tool.tool_id,
+            "external",
+            "external-window",
+            actor=os.environ.get("USERNAME") or os.environ.get("USER") or "system",
+            pid=self._external_process.pid,
+            log_path=str(log_path),
+            run_id=run_id,
+        )
         return ToolStartResponse(
             tool_id=tool.tool_id,
             input_url="",
@@ -966,6 +950,16 @@ class ToolProcessManager:
             self.stop()
             raise RuntimeError(f"Streamlit output for {tool.tool_id} did not become ready in time")
 
+        run_id = SQLiteManagementStore(self._db_path).start_tool_run(
+            tool.tool_id,
+            _derive_category(tool.tool_id),
+            "iframe",
+            actor=os.environ.get("USERNAME") or os.environ.get("USER") or "system",
+            input_port=input_port,
+            output_port=output_port,
+            pid=self._input_process.pid if self._input_process else None,
+        )
+        self._run_id = run_id
         return ToolStartResponse(
             tool_id=tool.tool_id,
             input_url=f"http://127.0.0.1:{input_port}",
@@ -973,15 +967,11 @@ class ToolProcessManager:
             input_port=input_port,
             output_port=output_port,
             category=_derive_category(tool.tool_id),
+            run_id=run_id,
         )
 
     def _start_one_sheet_tab(self, plugin_id: str) -> dict:
-        """Spawn and wait for a single sheet tab's input+output processes.
-
-        Thread-safe and idempotent. If the tab is already ready or already being
-        spawned by another thread, waits for the ports and returns the info.
-        Raises RuntimeError if processes don't become ready in time.
-        """
+        """Spawn a single sheet tab and wait until both Streamlit ports are ready."""
         with self._lock:
             tab = next((t for t in self._sheet_tab_info if t["plugin_id"] == plugin_id), None)
             if tab is None:
@@ -989,52 +979,40 @@ class ToolProcessManager:
             if tab.get("ready"):
                 return dict(tab)
 
-            in_port = tab["input_port"]
-            out_port = tab["output_port"]
+            input_port = tab["input_port"]
+            output_port = tab["output_port"]
 
-            # Only spawn if not already spawned by another thread
             if plugin_id not in self._sheet_processes:
-                tool = self._sheet_tool_def
-                input_script = self._sheet_input_script
-                output_script = self._sheet_output_script
-                if tool is None or input_script is None or output_script is None:
-                    raise RuntimeError("Sheet tool definition not available for lazy start")
-                in_proc = self._spawn(input_script, tool, in_port, "input", plugin_id)
-                out_proc = self._spawn(output_script, tool, out_port, "output", plugin_id)
-                self._sheet_processes[plugin_id] = (in_proc, out_proc)
+                if self._sheet_tool_def is None or self._sheet_input_script is None or self._sheet_output_script is None:
+                    raise RuntimeError("Sheet tool definition is not available for lazy start")
+                input_process = self._spawn(self._sheet_input_script, self._sheet_tool_def, input_port, "input", plugin_id)
+                output_process = self._spawn(self._sheet_output_script, self._sheet_tool_def, output_port, "output", plugin_id)
+                self._sheet_processes[plugin_id] = (input_process, output_process)
 
-        # Wait outside the lock so other threads are not blocked
-        if not wait_for_port(in_port):
+        if not wait_for_port(input_port):
             raise RuntimeError(f"Sheet tab {plugin_id} input did not become ready in time")
-        if not wait_for_port(out_port):
+        if not wait_for_port(output_port):
             raise RuntimeError(f"Sheet tab {plugin_id} output did not become ready in time")
 
         with self._lock:
-            tab["input_url"] = f"http://127.0.0.1:{in_port}"
-            tab["output_url"] = f"http://127.0.0.1:{out_port}"
+            tab["input_url"] = f"http://127.0.0.1:{input_port}"
+            tab["output_url"] = f"http://127.0.0.1:{output_port}"
             tab["ready"] = True
             return dict(tab)
 
     def _prewarm_remaining_tabs(self) -> None:
-        """Background thread: spawn remaining (not-ready) tabs one by one, 800ms apart."""
-        import threading as _threading
-        import time as _time
-
         for tab in list(self._sheet_tab_info):
             if tab.get("ready"):
                 continue
-            # Stop if manager has been reset (sheet stopped)
             if self._tool_id is None:
                 return
             try:
                 self._start_one_sheet_tab(tab["plugin_id"])
             except Exception as exc:
                 logging.warning("Pre-warm tab %s failed: %s", tab["plugin_id"], exc)
-            _time.sleep(0.8)
+            time.sleep(0.8)
 
     def _start_sheet(self, tool: ToolDefinition) -> ToolStartResponse:
-        import threading as _threading
-
         sheet_id = tool.tool_id[len("sheet-"):]
         tabs = self._get_sheet_tabs(sheet_id)
         if not tabs:
@@ -1046,42 +1024,49 @@ class ToolProcessManager:
         if not output_script.exists():
             raise FileNotFoundError(output_script)
 
-        # Pre-allocate ports for all tabs up-front so we can return complete URL list.
         used_ports: set[int] = set()
         tab_info: list[dict] = []
+
         for tab in tabs:
             plugin_id = tab["plugin_id"]
+            # Clear stale result files per tab
             (self._log_dir / f"sheet_{sheet_id}_{plugin_id}_result.json").unlink(missing_ok=True)
+
             in_port = find_free_port(exclude=used_ports)
             used_ports.add(in_port)
             out_port = find_free_port(exclude=used_ports)
             used_ports.add(out_port)
+
             tab_info.append({
                 "plugin_id": plugin_id,
                 "label": tab["label"],
                 "input_port": in_port,
                 "output_port": out_port,
-                "input_url": "",   # filled in once that tab is started
+                "input_url": "",
                 "output_url": "",
                 "ready": False,
             })
 
-        # Persist tab definitions for lazy/pre-warm spawning
         self._sheet_tab_info = tab_info
         self._sheet_tool_def = tool
         self._sheet_input_script = input_script
         self._sheet_output_script = output_script
         self._tool_id = tool.tool_id
 
-        # Start only the first tab now, wait for it
-        first_pid = tab_info[0]["plugin_id"]
-        first = self._start_one_sheet_tab(first_pid)
-
-        # Background-spawn remaining tabs (one every 800ms) without blocking
+        first = self._start_one_sheet_tab(tab_info[0]["plugin_id"])
         if len(tab_info) > 1:
-            t = _threading.Thread(target=self._prewarm_remaining_tabs, daemon=True)
-            t.start()
+            threading.Thread(target=self._prewarm_remaining_tabs, daemon=True).start()
 
+        run_id = SQLiteManagementStore(self._db_path).start_tool_run(
+            tool.tool_id,
+            "sheet",
+            "iframe",
+            actor=os.environ.get("USERNAME") or os.environ.get("USER") or "system",
+            input_port=first["input_port"],
+            output_port=first["output_port"],
+            pid=self._sheet_processes[first["plugin_id"]][0].pid if first["plugin_id"] in self._sheet_processes else None,
+        )
+        self._run_id = run_id
         return ToolStartResponse(
             tool_id=tool.tool_id,
             input_url=first["input_url"],
@@ -1090,10 +1075,18 @@ class ToolProcessManager:
             output_port=first["output_port"],
             category="sheet",
             sheet_tabs=[SheetTabInfo(**t) for t in tab_info],
+            run_id=run_id,
         )
 
     def stop(self) -> None:
         with self._lock:
+            run_id = self._run_id
+            if run_id:
+                try:
+                    SQLiteManagementStore(self._db_path).finish_tool_run(run_id, "stopped")
+                except Exception as exc:
+                    logging.warning("Unable to finish run %s: %s", run_id, exc)
+                self._run_id = None
             if self._external_process:
                 if self._external_process.poll() is None:
                     _terminate_process(self._external_process, f"{self._tool_id}-external")
@@ -1111,9 +1104,9 @@ class ToolProcessManager:
             if self._output_process:
                 _terminate_process(self._output_process, f"{self._tool_id}-output")
                 self._output_process = None
-            for pid, (in_p, out_p) in self._sheet_processes.items():
-                _terminate_process(in_p, f"{self._tool_id}-sheet-{pid}-input")
-                _terminate_process(out_p, f"{self._tool_id}-sheet-{pid}-output")
+            for plugin_id, (in_p, out_p) in self._sheet_processes.items():
+                _terminate_process(in_p, f"{self._tool_id}-sheet-{plugin_id}-input")
+                _terminate_process(out_p, f"{self._tool_id}-sheet-{plugin_id}-output")
             self._sheet_processes = {}
             self._sheet_tab_info = []
             self._sheet_tool_def = None
@@ -1209,7 +1202,12 @@ def configure_logging(log_dir: Path) -> None:
     )
 
 
-def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_paths: SelectedPathStore) -> FastAPI:
+def create_app(
+    manager: ToolProcessManager,
+    registry: ToolRegistry,
+    selected_paths: SelectedPathStore,
+    db_path: Path,
+) -> FastAPI:
     app = FastAPI(title="CIM Python Sidecar", version="0.1.0")
 
     @app.get("/health")
@@ -1240,17 +1238,80 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
             all_tools = [t for t in all_tools if t.category != "management"]
             prod_rows = registry.list_tools_with_prod()
             prod_enabled = {tool_id for tool_id, _, _, ep in prod_rows if ep}
-            all_tools = [t for t in all_tools if t.tool_id in prod_enabled]
+            store = SQLiteManagementStore(db_path)
+            visible_tools: list[ToolInfo] = []
+            for tool in all_tools:
+                if tool.tool_id not in prod_enabled:
+                    continue
+                if tool.tool_id.startswith("module_"):
+                    issues = validate_module_snapshot_content(
+                        tool.tool_id,
+                        store.get_active_snapshot_content(tool.tool_id),
+                    )
+                    if issues:
+                        continue
+                if tool.tool_id.startswith("sheet-"):
+                    sheet_id = tool.tool_id[len("sheet-"):]
+                    if validate_sheet_prod_readiness(db_path, sheet_id, store=store):
+                        continue
+                visible_tools.append(tool)
+            all_tools = visible_tools
         return all_tools
 
-    class ProdEnabledRequest(BaseModel):
-        enabled: bool
-
     @app.patch("/tools/{tool_id}/prod-enabled")
-    def set_prod_enabled(tool_id: str, body: ProdEnabledRequest) -> dict:
+    def set_prod_enabled(tool_id: str, body: ProdEnabledRequest = Body(...)) -> dict:
         try:
+            store = SQLiteManagementStore(db_path)
+            if body.enabled:
+                if tool_id.startswith("module_"):
+                    row = store.get_tool_catalog_row(tool_id)
+                    if row is None:
+                        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_id}")
+                    active = store.get_active_snapshot_content(tool_id)
+                    snapshot_issues = validate_module_snapshot_content(tool_id, active)
+                    if snapshot_issues:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "message": "Module cannot be shown in Prod yet.",
+                                "issues": snapshot_issues,
+                            },
+                        )
+                elif tool_id.startswith("sheet-"):
+                    sheet_id = tool_id[len("sheet-"):]
+                    issues = validate_sheet_prod_readiness(db_path, sheet_id, store=store)
+                    if issues:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "message": "Sheet cannot be shown in Prod yet.",
+                                "issues": [
+                                    {
+                                        "sheet_id": issue.sheet_id,
+                                        "plugin_id": issue.plugin_id,
+                                        "label": issue.label,
+                                        "issue": issue.issue,
+                                    }
+                                    for issue in issues
+                                ],
+                            },
+                        )
+                    store.set_sheet_enabled(sheet_id, True, mode="prod")
+                    return {"tool_id": tool_id, "sheet_id": sheet_id, "enabled_prod": True}
+                elif store.get_tool_catalog_row(tool_id) is None:
+                    raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_id}")
+            if tool_id.startswith("sheet-"):
+                sheet_id = tool_id[len("sheet-"):]
+                if store.get_sheet_row(sheet_id) is None:
+                    raise HTTPException(status_code=404, detail=f"Unknown sheet: {sheet_id}")
+                store.set_sheet_enabled(sheet_id, body.enabled, mode="prod")
+                return {"tool_id": tool_id, "sheet_id": sheet_id, "enabled_prod": body.enabled}
+            if store.get_tool_catalog_row(tool_id) is None:
+                raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_id}")
             registry.set_prod_enabled(tool_id, body.enabled)
             return {"tool_id": tool_id, "enabled_prod": body.enabled}
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -1260,6 +1321,14 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
             {"tool_id": tid, "name": name, "enabled": en, "enabled_prod": ep}
             for tid, name, en, ep in registry.list_tools_with_prod()
         ]
+
+    @app.get("/runs")
+    def runs(limit: int = 50, tool_id: str | None = None) -> list[dict]:
+        return SQLiteManagementStore(db_path).list_tool_run_rows(limit=limit, tool_id=tool_id)
+
+    @app.get("/usage/summary")
+    def usage_summary(days: int = 30) -> list[dict]:
+        return SQLiteManagementStore(db_path).usage_summary(days=days)
 
     @app.post("/tools/{tool_id}/start", response_model=ToolStartResponse)
     def start_tool(tool_id: str) -> ToolStartResponse:
@@ -1297,15 +1366,21 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
                 "ready_file": str(manager._external_ready_file) if manager._external_ready_file else None,
             }
 
-        # Sheet tool: report per-tab result mtimes and ready state
+        # Sheet tool: report per-tab result mtimes
         if manager._sheet_tab_info:
             sheet_id = tool_id[len("sheet-"):]
             tab_mtimes: dict[str, float] = {}
             tab_ready: dict[str, bool] = {}
+            tab_urls: dict[str, dict[str, str]] = {}
             all_alive = True
             for tab in manager._sheet_tab_info:
                 pid = tab["plugin_id"]
                 tab_ready[pid] = bool(tab.get("ready", False))
+                if tab.get("ready"):
+                    tab_urls[pid] = {
+                        "input_url": tab.get("input_url", ""),
+                        "output_url": tab.get("output_url", ""),
+                    }
                 rf = manager._log_dir / f"sheet_{sheet_id}_{pid}_result.json"
                 try:
                     tab_mtimes[pid] = rf.stat().st_mtime
@@ -1316,16 +1391,13 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
                     in_p, out_p = procs
                     if in_p.poll() is not None or out_p.poll() is not None:
                         all_alive = False
-            tab_urls = {
-                t["plugin_id"]: {"input_url": t["input_url"], "output_url": t["output_url"]}
-                for t in manager._sheet_tab_info if t.get("ready")
-            }
             return {
                 "active": True,
                 "tool_id": tool_id,
                 "input_alive": all_alive,
                 "output_alive": all_alive,
                 "result_mtime": -1,
+                "run_id": manager._run_id,
                 "sheet_tab_mtimes": tab_mtimes,
                 "sheet_tab_ready": tab_ready,
                 "sheet_tab_urls": tab_urls,
@@ -1351,11 +1423,11 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
             "input_alive": input_alive,
             "output_alive": output_alive,
             "result_mtime": result_mtime,
+            "run_id": manager._run_id,
         }
 
     @app.post("/tools/active/sheet-tab/{plugin_id}/start")
     def start_sheet_tab(plugin_id: str) -> dict:
-        """Start a single sheet tab on-demand (lazy / pre-warm fallback)."""
         if not manager._sheet_tab_info:
             raise HTTPException(status_code=409, detail="No sheet tool is currently active")
         try:
@@ -1368,10 +1440,10 @@ def create_app(manager: ToolProcessManager, registry: ToolRegistry, selected_pat
                 "output_port": tab["output_port"],
                 "ready": True,
             }
-        except KeyError:
-            raise HTTPException(status_code=404, detail=f"Tab '{plugin_id}' not found in active sheet")
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown sheet tab: {plugin_id}") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/tools/stop")
     def stop_tool() -> dict[str, str]:
@@ -1423,10 +1495,12 @@ def main() -> None:
 
     configure_logging(args.log_dir)
     os.environ["CIM_CONTROL_PORT"] = str(args.control_port)
+    db_path = resolve_tools_db_path(args.log_dir)
+    os.environ["CIM_TOOLS_DB"] = str(db_path)
     selected_paths = SelectedPathStore(args.log_dir / "selected_paths.json")
-    registry = ToolRegistry(SQLiteToolAdapter(ROOT_DIR / "config" / "tools.sqlite"))
-    manager = ToolProcessManager(args.log_dir, args.log_dir / "selected_paths.json")
-    app = create_app(manager, registry, selected_paths)
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    manager = ToolProcessManager(args.log_dir, args.log_dir / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
     uvicorn.run(app, host="127.0.0.1", port=args.control_port, log_level="info")
 
 

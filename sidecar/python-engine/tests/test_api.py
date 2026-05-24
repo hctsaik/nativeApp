@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import subprocess
@@ -10,20 +12,24 @@ from fastapi.testclient import TestClient
 from engine import (
     MockToolAdapter,
     SelectedPathStore,
+    SQLiteToolAdapter,
     ToolDefinition,
     ToolProcessManager,
     ToolRegistry,
     ToolStartResponse,
     create_app,
+    resolve_tools_db_path,
 )
+from management_store import SQLiteManagementStore
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
     selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
     registry = ToolRegistry(MockToolAdapter())
-    manager = ToolProcessManager(tmp_path, tmp_path / "selected_paths.json")
-    app = create_app(manager, registry, selected_paths)
+    db_path = tmp_path / "data" / "tools.sqlite"
+    manager = ToolProcessManager(tmp_path, tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -135,7 +141,11 @@ def test_external_labelme_dino_start_returns_external_window(tmp_path: Path, mon
     fake_proc.pid = 1234
     fake_proc.poll.return_value = None
 
-    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json")
+    manager = ToolProcessManager(
+        tmp_path / "logs",
+        tmp_path / "selected_paths.json",
+        tmp_path / "data" / "tools.sqlite",
+    )
     tool = ToolDefinition(
         tool_id="labelme-dino",
         name="video_annotator",
@@ -166,6 +176,221 @@ def test_external_labelme_dino_start_returns_external_window(tmp_path: Path, mon
     run.assert_called_once()
     popen.assert_called_once()
     manager.stop()
+
+
+def test_sheet_start_is_lazy_and_can_start_tab_on_demand(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(MockToolAdapter())
+    app = create_app(manager, registry, selected_paths, db_path)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sheets (sheet_id, name) VALUES (?, ?)", ("lazy_sheet", "Lazy Sheet"))
+        conn.executemany(
+            "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label) VALUES (?, ?, ?, ?)",
+            [
+                ("lazy_sheet", 0, "module_a", "Module A"),
+                ("lazy_sheet", 1, "module_b", "Module B"),
+            ],
+        )
+
+    script = tmp_path / "lazy_sheet.py"
+    script.write_text("print('ok')", encoding="utf-8")
+    tool = ToolDefinition("sheet-lazy_sheet", "Lazy Sheet", script, "0.1.0")
+
+    processes = []
+    for pid in range(100, 106):
+        proc = MagicMock()
+        proc.pid = pid
+        proc.poll.return_value = None
+        processes.append(proc)
+
+    with (
+        patch.object(manager, "_spawn", side_effect=processes) as spawn,
+        patch("engine.wait_for_port", return_value=True),
+        patch("engine.threading.Thread") as thread_cls,
+    ):
+        thread_cls.return_value.start.return_value = None
+        result = manager.start(tool)
+
+        assert spawn.call_count == 2
+        assert result.sheet_tabs[0].plugin_id == "module_a"
+        assert result.sheet_tabs[0].ready is True
+        assert result.sheet_tabs[1].plugin_id == "module_b"
+        assert result.sheet_tabs[1].ready is False
+        assert result.sheet_tabs[1].input_url == ""
+
+        status = client.get("/tools/active/status").json()
+        assert status["sheet_tab_ready"] == {"module_a": True, "module_b": False}
+
+        response = client.post("/tools/active/sheet-tab/module_b/start")
+        assert response.status_code == 200
+        assert response.json()["ready"] is True
+        assert spawn.call_count == 4
+
+        status = client.get("/tools/active/status").json()
+        assert status["sheet_tab_ready"] == {"module_a": True, "module_b": True}
+        assert "module_b" in status["sheet_tab_urls"]
+
+    manager.stop()
+
+
+# ---------------------------------------------------------------------------
+# Management DB path
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_tools_db_path_defaults_to_log_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CIM_TOOLS_DB", raising=False)
+    assert resolve_tools_db_path(tmp_path) == (tmp_path / "data" / "tools.sqlite").resolve()
+
+
+def test_resolve_tools_db_path_uses_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    override = tmp_path / "custom.sqlite"
+    monkeypatch.setenv("CIM_TOOLS_DB", str(override))
+    assert resolve_tools_db_path(tmp_path) == override.resolve()
+
+
+def test_prod_enabled_endpoint_blocks_unpublished_module(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+
+    response = TestClient(app, raise_server_exceptions=False).patch(
+        "/tools/module_001/prod-enabled",
+        json={"enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["message"] == "Module cannot be shown in Prod yet."
+    assert "Publish an active snapshot" in response.json()["detail"]["issues"][0]
+
+
+def test_prod_enabled_endpoint_blocks_malformed_module_snapshot(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    store = SQLiteManagementStore(db_path)
+    store.publish_tool_snapshot("module_001", "Module 001", "1.0.0", "{}", "bad", "tester")
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+
+    response = TestClient(app, raise_server_exceptions=False).patch(
+        "/tools/module_001/prod-enabled",
+        json={"enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert "Active snapshot content is empty" in response.json()["detail"]["issues"][0]
+
+
+def test_prod_enabled_endpoint_uses_sheet_gate(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    store = SQLiteManagementStore(db_path)
+    store.upsert_sheet(
+        "blocked",
+        "Blocked Sheet",
+        "",
+        [{"plugin_id": "module_001", "label": "Unpublished Module"}],
+    )
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+
+    response = TestClient(app, raise_server_exceptions=False).patch(
+        "/tools/sheet-blocked/prod-enabled",
+        json={"enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["message"] == "Sheet cannot be shown in Prod yet."
+    assert store.get_sheet_row("blocked")["enabled_prod"] == 0
+    assert store.get_tool_catalog_row("sheet-blocked")["enabled_prod"] == 0
+
+
+def test_prod_enabled_endpoint_blocks_empty_sheet(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    store = SQLiteManagementStore(db_path)
+    store.upsert_sheet("empty", "Empty Sheet", "", [])
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+
+    response = TestClient(app, raise_server_exceptions=False).patch(
+        "/tools/sheet-empty/prod-enabled",
+        json={"enabled": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["issues"][0]["issue"] == "Sheet has no tabs."
+    assert store.get_sheet_row("empty")["enabled_prod"] == 0
+
+
+def test_prod_enabled_endpoint_rejects_unknown_tool(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+
+    response = TestClient(app, raise_server_exceptions=False).patch(
+        "/tools/does-not-exist/prod-enabled",
+        json={"enabled": True},
+    )
+
+    assert response.status_code == 404
+
+
+def test_runs_and_usage_endpoints_return_management_store_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    store = SQLiteManagementStore(db_path)
+    run_id = store.start_tool_run("module_001", "module", "iframe", actor="tester")
+    store.finish_tool_run(run_id, "stopped")
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    runs = client.get("/runs").json()
+    usage = client.get("/usage/summary").json()
+
+    assert runs[0]["run_id"] == run_id
+    assert usage[0]["tool_id"] == "module_001"
+    assert usage[0]["run_count"] == 1
+
+
+def test_startup_sync_does_not_enable_prod_from_yaml(tmp_path: Path) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    SQLiteToolAdapter(db_path)
+    store = SQLiteManagementStore(db_path)
+    store.set_tool_prod_enabled("module_001", False)
+
+    SQLiteToolAdapter(db_path)
+
+    assert store.get_tool_catalog_row("module_001")["enabled_prod"] == 0
+
+
+def test_prod_tools_list_hides_invalid_prod_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    store = SQLiteManagementStore(db_path)
+    store.publish_tool_snapshot("module_001", "Module 001", "1.0.0", json.dumps({}), "bad", "tester")
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+    monkeypatch.setenv("CIM_DEV_MODE", "0")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/tools")
+
+    assert response.status_code == 200
+    assert "module_001" not in {tool["tool_id"] for tool in response.json()}
 
 
 # ---------------------------------------------------------------------------

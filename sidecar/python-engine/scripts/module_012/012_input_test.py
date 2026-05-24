@@ -47,9 +47,32 @@ class _FakeStreamlit:
         self.calls.append(("selectbox", label))
         return options[index]
 
-    def checkbox(self, label, *, key, help=None):
+    def radio(self, label, options, *, index=0, horizontal=False, key=None):
+        self.calls.append(("radio", label))
+        if key:
+            self.session_state[key] = options[index]
+        return options[index]
+
+    def checkbox(self, label, *, key, value=None, help=None):
         self.calls.append(("checkbox", label))
-        return bool(self.session_state.get(key, False))
+        return bool(self.session_state.get(key, value if value is not None else False))
+
+    def text_input(self, label, *, key, placeholder=None):
+        self.calls.append(("text_input", label))
+        return self.session_state.get(key, "")
+
+    def button(self, label, *, key=None, help=None):
+        self.calls.append(("button", label))
+        return False
+
+    def slider(self, label, *, min_value=None, max_value=None, value=None, step=None, format=None, key=None):
+        self.calls.append(("slider", label))
+        if key:
+            self.session_state[key] = value
+        return value
+
+    def write(self, text):
+        self.calls.append(("write", text))
 
     def number_input(
         self, label, *, min_value=None, max_value=None, step=None, key, disabled=False

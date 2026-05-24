@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("cimHost", {
   getAppConfig: () => ipcRenderer.invoke("get-app-config"),
   listTools: () => ipcRenderer.invoke("list-tools"),
   startTool: (toolId) => ipcRenderer.invoke("start-tool", toolId),
+  startSheetTab: (pluginId) => ipcRenderer.invoke("start-sheet-tab", pluginId),
   stopTool: () => ipcRenderer.invoke("stop-tool"),
   chooseFile: (options) => ipcRenderer.invoke("choose-file", options),
   onSidecarExited: (handler) => {

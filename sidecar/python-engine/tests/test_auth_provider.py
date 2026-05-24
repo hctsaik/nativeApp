@@ -72,6 +72,13 @@ def test_get_current_role_no_db(auth_no_db: AuthProvider) -> None:
     assert auth_no_db.get_current_role() == "admin"
 
 
+def test_get_current_role_uses_env_override(
+    auth: AuthProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_USER_ROLE", "viewer")
+    assert auth.get_current_role() == "viewer"
+
+
 # ── check_permission: no DB ──────────────────────────────────────────────────
 
 
@@ -127,3 +134,39 @@ def test_viewer_can_view_plugin_b(db_path: Path) -> None:
 def test_viewer_cannot_execute_plugin_b(db_path: Path) -> None:
     auth = _ViewerAuth(db_path=db_path)
     assert auth.check_permission("plugin_b", "execute") is False
+
+
+# ── management role gate (mirrors _can_manage() in management_runner.py) ─────
+
+
+def test_admin_role_can_manage(auth: AuthProvider) -> None:
+    # Default env: no CIM_USER_ROLE set → role is 'admin'
+    assert auth.get_current_role() == "admin"
+
+
+def test_viewer_role_cannot_manage(
+    auth: AuthProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_USER_ROLE", "viewer")
+    assert auth.get_current_role() != "admin"
+
+
+def test_operator_role_cannot_manage(
+    auth: AuthProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_USER_ROLE", "operator")
+    assert auth.get_current_role() != "admin"
+
+
+def test_empty_env_falls_back_to_admin(
+    auth: AuthProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_USER_ROLE", "")
+    assert auth.get_current_role() == "admin"
+
+
+def test_whitespace_env_falls_back_to_admin(
+    auth: AuthProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_USER_ROLE", "   ")
+    assert auth.get_current_role() == "admin"

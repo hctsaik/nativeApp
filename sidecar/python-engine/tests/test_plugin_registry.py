@@ -267,6 +267,19 @@ def test_rollback_switches_active(registry: PluginRegistry) -> None:
 # ── list_versions ───────────────────────────────────────────────────────────
 
 
+def test_rollback_invalid_version_preserves_active_version(registry: PluginRegistry) -> None:
+    v1 = registry.publish("module_aaa", changelog="v1")
+
+    with pytest.raises(KeyError):
+        registry.rollback("module_aaa", 999999)
+
+    with registry._connect() as conn:
+        row = conn.execute(
+            "SELECT version_id FROM tool_versions WHERE tool_id='module_aaa' AND is_active=1"
+        ).fetchone()
+    assert row["version_id"] == v1
+
+
 def test_list_versions_empty_before_publish(registry: PluginRegistry) -> None:
     assert registry.list_versions("module_aaa") == []
 
@@ -278,6 +291,31 @@ def test_list_versions_after_publish(registry: PluginRegistry) -> None:
     assert len(versions) == 2
     assert versions[0].changelog == "v2"
     assert versions[1].changelog == "v1"
+
+
+# ── audit events ────────────────────────────────────────────────────────────
+
+
+def test_record_audit_event_returns_id(registry: PluginRegistry) -> None:
+    event_id = registry.record_audit_event(
+        "publish",
+        "tool",
+        "module_aaa",
+        actor="alice",
+        details={"version_id": 1},
+    )
+    assert event_id > 0
+
+
+def test_list_audit_events_returns_newest_first(registry: PluginRegistry) -> None:
+    registry.record_audit_event("publish", "tool", "module_aaa", actor="alice")
+    registry.record_audit_event("rollback", "tool", "module_aaa", actor="bob")
+
+    events = registry.list_audit_events(limit=10)
+
+    assert [e.action for e in events[:2]] == ["rollback", "publish"]
+    assert events[0].actor == "bob"
+    assert events[0].target_id == "module_aaa"
 
 
 # ── set_enabled ─────────────────────────────────────────────────────────────
@@ -315,6 +353,101 @@ def test_set_enabled_prod_does_not_affect_dev(registry: PluginRegistry) -> None:
         row = conn.execute("SELECT enabled_dev, enabled_prod FROM tools WHERE tool_id='module_aaa'").fetchone()
     assert row["enabled_dev"] == 1   # unchanged
     assert row["enabled_prod"] == 0
+
+
+def test_set_tool_prod_enabled_updates_any_tool(registry: PluginRegistry) -> None:
+    registry.list_plugins()
+    registry.set_tool_prod_enabled("module_aaa", True)
+    with registry._connect() as conn:
+        row = conn.execute("SELECT enabled_prod FROM tools WHERE tool_id='module_aaa'").fetchone()
+    assert row["enabled_prod"] == 1
+
+
+def test_publish_stores_author_in_versions(registry: PluginRegistry) -> None:
+    registry.publish("module_aaa", changelog="init", author="alice")
+    versions = registry.list_versions("module_aaa")
+    assert versions[0].author == "alice"
+
+
+def test_set_sheet_enabled_prod_syncs_tool_table(registry: PluginRegistry) -> None:
+    # create_or_update_sheet creates the sheet tool row and keeps Prod state in sync.
+    registry.create_or_update_sheet(
+        "sheet_one", "Sheet One", "", [{"plugin_id": "module_aaa", "label": "A"}]
+    )
+    registry.set_sheet_enabled("sheet_one", True, mode="prod")
+    with registry._connect() as conn:
+        row = conn.execute("SELECT enabled_prod FROM tools WHERE tool_id='sheet-sheet_one'").fetchone()
+    assert row is not None and row["enabled_prod"] == 1
+
+
+def test_set_sheet_enabled_prod_disable_clears_tool_table(registry: PluginRegistry) -> None:
+    registry.create_or_update_sheet(
+        "sheet_one", "Sheet One", "", [{"plugin_id": "module_aaa", "label": "A"}]
+    )
+    registry.set_sheet_enabled("sheet_one", True, mode="prod")
+    registry.set_sheet_enabled("sheet_one", False, mode="prod")
+    with registry._connect() as conn:
+        row = conn.execute("SELECT enabled_prod FROM tools WHERE tool_id='sheet-sheet_one'").fetchone()
+    assert row is not None and row["enabled_prod"] == 0
+
+
+def test_list_audit_events_stores_details_json(registry: PluginRegistry) -> None:
+    registry.record_audit_event(
+        "publish",
+        "tool",
+        "module_aaa",
+        actor="alice",
+        details={"version_id": 42, "file_count": 4, "has_plugin_yaml": True},
+    )
+    events = registry.list_audit_events(limit=1)
+    assert events[0].details["version_id"] == 42
+    assert events[0].details["has_plugin_yaml"] is True
+
+
+def test_normalize_active_versions_noop_when_single_active(registry: PluginRegistry) -> None:
+    v1 = registry.publish("module_aaa", changelog="v1")
+    result = registry.normalize_active_versions("module_aaa")
+    assert result["kept_version_id"] == v1
+    assert result["updated_rows"] == 0
+
+
+def test_delete_orphan_versions_skips_existing_tool(registry: PluginRegistry) -> None:
+    registry.publish("module_aaa", changelog="v1")
+    deleted = registry.delete_orphan_versions("module_aaa")
+    assert deleted == 0
+
+
+def test_normalize_active_versions_keeps_newest(registry: PluginRegistry) -> None:
+    v1 = registry.publish("module_aaa", changelog="v1")
+    v2 = registry.publish("module_aaa", changelog="v2")
+    with registry._connect() as conn:
+        conn.execute("UPDATE tool_versions SET is_active=1 WHERE version_id=?", (v1,))
+
+    result = registry.normalize_active_versions("module_aaa")
+
+    assert result["kept_version_id"] == v2
+    with registry._connect() as conn:
+        active = conn.execute(
+            "SELECT version_id FROM tool_versions WHERE tool_id='module_aaa' AND is_active=1"
+        ).fetchall()
+    assert [row["version_id"] for row in active] == [v2]
+
+
+def test_delete_orphan_versions_removes_only_missing_tool_rows(registry: PluginRegistry) -> None:
+    with registry._connect() as conn:
+        conn.execute(
+            """INSERT INTO tool_versions (tool_id, version, content_json, is_active, source)
+               VALUES ('module_missing', '1.0.0', '{}', 0, 'filesystem')"""
+        )
+
+    deleted = registry.delete_orphan_versions("module_missing")
+
+    assert deleted == 1
+    with registry._connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM tool_versions WHERE tool_id='module_missing'"
+        ).fetchone()[0]
+    assert count == 0
 
 
 # ── enabled property ─────────────────────────────────────────────────────────
@@ -491,3 +624,89 @@ def test_cv_framework_runner_imports_auth() -> None:
 def test_management_runner_has_layer_check() -> None:
     src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
     assert "CIM_TOOL_LAYER" in src
+
+
+def test_management_runner_uses_single_prod_control_panel() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "st.data_editor(" not in src
+    assert "Enable Prod" in src
+    assert "Turn off Prod" in src
+    assert "Tool Actions" in src
+    assert "_render_selected_tool_actions" in src
+    assert "selection_mode=\"single-row\"" in src
+    assert "on_select=\"rerun\"" in src
+    assert "tools_action_target" in src
+    assert "row_prod_on_" not in src
+    assert "row_save_order_" not in src
+    assert "row_archive_" not in src
+    assert "Inactive Tools" in src
+    assert "_render_inactive_tools" in src
+    assert "Upload / New Module" in src
+    assert "Upload as new module snapshot" in src
+    assert "Create module scaffold" in src
+    assert "Create snapshot" in src
+    assert "Delete unpublished draft" in src
+    assert "`No active snapshot`" in src
+    assert 'st.warning("Needs attention") if issues else st.success("Passed")' not in src
+    assert "?芰" not in src
+    assert "?" not in src
+    assert "繚" not in src
+
+
+def test_management_runner_has_workflow_tabs() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert '["Health", "Tools", "Runs & Usage", "Sheets", "Repairs", "Audit & Database"]' in src
+    assert "Audit & Backup" not in src
+
+
+def test_management_runner_audit_database_is_backend_aware() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "_management_backend" in src
+    assert "CIM_MANAGEMENT_BACKEND" in src
+    assert "Audit & Database" in src
+    assert "Local SQLite Backup" in src
+    assert "Download local SQLite backup (JSON)" in src
+    assert "Oracle production backups are managed outside Management Center" in src
+    assert "External DBA / Oracle policy" in src
+    assert "Disabled for non-SQLite backends" in src
+
+
+def test_management_runner_guards_high_risk_actions() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "_confirm_rollback_dialog" in src
+    assert "_confirm_archive_dialog" in src
+    assert "_confirm_restore_dialog" in src
+    assert "_confirm_delete_draft_tool_dialog" in src
+    assert "_confirm_delete_sheet_dialog" in src
+    assert "_confirm_repair_dialog" in src
+
+
+def test_management_runner_routes_sheet_prod_through_sheet_gate() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "validate_sheet_prod_readiness(_DB_PATH, sheet_id)" in src
+    assert "Sheet Prod visibility is managed in the Sheets tab." in src
+    assert "set_sheet_prod_enabled(" in src
+    assert "disabled=manage_disabled or is_dirty or (not sheet.enabled_prod and bool(prod_issues))" in src
+    assert "Unsaved changes" in src
+
+
+def test_management_runner_has_sheet_steps_table_controls() -> None:
+    src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
+    assert "_sheet_steps_editor" in src
+    assert "_sheet_readiness_summary" in src
+    assert "_prepare_sheet_draft_steps" in src
+    assert "_draft_id" in src
+    assert "Module to add" in src
+    assert "Add step" in src
+    assert "Readiness" in src
+    assert "Readiness details" not in src
+    assert "Needs release" in src
+    assert "Discard edits" in src
+    assert "Hide in Dev" in src
+    assert "Show in Dev" in src
+    assert "Save Sheet" in src
+    assert "_up_" in src
+    assert "_down_" in src
+    assert "_sheet_tab_editor" not in src
+    assert "edit_tabs_" not in src
+    assert "editing_sheet_" not in src

@@ -387,13 +387,16 @@ select {
 }
 
 .sheet-module-tab {
+  align-items: center;
   background: transparent;
   border: none;
   border-bottom: 3px solid transparent;
   border-radius: 0;
   color: #93b4d4;
+  display: inline-flex;
   font-size: 13px;
   font-weight: 500;
+  gap: 8px;
   min-height: 40px;
   padding: 8px 16px;
   white-space: nowrap;
@@ -411,23 +414,21 @@ select {
 }
 
 .sheet-module-tab.tab-pending {
-  opacity: 0.55;
+  color: #b8c9d8;
 }
 
 .tab-loading-dot {
+  animation: pulse 1s ease-in-out infinite;
+  background: #93c5fd;
+  border-radius: 999px;
   display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #60a5fa;
-  margin-left: 6px;
-  vertical-align: middle;
-  animation: tab-dot-pulse 1s ease-in-out infinite;
+  height: 7px;
+  width: 7px;
 }
 
-@keyframes tab-dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.75); }
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
 /* ── Loading Overlay ─────────────────────────────────── */
