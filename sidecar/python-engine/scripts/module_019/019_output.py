@@ -12,6 +12,10 @@ _cfg_spec = _ilu.spec_from_file_location("_019_config", _HERE / "_config.py")
 _cfg = _ilu.module_from_spec(_cfg_spec)
 _cfg_spec.loader.exec_module(_cfg)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 _STATUS_COLOR = {
     "needs_review": "🟡",
     "empty": "🔴",
@@ -24,7 +28,8 @@ _STATUS_LABEL = {
 }
 
 
-def render_output() -> None:
+def render_output(result: dict = None) -> None:
+    _help.render_help_button("module_019", "output", "🌐 Data Downloader — 下載結果")
     result: dict = st.session_state.get("last_result", {})
     mode = result.get("mode", "idle")
 

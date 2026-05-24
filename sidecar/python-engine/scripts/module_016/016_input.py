@@ -19,6 +19,10 @@ _mdb_spec = _ilu.spec_from_file_location(
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def _browse_file(title: str, filetypes: str) -> str:
     try:
@@ -36,7 +40,7 @@ def _browse_file(title: str, filetypes: str) -> str:
 
 
 def render_input() -> dict:
-    st.subheader("🤖 AI Pre-labeling — 模型自動預標注")
+    _help.render_help_button("module_016", "input", "🤖 AI Pre-labeling — 模型自動預標注")
     st.caption("選擇模型，對當前 Manifest 的圖片批次推論，結果寫成 X-AnyLabeling JSON 供人工修正。")
 
     db_path = _cfg.get_manifest_db_path()

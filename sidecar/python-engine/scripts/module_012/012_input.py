@@ -71,12 +71,7 @@ def _duplicate_labels(labels: list[str]) -> list[str]:
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
 def render_input() -> dict:
-    _help.render_help_header(
-        "module_012",
-        "input",
-        "🏷️ 開始標注前確認",
-        "確認資料集、標注類別、快速分類與 AI 模型設定。",
-    )
+    _help.render_help_button("module_012", "input", "🏷️ 開始標注前確認")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)

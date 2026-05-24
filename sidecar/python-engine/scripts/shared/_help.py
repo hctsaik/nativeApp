@@ -8,14 +8,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-
-def _markdown_html(body: str) -> None:
-    """Render HTML in Streamlit, while keeping older test fakes compatible."""
-    try:
-        st.markdown(body, unsafe_allow_html=True)
-    except TypeError:
-        st.markdown(body)
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 各模組說明內容（module_id + side → HTML 字串）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -582,15 +574,10 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
     content_key = f"{module_id}_{side}"
     html_content = _HELP_CONTENT.get(content_key, "<p>（尚無使用說明）</p>")
 
-    if title:
-        st.markdown(f"### {title}")
-    _render_help_control(html_content)
-    return
-
     # ── Global CSS — injected once per page ───────────────────────────────────
     if "cim_help_css_injected" not in st.session_state:
         st.session_state["cim_help_css_injected"] = True
-        _markdown_html("""<style>
+        st.markdown("""<style>
 /* Hidden checkbox that drives the modal open/close */
 .cim-help-toggle { display: none; }
 
@@ -679,7 +666,7 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
     line-height: 1.4;
     display: block;
 }
-</style>""")
+</style>""", unsafe_allow_html=True)
 
     # ── Badge + Modal in one block ─────────────────────────────────────────────
     # DOM order inside wrapper: input(toggle) → content(badge) → div(overlay)
@@ -698,34 +685,19 @@ def render_help_button(module_id: str, side: str = "input", title: str = "") -> 
 
     if title:
         # Render heading with badge inline — replaces the caller's st.subheader()
-        _markdown_html(
+        st.markdown(
             f'<div style="overflow:visible;margin:0 0 4px 0;">'
             f'{_toggle}'
             f'<span class="cim-help-heading">{title} {_badge}</span>'
             f'{_overlay}'
-            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
-
-
-def _render_help_control(html_content: str, label: str = "說明") -> None:
-    if hasattr(st, "popover"):
-        with st.popover(label, help="查看使用說明"):
-            _markdown_html(html_content)
     else:
-        with st.expander(label, expanded=False):
-            _markdown_html(html_content)
-
-
-def render_help_header(module_id: str, side: str, title: str, caption: str = "") -> None:
-    """Render a compact page header with help aligned to the right."""
-    content_key = f"{module_id}_{side}"
-    html_content = _HELP_CONTENT.get(content_key, "<p>（尚無使用說明）</p>")
-
-    title_col, help_col = st.columns([6, 1])
-    with title_col:
-        st.subheader(title)
-        if caption:
-            st.caption(caption)
-    with help_col:
-        st.write("")
-        _render_help_control(html_content)
+        # Compact 22-px badge row for output pages that have no page-level title
+        st.markdown(
+            f'<div style="height:22px;margin:0 0 2px 0;overflow:visible;">'
+            f'{_toggle}{_badge}{_overlay}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )

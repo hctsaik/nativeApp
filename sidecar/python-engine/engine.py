@@ -344,6 +344,50 @@ class SQLiteToolAdapter(ToolAdapter):
             [("annotation_workflow", tab_order, plugin_id, label) for tab_order, plugin_id, label in desired_tabs],
         )
 
+            # migration: update module_013 label to Sync Back
+            try:
+                connection.execute(
+                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
+                    ("\U0001f504 Sync Back", "annotation_workflow", "module_013"),
+                )
+            except Exception:
+                pass
+
+            # migration: rename module_020 label to Download
+            try:
+                connection.execute(
+                    "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
+                    ("\U0001f4e5 Download", "annotation_workflow", "module_020"),
+                )
+            except Exception:
+                pass
+
+            # migration: insert module_020 (Upload Archive) at tab_order=4
+            try:
+                exists = connection.execute(
+                    "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
+                    ("annotation_workflow", "module_020"),
+                ).fetchone()
+                if not exists:
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order=-(tab_order+1)"
+                        " WHERE sheet_id=? AND tab_order>=4",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "UPDATE sheet_tabs SET tab_order=-tab_order"
+                        " WHERE sheet_id=? AND tab_order<0",
+                        ("annotation_workflow",),
+                    )
+                    connection.execute(
+                        "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                        " VALUES (?,?,?,?)",
+                        ("annotation_workflow", 4, "module_020",
+                         "\U0001f4e5 Download"),
+                    )
+            except Exception:
+                pass
+
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
 

@@ -13,6 +13,10 @@ import streamlit as st
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 _HERE = Path(__file__).resolve().parent
+
+_help_spec = importlib.util.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = importlib.util.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
 _PROCESS_FILE = _HERE / "018_process.py"
 
 _THUMB_SIZE = (320, 240)
@@ -24,28 +28,44 @@ _BOX_COLORS = [
 # Cache: {(file_path, ann_mtime): PIL.Image}
 _overlay_cache: dict = {}
 
-_YELLOW_BORDER_COLOR = (255, 220, 0, 255)
-_YELLOW_BORDER_WIDTH = 5
+_BORDER_WIDTH = 5
 
 
-# ─── Flag helpers ─────────────────────────────────────────────────────────────
+# ─── Review (.review.json) helpers ───────────────────────────────────────────
 
-def _flag_path(file_path: str) -> Path:
-    return Path(file_path).parent / (Path(file_path).name + ".flag")
+import datetime as _dt
+
+_REVIEWER_ID = "HCTSAIK"
+_REVIEW_STATUSES = ("approved", "rejected", "pending")
+_STATUS_COLOR = {"approved": (0, 180, 0, 255), "rejected": (200, 40, 40, 255)}
+_STATUS_ICON = {"approved": "✅", "rejected": "❌", "pending": "⏳"}
 
 
-def _is_flagged(file_path: str) -> bool:
-    return _flag_path(file_path).exists()
+def _review_path(file_path: str) -> Path:
+    return Path(file_path).parent / (Path(file_path).name + ".review.json")
 
 
-def _toggle_flag(file_path: str) -> bool:
-    """Create or remove .flag sidecar. Returns new flagged state."""
-    fp = _flag_path(file_path)
-    if fp.exists():
-        fp.unlink()
-        return False
-    fp.touch()
-    return True
+def _get_review(file_path: str) -> dict:
+    rp = _review_path(file_path)
+    if rp.exists():
+        try:
+            return json.loads(rp.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"status": "pending", "comment": "", "reviewer": "", "timestamp": ""}
+
+
+def _set_review(file_path: str, status: str, comment: str = "") -> None:
+    rp = _review_path(file_path)
+    data = {
+        "status": status,
+        "comment": comment,
+        "reviewer": _REVIEWER_ID,
+        "timestamp": _dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    tmp = rp.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, rp)
 
 
 # ─── X-AnyLabeling launch ─────────────────────────────────────────────────────
@@ -113,7 +133,7 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
 
 
 def _render_thumb_with_overlay(file_path: str, ann_path: str, show_overlay: bool) -> bytes | None:
-    """Return JPEG bytes of thumbnail, optionally with BBox overlay and flag border drawn."""
+    """Return JPEG bytes of thumbnail, optionally with BBox overlay and review-status border."""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -123,14 +143,15 @@ def _render_thumb_with_overlay(file_path: str, ann_path: str, show_overlay: bool
     if not img_path.exists():
         return None
 
-    flagged = _is_flagged(file_path)
-    flag_mtime = _flag_path(file_path).stat().st_mtime if flagged else 0
+    review = _get_review(file_path)
+    review_status = review.get("status", "pending")
+    rev_mtime = _review_path(file_path).stat().st_mtime if _review_path(file_path).exists() else 0
 
-    cache_key = (file_path, ann_path, show_overlay, flag_mtime)
+    cache_key = (file_path, ann_path, show_overlay, review_status, rev_mtime)
     if show_overlay:
         ann_p = Path(ann_path)
         ann_mtime = ann_p.stat().st_mtime if ann_p.exists() else 0
-        cache_key = (file_path, ann_path, ann_mtime, flag_mtime)
+        cache_key = (file_path, ann_path, ann_mtime, review_status, rev_mtime)
 
     if cache_key in _overlay_cache:
         return _overlay_cache[cache_key]
@@ -180,12 +201,13 @@ def _render_thumb_with_overlay(file_path: str, ann_path: str, show_overlay: bool
                 except Exception:
                     pass
 
-        if flagged:
-            draw = ImageDraw.Draw(img, "RGBA") if not show_overlay else ImageDraw.Draw(img, "RGBA")
+        border_color = _STATUS_COLOR.get(review_status)
+        if border_color:
+            draw = ImageDraw.Draw(img, "RGBA")
             w, h = img.size
-            for i in range(_YELLOW_BORDER_WIDTH):
+            for i in range(_BORDER_WIDTH):
                 draw.rectangle([i, i, w - 1 - i, h - 1 - i],
-                                outline=_YELLOW_BORDER_COLOR, width=1)
+                                outline=border_color, width=1)
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
@@ -197,6 +219,11 @@ def _render_thumb_with_overlay(file_path: str, ann_path: str, show_overlay: bool
         return result
     except Exception:
         return None
+
+
+def _get_review_status(file_path: str) -> str:
+    """Return review status string for an item."""
+    return _get_review(file_path).get("status", "pending")
 
 
 def _get_items(result: dict) -> list[dict]:
@@ -229,6 +256,7 @@ PAGE_SIZE = 30
 
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_018", "output", "🖼️ Review Gallery")
     if not result or result.get("error"):
         st.info("請先在 Input 頁籤確認設定，然後按下 ▶ 執行。")
         if result and result.get("error"):
@@ -247,11 +275,15 @@ def render_output(result: dict) -> None:
     # ── 摘要 ─────────────────────────────────────────────────────────────────
     st.subheader("🖼️ Review Gallery")
     total_raw = result.get("total_raw", len(items))
-    m1, m2, m3 = st.columns(3)
+    has_bbox = sum(1 for it in items if it["has_bbox"])
+    approved_n = sum(1 for it in items if _get_review_status(it["file_path"]) == "approved")
+    rejected_n = sum(1 for it in items if _get_review_status(it["file_path"]) == "rejected")
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("顯示", len(items))
     m2.metric("總計", total_raw)
-    has_bbox = sum(1 for it in items if it["has_bbox"])
     m3.metric("含 BBox", has_bbox)
+    m4.metric("✅ 核准", approved_n)
+    m5.metric("❌ 退回", rejected_n)
 
     if not items:
         st.info("沒有符合篩選條件的圖片。")
@@ -304,15 +336,35 @@ def render_output(result: dict) -> None:
                         st.error(f"無法開啟：{err}")
                     else:
                         st.success("已在 X-AnyLabeling 開啟")
-                flagged_now = _is_flagged(sel_item["file_path"])
-                flag_label = "✅ 取消 Flag" if flagged_now else "🚩 Flag for re-annotation"
-                if st.button(flag_label, key="m018_toggle_flag"):
-                    _toggle_flag(sel_item["file_path"])
+                st.divider()
+                rev = _get_review(sel_item["file_path"])
+                rev_status = rev.get("status", "pending")
+                status_icon = _STATUS_ICON.get(rev_status, "⏳")
+                st.markdown(f"**QA 狀態**：{status_icon} {rev_status}")
+                if rev.get("comment"):
+                    st.caption(f"備註：{rev['comment']}")
+                if rev.get("reviewer"):
+                    st.caption(f"審核：{rev['reviewer']}　{(rev.get('timestamp') or '')[:19]}")
+                comment_key = f"m018_comment_{sel_item['item_id']}"
+                comment_val = st.text_input("備註（選填）", key=comment_key, value="")
+                qa_c1, qa_c2, qa_c3 = st.columns(3)
+                if qa_c1.button("✅ 核准", key="m018_approve", type="primary"):
+                    _set_review(sel_item["file_path"], "approved", comment_val)
                     _overlay_cache.clear()
                     st.session_state.pop("m018_items_cache", None)
                     st.rerun()
-                if flagged_now:
-                    st.warning("此圖片已被標記需重新標注")
+                if qa_c2.button("❌ 退回", key="m018_reject"):
+                    _set_review(sel_item["file_path"], "rejected", comment_val)
+                    _overlay_cache.clear()
+                    st.session_state.pop("m018_items_cache", None)
+                    st.rerun()
+                if qa_c3.button("↩️ 重置", key="m018_reset_review"):
+                    rp = _review_path(sel_item["file_path"])
+                    if rp.exists():
+                        rp.unlink()
+                    _overlay_cache.clear()
+                    st.session_state.pop("m018_items_cache", None)
+                    st.rerun()
             if st.button("✕ 關閉詳細檢視", key="m018_close_detail"):
                 st.session_state.pop("m018_selected", None)
                 st.rerun()
@@ -333,9 +385,8 @@ def render_output(result: dict) -> None:
                 else:
                     st.markdown(f"🖼️ `{fname}`\n\n*(無法載入)*")
 
-                badge = ""
-                if _is_flagged(it["file_path"]):
-                    badge += "🚩 "
+                rev_st = _get_review_status(it["file_path"])
+                badge = _STATUS_ICON.get(rev_st, "") + " "
                 if it["has_bbox"]:
                     badge += f"🟢 {it['shape_count']}個BBox　"
                 else:
@@ -344,16 +395,23 @@ def render_output(result: dict) -> None:
                     badge += f"🏷️ {it['classification']}"
 
                 st.caption(badge or fname)
-                btn_col1, btn_col2 = st.columns(2)
+                btn_col1, btn_col2, btn_col3 = st.columns(3)
                 with btn_col1:
-                    if st.button("🔍 詳細", key=f"m018_detail_{it['item_id']}"):
+                    if st.button("🔍", key=f"m018_detail_{it['item_id']}",
+                                 help="詳細檢視"):
                         st.session_state["m018_selected"] = it["item_id"]
                         st.rerun()
                 with btn_col2:
-                    flag_icon = "✅" if _is_flagged(it["file_path"]) else "🚩"
-                    if st.button(flag_icon, key=f"m018_flag_{it['item_id']}",
-                                 help="Flag / Unflag for re-annotation"):
-                        _toggle_flag(it["file_path"])
+                    if st.button("✅", key=f"m018_approve_{it['item_id']}",
+                                 help="核准", type="primary" if rev_st == "approved" else "secondary"):
+                        _set_review(it["file_path"], "approved")
+                        _overlay_cache.clear()
+                        st.session_state.pop("m018_items_cache", None)
+                        st.rerun()
+                with btn_col3:
+                    if st.button("❌", key=f"m018_reject_{it['item_id']}",
+                                 help="退回"):
+                        _set_review(it["file_path"], "rejected")
                         _overlay_cache.clear()
                         st.session_state.pop("m018_items_cache", None)
                         st.rerun()

@@ -86,7 +86,7 @@ def _build_csv(items: list[dict]) -> bytes:
 # ─── 主入口 ──────────────────────────────────────────────────────────────────
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_010", "output")
+    _help.render_help_button("module_010", "output", "📦 Data Feeder — 執行結果")
     mode = result.get("mode", "idle")
 
     if mode == "idle":

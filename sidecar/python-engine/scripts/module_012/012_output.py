@@ -923,7 +923,7 @@ def _check_pending_reload() -> bool:
 
 
 def render_output(result: dict) -> None:
-    _help.render_help_button("module_012", "output")
+    _help.render_help_button("module_012", "output", "🏷️ 標注進度")
     # 若 module_019 已下載新資料但 module_010 還沒重新載入，顯示警告並鎖定標注入口
     if _check_pending_reload():
         st.error(

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import importlib.util as _ilu
 import subprocess
 from pathlib import Path
 
 import streamlit as st
+
+_HERE = Path(__file__).resolve().parent
+
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
 
 
 def _open_folder(path_str: str) -> None:
@@ -44,6 +51,7 @@ def _render_validation_issues(issues: list[dict]) -> None:
 
 
 def render_output(result: dict) -> None:
+    _help.render_help_button("module_014", "output", "📤 Export — 匯出結果")
     mode = result.get("mode", "idle")
 
     if mode == "idle":

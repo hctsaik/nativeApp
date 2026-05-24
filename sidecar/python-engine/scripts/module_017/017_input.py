@@ -17,9 +17,13 @@ _mdb_spec = _ilu.spec_from_file_location(
 _mdb = _ilu.module_from_spec(_mdb_spec)
 _mdb_spec.loader.exec_module(_mdb)
 
+_help_spec = _ilu.spec_from_file_location("_help", _HERE.parent / "shared" / "_help.py")
+_help = _ilu.module_from_spec(_help_spec)
+_help_spec.loader.exec_module(_help)
+
 
 def render_input() -> dict:
-    st.subheader("📊 管理中心")
+    _help.render_help_button("module_017", "input", "📊 管理中心")
     st.caption("標注進度統計、標籤管理（改名 / 合併 / 刪除）")
 
     db_path = _cfg.get_manifest_db_path()
