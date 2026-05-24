@@ -164,95 +164,54 @@ window.parent.postMessage({
   );
 }
 
-function TopBar({
-  tools, selectedToolId, onToolChange, activeTool, onStart, onStop,
-  status, sidecarDown, devMode,
-  webAppUrl, setWebAppUrl, queueCount, onClearQueue,
-}) {
-  const [editingUrl, setEditingUrl] = useState(false);
-  const [urlDraft, setUrlDraft] = useState(webAppUrl);
-  const [showHelp, setShowHelp] = useState(false);
-
-  function saveUrl() {
-    setWebAppUrl(urlDraft.trim());
-    setEditingUrl(false);
-  }
-
+function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode }) {
   return (
-    <>
-      {showHelp && <VisionDiyHelpModal onClose={() => setShowHelp(false)} />}
-      <header className="toolbar">
-        <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-          <span className="top-bar-brand">CIM Platform</span>
-          <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
-            {devMode ? "DEV" : "PROD"}
-          </span>
-          <div className="toolbar-title">
-            <p>{status}</p>
-          </div>
+    <header className="toolbar">
+      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        <span className="top-bar-brand">CIM Platform</span>
+        <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
+          {devMode ? "DEV" : "PROD"}
+        </span>
+        <div className="toolbar-title">
+          <p>{status}</p>
         </div>
-        <div className="actions">
-          <div className="toolSelectGroup">
-            <label className="toolSelectLabel">Portal 功能下拉選擇</label>
-            <select
-              className="toolSelect"
-              value={selectedToolId}
-              onChange={(e) => onToolChange(e.target.value)}
-              disabled={sidecarDown || !!activeTool}
-            >
-              {(() => {
-                const groups = groupTools(tools);
-                return CATEGORY_ORDER
-                  .filter(cat => groups[cat]?.length)
-                  .map(cat => (
-                    <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
-                      {groups[cat].map(t => (
-                        <option key={t.tool_id} value={t.tool_id}>{t.name}</option>
-                      ))}
-                    </optgroup>
-                  ));
-              })()}
-            </select>
-          </div>
-          {activeTool ? (
-            <button onClick={onStop} className="btn-danger">
-              <Square size={17} />
-              Stop {activeTool.name}
-            </button>
-          ) : (
-            <button onClick={onStart} disabled={!selectedToolId || sidecarDown}>
-              <RefreshCw size={17} />
-              Start Tool
-            </button>
-          )}
-
-          <div className="vd-divider" />
-
-          {editingUrl ? (
-            <>
-              <input
-                className="web-app-url-input"
-                value={urlDraft}
-                onChange={e => setUrlDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") saveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
-                placeholder="https://your-k8s-app.example.com"
-                autoFocus
-              />
-              <button onClick={saveUrl}>確認</button>
-              <button onClick={() => setEditingUrl(false)}>取消</button>
-            </>
-          ) : (
-            <>
-              <button className="btn-ghost" onClick={() => { setUrlDraft(webAppUrl); setEditingUrl(true); }} title={`Vision DIY URL${webAppUrl ? `: ${webAppUrl}` : " — 點擊設定"}`}>🔭✏️</button>
-              {queueCount > 0 && (
-                <button className="btn-ghost" onClick={onClearQueue} title="清空標注佇列">🗑️ {queueCount}</button>
-              )}
-              <button className="btn-ghost vd-help-btn" onClick={() => setShowHelp(true)} title="Vision DIY 整合指南">?</button>
-            </>
-          )}
+      </div>
+      <div className="actions">
+        <div className="toolSelectGroup">
+          <label className="toolSelectLabel">Portal 功能下拉選擇</label>
+          <select
+            className="toolSelect"
+            value={selectedToolId}
+            onChange={(e) => onToolChange(e.target.value)}
+            disabled={sidecarDown || !!activeTool}
+          >
+            {(() => {
+              const groups = groupTools(tools);
+              return CATEGORY_ORDER
+                .filter(cat => groups[cat]?.length)
+                .map(cat => (
+                  <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
+                    {groups[cat].map(t => (
+                      <option key={t.tool_id} value={t.tool_id}>{t.name}</option>
+                    ))}
+                  </optgroup>
+                ));
+            })()}
+          </select>
         </div>
-      </header>
-    </>
+        {activeTool ? (
+          <button onClick={onStop} className="btn-danger">
+            <Square size={17} />
+            Stop {activeTool.name}
+          </button>
+        ) : (
+          <button onClick={onStart} disabled={!selectedToolId || sidecarDown}>
+            <RefreshCw size={17} />
+            Start Tool
+          </button>
+        )}
+      </div>
+    </header>
   );
 }
 
@@ -896,10 +855,6 @@ function App() {
         status={status}
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
-        webAppUrl={webAppUrl}
-        setWebAppUrl={setWebAppUrl}
-        queueCount={extQueue.length}
-        onClearQueue={handleClearQueue}
       />
       <div className="workspace-body">
         {activeTool?.category === "external" ? (
