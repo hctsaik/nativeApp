@@ -12,7 +12,6 @@ cd apps/host-electron && npm run dev
 
 ### 首次設定（解壓 source zip 或全新 clone 後）
 ```powershell
-python restore_gmail_safe_filenames.py   # 僅 Gmail-safe zip 需要
 npm install
 pip install -r sidecar/python-engine/requirements.txt
 start-dev.bat
@@ -72,10 +71,5 @@ npm test                # JavaScript shared-protocol 單元測試
 
 ## 打包
 
-三種打包方式，完整指令見 `README.md`：
-
-| 方式 | 說明 | 關鍵差異 |
-|------|------|---------|
-| 原始碼 zip（含 DB） | 換電腦用 | `--include-file "apps/host-electron/logs/data/tools.sqlite"` |
-| 原始碼 zip（Gmail 安全） | 無 SQLite，附件可寄 Gmail | `--gmail-safe`，收件方需執行 `restore_gmail_safe_filenames.py` |
-| Electron 可攜式安裝包 | 給使用者的 release | `npm run build` → PyInstaller → `npm run package:portable` |
+- 原始碼 zip → `/package-source`
+- Electron 可攜式安裝包 → `/package-build`
