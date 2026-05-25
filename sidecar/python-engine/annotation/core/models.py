@@ -270,6 +270,19 @@ class ArtifactRef:
 
 
 @dataclass(slots=True)
+class LossEntry:
+    loss_type: str          # "dropped" | "approximated" | "unsupported" | "truncated"
+    field: str              # e.g. "geometry", "segmentation", "rle"
+    reason: str
+    severity: str = "warning"   # "warning" | "error"
+    asset_id: str | None = None
+    annotation_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _to_dict(self)
+
+
+@dataclass(slots=True)
 class ConversionReport:
     lossless: bool = True
     dropped_fields: list[str] = field(default_factory=list)
@@ -280,6 +293,10 @@ class ConversionReport:
     warnings: list[str] = field(default_factory=list)
     source_format_version: str | None = None
     target_format_version: str | None = None
+    # Phase 2 additions (backwards compatible — all have defaults)
+    losses: list[LossEntry] = field(default_factory=list)
+    mapping_version: str | None = None
+    summary: str = ""
 
     def mark_loss(self, field: str, warning: str | None = None) -> None:
         self.lossless = False
@@ -288,8 +305,45 @@ class ConversionReport:
         if warning:
             self.warnings.append(warning)
 
+    def add_loss(
+        self,
+        loss_type: str,
+        field: str,
+        reason: str,
+        severity: str = "warning",
+        asset_id: str | None = None,
+        annotation_id: str | None = None,
+    ) -> None:
+        """Add a structured LossEntry and update legacy fields."""
+        self.losses.append(LossEntry(loss_type, field, reason, severity, asset_id, annotation_id))
+        if severity == "error":
+            self.lossless = False
+        elif loss_type in {"dropped", "approximated", "unsupported"}:
+            self.lossless = False
+        if loss_type == "dropped" and field not in self.dropped_fields:
+            self.dropped_fields.append(field)
+        elif loss_type == "approximated" and field not in self.approximated_fields:
+            self.approximated_fields.append(field)
+        elif loss_type == "unsupported" and field not in self.unsupported_annotations:
+            self.unsupported_annotations.append(field)
+        if reason and reason not in self.warnings:
+            self.warnings.append(reason)
+
+    def build_summary(self) -> str:
+        if self.lossless and not self.losses:
+            return "lossless"
+        errors = [e for e in self.losses if e.severity == "error"]
+        warnings = [e for e in self.losses if e.severity == "warning"]
+        if errors:
+            return f"{len(errors)} error(s), {len(warnings)} warning(s)"
+        if warnings:
+            return f"{len(warnings)} warning(s)"
+        return "lossless"
+
     def to_dict(self) -> dict[str, Any]:
-        return _to_dict(self)
+        d = _to_dict(self)
+        d["summary"] = self.build_summary()
+        return d
 
 
 @dataclass(slots=True)

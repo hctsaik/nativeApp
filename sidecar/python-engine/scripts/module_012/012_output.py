@@ -469,6 +469,17 @@ def _launch_isat(file_path: str, isat_exe: str) -> str | None:
         return str(e)
 
 
+def _launch_tool(tool_id: str, file_path: str, exe_override: str | None = None) -> str | None:
+    """Unified tool launch via ToolRegistry. Returns error string or None on success."""
+    try:
+        from annotation.tools.registry import get_tool_registry
+        _, adapter = get_tool_registry().get(tool_id)
+        return adapter.launch_file(file_path, {"executable_override": exe_override})
+    except Exception as exc:
+        _log.error("[012] _launch_tool failed tool=%s: %s", tool_id, exc)
+        return str(exc)
+
+
 def _launch_annotation_tool(
     annotation_tool: str,
     file_path: str,

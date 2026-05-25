@@ -224,11 +224,26 @@ class AnnotationMCPHandlers:
     def get_export(self, export_id: str) -> str:
         return call_service(lambda: self.service.get_export(export_id))
 
+    def dry_run_export(
+        self,
+        annotation_set_id: str,
+        export_format: str,
+        options_json: str = "{}",
+    ) -> str:
+        return call_service(
+            lambda: self.service.dry_run_export(
+                annotation_set_id, export_format, _loads_object(options_json)
+            )
+        )
+
+    def list_labeling_tools(self) -> str:
+        return call_service(self.service.list_labeling_tools)
+
     def get_job_status(self, job_id: str) -> str:
-        return ok({"job_id": job_id, "state": "succeeded", "message": "MVP operations run synchronously."})
+        return call_service(lambda: self.service.get_job_status(job_id))
 
     def cancel_job(self, job_id: str) -> str:
-        return ok({"job_id": job_id, "state": "not_cancelable", "message": "MVP operations run synchronously."})
+        return call_service(lambda: self.service.cancel_job(job_id))
 
 
 def _loads_object(value: str) -> dict[str, Any]:

@@ -3,14 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from annotation.adapters.coco import export_coco, import_coco_file
-from annotation.adapters.isat import export_isat, import_isat_file, import_isat_project_dir, prepare_isat_project
 from annotation.adapters.labeling_runtime import detect_labeling_tool, launch_labeling_project
-from annotation.adapters.labelme import export_labelme, import_labelme_file, import_labelme_project_dir
 from annotation.adapters.xanylabeling import XAnyLabelingProjectAdapter
 from annotation.adapters.xanylabeling_runtime import detect_xanylabeling, launch_xanylabeling_project
-from annotation.adapters.yolo_detection import export_yolo_detection, import_yolo_detection_dir
-from annotation.adapters.yolo_segmentation import export_yolo_segmentation, import_yolo_segmentation_dir
 from annotation.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from annotation.core.models import (
     AdapterResult,
@@ -26,7 +21,9 @@ from annotation.core.models import (
 )
 from annotation.core.states import apply_review_decision, transition_annotation_set
 from annotation.core.validation import validate_annotation_set
+from annotation.formats.registry import get_format_registry
 from annotation.storage.workspace import AnnotationWorkspace
+from annotation.tools.registry import get_tool_registry
 
 
 class AnnotationService:
@@ -105,6 +102,8 @@ class AnnotationService:
         }
 
     def get_task(self, task_id: str) -> dict[str, Any]:
+        # NOTE: task_id is an alias for annotation_set_id — they share the same ID namespace.
+        # Do not rename this method; MCP tool annotation_get_task depends on it.
         annotation_set = self._require_annotation_set(task_id)
         return {
             "task_id": annotation_set.id,
@@ -188,6 +187,8 @@ class AnnotationService:
         self.workspace.write_canonical_annotation_set(annotation_set)
         return {"annotation_set": annotation_set.to_dict(), "review": review.to_dict()}
 
+    # ── Legacy X-AnyLabeling compatibility API (preserved, calls generic API internally) ──
+
     def prepare_xanylabeling_project(
         self,
         dataset_id: str,
@@ -204,40 +205,11 @@ class AnnotationService:
         result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
         return result.to_dict()
 
-    def prepare_labeling_project(
-        self,
-        tool: str,
-        dataset_id: str,
-        schema_id: str,
-        output_dir: str,
-        asset_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
-        self._require_dataset(dataset_id)
-        schema = self._require_schema(schema_id)
-        assets = self.workspace.metadata.list_assets(dataset_id)
-        if asset_ids is not None:
-            wanted = set(asset_ids)
-            assets = [asset for asset in assets if asset.id in wanted]
-        normalized = _normalize_tool(tool)
-        if normalized in {"x-anylabeling", "labelme"}:
-            result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
-        elif normalized == "isat":
-            result = prepare_isat_project(dataset_id, schema, assets, Path(output_dir))
-        else:
-            raise ValueError(f"Unsupported labeling tool: {tool}")
-        return result.to_dict()
-
     def detect_xanylabeling(self) -> dict[str, Any]:
         return detect_xanylabeling().to_dict()
 
     def launch_xanylabeling_project(self, project_dir: str) -> dict[str, Any]:
         return launch_xanylabeling_project(project_dir)
-
-    def detect_labeling_tool(self, tool: str) -> dict[str, Any]:
-        return detect_labeling_tool(tool).to_dict()
-
-    def launch_labeling_project(self, tool: str, project_dir: str) -> dict[str, Any]:
-        return launch_labeling_project(tool, project_dir)
 
     def import_xanylabeling_annotations(
         self,
@@ -254,13 +226,56 @@ class AnnotationService:
         schema_id: str,
         labels_dir: str,
     ) -> dict[str, Any]:
-        """Import all LabelMe JSON files from an X-AnyLabeling labels/ directory.
-
-        Matches each JSON to an asset automatically using the imagePath field.
-        Returns the merged AnnotationSet, an aggregated conversion report, and
-        a list of JSON filenames that could not be matched to any dataset asset.
-        """
         return self.import_project_labels(dataset_id, schema_id, "x-anylabeling", labels_dir)
+
+    # ── Phase 3: ToolRegistry-backed tool methods ─────────────────────────────
+
+    def prepare_labeling_project(
+        self,
+        tool: str,
+        dataset_id: str,
+        schema_id: str,
+        output_dir: str,
+        asset_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._require_dataset(dataset_id)
+        schema = self._require_schema(schema_id)
+        assets = self.workspace.metadata.list_assets(dataset_id)
+        if asset_ids is not None:
+            wanted = set(asset_ids)
+            assets = [asset for asset in assets if asset.id in wanted]
+        canonical = get_tool_registry().normalize(tool)
+        # ISAT does not support project preparation (no project args accepted)
+        if canonical == "isat":
+            from annotation.adapters.isat import prepare_isat_project
+            result = prepare_isat_project(dataset_id, schema, assets, Path(output_dir))
+        else:
+            result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
+        return result.to_dict()
+
+    def detect_labeling_tool(self, tool: str) -> dict[str, Any]:
+        registry = get_tool_registry()
+        try:
+            _, adapter = registry.get(tool)
+            return adapter.detect().to_dict()
+        except ValueError:
+            return detect_labeling_tool(tool).to_dict()
+
+    def launch_labeling_project(self, tool: str, project_dir: str) -> dict[str, Any]:
+        registry = get_tool_registry()
+        try:
+            desc, adapter = registry.get(tool)
+            return adapter.launch_project(Path(project_dir), {})
+        except ValueError:
+            return launch_labeling_project(tool, project_dir)
+
+    def list_labeling_tools(self) -> list[dict[str, Any]]:
+        return get_tool_registry().list_supported()
+
+    # ── Phase 1: FormatRegistry-backed format methods ─────────────────────────
+
+    def supported_annotation_formats(self) -> list[dict[str, Any]]:
+        return get_format_registry().list_supported()
 
     def import_annotations(
         self,
@@ -272,22 +287,19 @@ class AnnotationService:
     ) -> dict[str, Any]:
         self._require_dataset(dataset_id)
         schema = self._require_schema(schema_id)
-        fmt = _normalize_format(input_format)
-        if fmt == "coco":
+        registry = get_format_registry()
+        fmt = registry.normalize(input_format)
+        desc, adapter = registry.get(fmt)
+        all_assets = self.workspace.metadata.list_assets(dataset_id)
+
+        if not desc.capabilities.requires_asset:
             asset = None
-        elif asset_id is None:
-            asset = self._asset_for_annotation_file(dataset_id, input_path, fmt)
-        else:
+        elif asset_id is not None:
             asset = self._require_asset(dataset_id, asset_id)
-        if fmt in {"labelme", "x-anylabeling"}:
-            annotation_set, report = import_labelme_file(input_path, dataset_id, schema, asset)
-        elif fmt == "isat":
-            annotation_set, report = import_isat_file(input_path, dataset_id, schema, asset)
-        elif fmt == "coco":
-            assets = self.workspace.metadata.list_assets(dataset_id)
-            annotation_set, report, _unmatched = import_coco_file(input_path, dataset_id, schema, assets)
         else:
-            raise ValueError(f"Unsupported import format: {input_format}")
+            asset = self._asset_for_annotation_file(dataset_id, input_path, fmt)
+
+        annotation_set, report = adapter.import_file(input_path, dataset_id, schema, asset, all_assets)
         self.workspace.write_canonical_annotation_set(annotation_set)
         return {"annotation_set": annotation_set.to_dict(), "conversion_report": report.to_dict()}
 
@@ -301,25 +313,9 @@ class AnnotationService:
         self._require_dataset(dataset_id)
         schema = self._require_schema(schema_id)
         assets = self.workspace.metadata.list_assets(dataset_id)
-        fmt = _normalize_format(input_format)
-        if fmt in {"labelme", "x-anylabeling"}:
-            annotation_set, report, unmatched = import_labelme_project_dir(
-                Path(labels_dir), dataset_id, schema, assets
-            )
-        elif fmt == "isat":
-            annotation_set, report, unmatched = import_isat_project_dir(
-                Path(labels_dir), dataset_id, schema, assets
-            )
-        elif fmt == "yolo-detection":
-            annotation_set, report, unmatched = import_yolo_detection_dir(
-                Path(labels_dir), dataset_id, schema, assets
-            )
-        elif fmt == "yolo-segmentation":
-            annotation_set, report, unmatched = import_yolo_segmentation_dir(
-                Path(labels_dir), dataset_id, schema, assets
-            )
-        else:
-            raise ValueError(f"Unsupported import format: {input_format}")
+        registry = get_format_registry()
+        desc, adapter = registry.get(input_format)
+        annotation_set, report, unmatched = adapter.import_dir(Path(labels_dir), dataset_id, schema, assets)
         self.workspace.write_canonical_annotation_set(annotation_set)
         return {
             "annotation_set": annotation_set.to_dict(),
@@ -327,16 +323,6 @@ class AnnotationService:
             "unmatched_files": unmatched,
             "matched_count": len(annotation_set.annotations),
         }
-
-    def supported_annotation_formats(self) -> list[dict[str, Any]]:
-        return [
-            {"id": "labelme", "name": "LabelMe JSON", "can_import": True, "can_export": True},
-            {"id": "x-anylabeling", "name": "X-AnyLabeling JSON", "can_import": True, "can_export": True},
-            {"id": "isat", "name": "ISAT JSON", "can_import": True, "can_export": True},
-            {"id": "coco", "name": "COCO", "can_import": True, "can_export": True},
-            {"id": "yolo-detection", "name": "YOLO Detection", "can_import": True, "can_export": True},
-            {"id": "yolo-segmentation", "name": "YOLO Segmentation", "can_import": True, "can_export": True},
-        ]
 
     def create_export(
         self,
@@ -353,21 +339,8 @@ class AnnotationService:
             )
         schema = self._require_schema(annotation_set.schema_id)
         assets = {asset.id: asset for asset in self.workspace.metadata.list_assets(annotation_set.dataset_id)}
-        output = Path(output_dir)
-        result: AdapterResult
-        normalized_format = _normalize_format(export_format)
-        if normalized_format in {"labelme", "x-anylabeling"}:
-            result = export_labelme(annotation_set, schema, assets, output)
-        elif normalized_format == "isat":
-            result = export_isat(annotation_set, schema, assets, output)
-        elif normalized_format == "coco":
-            result = export_coco(annotation_set, schema, assets, output)
-        elif normalized_format == "yolo-detection":
-            result = export_yolo_detection(annotation_set, schema, assets, output)
-        elif normalized_format == "yolo-segmentation":
-            result = export_yolo_segmentation(annotation_set, schema, assets, output)
-        else:
-            raise ValueError(f"Unsupported export format: {export_format}")
+        _, adapter = get_format_registry().get(export_format)
+        result = adapter.export(annotation_set, schema, assets, Path(output_dir))
         payload = result.to_dict()
         export_id = new_id("export")
         payload["export_id"] = export_id
@@ -377,11 +350,38 @@ class AnnotationService:
         self.workspace.metadata.save_export(export_id, annotation_set.id, payload)
         return payload
 
+    # ── Phase 2: dry-run export ───────────────────────────────────────────────
+
+    def dry_run_export(
+        self,
+        annotation_set_id: str,
+        export_format: str,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run export conversion without writing any persistent files. Returns ConversionReport."""
+        annotation_set = self._require_annotation_set(annotation_set_id)
+        schema = self._require_schema(annotation_set.schema_id)
+        assets = {asset.id: asset for asset in self.workspace.metadata.list_assets(annotation_set.dataset_id)}
+        _, adapter = get_format_registry().get(export_format)
+        result = adapter.export(annotation_set, schema, assets, Path("."), dry_run=True)
+        return result.conversion_report.to_dict()
+
     def get_export(self, export_id: str) -> dict[str, Any]:
         export_record = self.workspace.metadata.get_export(export_id)
         if export_record is None:
             raise NotFoundError("export", export_id)
         return export_record
+
+    # ── Phase 5: Job API (replaces stubs) ────────────────────────────────────
+
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
+        """MVP: jobs run synchronously; always return succeeded."""
+        return {"job_id": job_id, "state": "succeeded", "message": "MVP operations run synchronously."}
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        return {"job_id": job_id, "state": "not_cancelable", "message": "MVP: no async jobs to cancel."}
+
+    # ── Private helpers ───────────────────────────────────────────────────────
 
     def _asset_for_annotation_file(self, dataset_id: str, input_path: str, input_format: str):
         path = Path(input_path)
@@ -389,7 +389,6 @@ class AnnotationService:
         by_filename = {Path(asset.uri).name: asset for asset in assets}
         try:
             import json
-
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             payload = {}
@@ -457,26 +456,3 @@ def _annotation_from_payload(payload: dict[str, Any]) -> Annotation:
         provenance=data.get("provenance", {}),
         version=data.get("version", 1),
     )
-
-
-def _normalize_format(value: str) -> str:
-    fmt = (value or "").strip().lower().replace("_", "-")
-    aliases = {
-        "xanylabeling": "x-anylabeling",
-        "x-any": "x-anylabeling",
-        "yolo": "yolo-detection",
-        "yolo-detect": "yolo-detection",
-        "yolo-detection": "yolo-detection",
-        "yolo-seg": "yolo-segmentation",
-        "yolo-segment": "yolo-segmentation",
-        "yolo-segmentation": "yolo-segmentation",
-        "yolo-segmentations": "yolo-segmentation",
-    }
-    return aliases.get(fmt, fmt)
-
-
-def _normalize_tool(value: str) -> str:
-    tool = (value or "").strip().lower().replace("_", "-")
-    if tool == "xanylabeling":
-        return "x-anylabeling"
-    return tool
