@@ -51,6 +51,7 @@ class AnnotationTask:
     annotated_by: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
+    delivery_status: dict | None = None
 
 
 # ---------------------------------------------------------------------------

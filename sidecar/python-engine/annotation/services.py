@@ -684,6 +684,7 @@ def _task_to_dict(task: AnnotationTask) -> dict[str, Any]:
         "annotated_by": task.annotated_by,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
+        "delivery_status": task.delivery_status,
     }
 
 

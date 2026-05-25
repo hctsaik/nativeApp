@@ -40,7 +40,11 @@ class RestConnector(ExternalSystemConnector):
     def __init__(self, tenant: SystemTenant, timeout: float = 30.0) -> None:
         self._tenant = tenant
         self._timeout = timeout
-        self._headers = {"Authorization": f"Bearer {tenant.api_token or ''}"}
+        self._headers = (
+            {"Authorization": f"Bearer {tenant.api_token}"}
+            if tenant.api_token
+            else {}
+        )
         self._base = tenant.server_host_name  # 已去除末尾斜線（profiles.load_profile 保證）
 
     # ── ExternalSystemConnector ───────────────────────────────────────────────

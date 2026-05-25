@@ -420,6 +420,7 @@ def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
 
 
 def _row_to_task(row: sqlite3.Row) -> AnnotationTask:
+    raw_delivery = row["delivery_status"] if "delivery_status" in row.keys() else None
     return AnnotationTask(
         task_id=row["task_id"],
         tenant_id=row["tenant_id"],
@@ -432,4 +433,5 @@ def _row_to_task(row: sqlite3.Row) -> AnnotationTask:
         annotated_by=row["annotated_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        delivery_status=json.loads(raw_delivery) if raw_delivery else None,
     )

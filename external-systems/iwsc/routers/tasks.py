@@ -25,6 +25,11 @@ class ResultPayload(BaseModel):
     annotated_by: str | None = None
 
 
+class AntTaskDetailRequest(BaseModel):
+    antID: str
+    format: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -47,14 +52,47 @@ def _utc_now() -> str:
 # GET /tasks — return all pending tasks (ant_active = 0)
 # ---------------------------------------------------------------------------
 
-@router.get("/tasks", summary="Get pending tasks (ant_active=0)")
-def list_pending_tasks():
+def _fetch_pending_tasks():
     conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM iwsc_tasks WHERE ant_active = 0 ORDER BY ant_period"
         ).fetchall()
         return [_row_to_task_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.get("/tasks", summary="Get pending tasks (ant_active=0)")
+def list_pending_tasks():
+    return _fetch_pending_tasks()
+
+
+@router.get("/getAntList", summary="CIM platform compat alias for GET /tasks")
+def get_ant_list():
+    """Alias endpoint matching CIM RestConnector's expected path."""
+    return _fetch_pending_tasks()
+
+
+# ---------------------------------------------------------------------------
+# POST /getAntTaskDetail — CIM platform compat: return task ZIP download URL
+# ---------------------------------------------------------------------------
+
+@router.post("/getAntTaskDetail", summary="Return task detail (ZIP URL) for a given antID")
+def get_ant_task_detail(body: AntTaskDetailRequest):
+    """
+    CIM platform calls this after claiming a task to get the ZIP download URL.
+    iWISC does not generate image ZIPs, so download_url is null — the platform
+    will skip the download step and create an empty annotation task.
+    """
+    conn = get_connection()
+    try:
+        task = conn.execute(
+            "SELECT * FROM iwsc_tasks WHERE ant_id = ?", (body.antID,)
+        ).fetchone()
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {body.antID!r} not found")
+        return {"antID": body.antID, "download_url": None}
     finally:
         conn.close()
 
