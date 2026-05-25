@@ -32,6 +32,10 @@ class AnnotationWorkspace:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def update_task_delivery(self, task_id: str, delivery_result: dict) -> None:
+        """將回饋結果存入資料庫的 delivery_status 欄位。"""
+        self.metadata.update_task_delivery(task_id, delivery_result)
+
     # ── 舊版 Dataset / Asset / Schema 介面（FormatRegistry 相容用） ─────────
 
     def create_dataset(self, name: str, root_uri: str, metadata: dict | None = None) -> Dataset:

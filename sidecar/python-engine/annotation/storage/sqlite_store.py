@@ -105,6 +105,15 @@ class SQLiteMetadataStore:
                 );
                 """
             )
+            # 遷移舊資料庫：delivery_status 欄位若不存在則新增
+            # SQLite 不支援 ALTER TABLE ... ADD COLUMN IF NOT EXISTS，改用 exception 忽略
+            try:
+                conn.execute(
+                    "ALTER TABLE annotation_tasks ADD COLUMN delivery_status TEXT"
+                )
+                conn.commit()
+            except Exception:
+                pass  # 欄位已存在，忽略錯誤
 
     # ── SystemTenant ─────────────────────────────────────────────────────────
 
@@ -238,6 +247,14 @@ class SQLiteMetadataStore:
                 (tenant_id, ant_id),
             ).fetchone()
         return _row_to_task(row) if row else None
+
+    def update_task_delivery(self, task_id: str, delivery_result: dict[str, Any]) -> None:
+        """將回饋結果（delivery_result）序列化後存入 delivery_status 欄位。"""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE annotation_tasks SET delivery_status = ? WHERE task_id = ?",
+                (json.dumps(delivery_result, ensure_ascii=False), task_id),
+            )
 
     # ── Legacy Dataset / Asset / Schema / AnnotationSet ──────────────────────
     # 保留以供 FormatRegistry 與 dry-run 測試使用

@@ -184,7 +184,24 @@ class AnnotationService:
         task.annotated_by = annotated_by
         task.updated_at = utc_now_iso()
         self.workspace.metadata.save_task(task)
-        return _task_to_dict(task)
+
+        # deliver result back to external system
+        tenant = self._require_tenant(task.tenant_id)
+        connector = self._get_connector(tenant)
+        try:
+            delivery = connector.deliver_result(
+                ant_id=task.ant_id,
+                platform_task_id=task_id,
+                annotation_json=task.annotation_json or {},
+                new_classification=task.new_classification,
+                annotated_by=task.annotated_by,
+            )
+        except Exception as exc:
+            delivery = {"status": "error", "error": str(exc)}
+        # store delivery result in task record
+        self.workspace.update_task_delivery(task_id, delivery)
+
+        return {**_task_to_dict(task), "delivery": delivery}
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         return _task_to_dict(self._require_task(task_id))

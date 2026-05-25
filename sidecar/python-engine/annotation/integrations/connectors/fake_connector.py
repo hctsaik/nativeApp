@@ -6,6 +6,7 @@ annotation.integrations.connectors.fake_connector
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from annotation.integrations.contracts import (
@@ -52,6 +53,19 @@ class FakeConnector(ExternalSystemConnector):
 
     def health_check(self) -> ConnectorHealth:
         return ConnectorHealth(connected=True, latency_ms=0)
+
+    def deliver_result(
+        self,
+        ant_id: str,
+        platform_task_id: str,
+        annotation_json: dict,
+        new_classification: str | None,
+        annotated_by: str | None,
+    ) -> dict:
+        """No-op：不發 HTTP，直接回傳假成功回應。"""
+        from datetime import timezone
+        received_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {"status": "ok", "ant_id": ant_id, "received_at": received_at}
 
     # ── Test helpers ──────────────────────────────────────────────────────────
 

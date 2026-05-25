@@ -77,3 +77,15 @@ class ExternalSystemConnector(ABC):
     def health_check(self) -> ConnectorHealth:
         """檢查與外部系統的連線狀態。"""
         ...
+
+    @abstractmethod
+    def deliver_result(
+        self,
+        ant_id: str,
+        platform_task_id: str,
+        annotation_json: dict,
+        new_classification: str | None,
+        annotated_by: str | None,
+    ) -> dict:
+        """Push annotation result back to external system. Returns response dict."""
+        ...

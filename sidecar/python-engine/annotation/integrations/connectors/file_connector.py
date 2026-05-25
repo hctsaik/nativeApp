@@ -86,3 +86,19 @@ class FileConnector(ExternalSystemConnector):
             latency_ms=latency_ms,
             error=f"路徑不存在：{check}",
         )
+
+    def deliver_result(
+        self,
+        ant_id: str,
+        platform_task_id: str,
+        annotation_json: dict,
+        new_classification: str | None,
+        annotated_by: str | None,
+    ) -> dict:
+        """FileConnector is local-only; delivery is a no-op."""
+        from datetime import datetime, timezone
+        return {
+            "status": "ok",
+            "ant_id": ant_id,
+            "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }

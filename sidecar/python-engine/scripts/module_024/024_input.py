@@ -168,11 +168,25 @@ def render_input() -> dict:
                 return {"mode": "idle"}
 
             try:
-                service.complete_task(task_id=task_id, annotated_by=annotated_by.strip())
-                st.session_state["m024_completion_msg"] = {
-                    "ok": True,
-                    "text": f"✅ 任務 {task_id[:8]}… 已標記完成（antActive→2）。",
-                }
+                result = service.complete_task(task_id=task_id, annotated_by=annotated_by.strip())
+                delivery = result.get("delivery", {})
+                delivery_status = delivery.get("status", "unknown")
+                if delivery_status == "error":
+                    st.session_state["m024_completion_msg"] = {
+                        "ok": False,
+                        "text": (
+                            f"任務 {task_id[:8]}… 已標記完成（antActive→2），"
+                            f"但回饋失敗：{delivery.get('error', '未知錯誤')}"
+                        ),
+                    }
+                else:
+                    st.session_state["m024_completion_msg"] = {
+                        "ok": True,
+                        "text": (
+                            f"✅ 任務 {task_id[:8]}… 已標記完成（antActive→2）。"
+                            f"回饋狀態：{delivery_status}"
+                        ),
+                    }
                 st.session_state.pop(f"m024_tasks_{tenant_id}", None)
                 st.session_state.pop("m024_task_selectbox", None)
             except Exception as exc:
