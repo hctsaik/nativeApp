@@ -22,7 +22,7 @@ def _mask_token(token: str | None) -> str:
 
 
 def render_output(result: dict = None) -> None:
-    st.title("🏢 Tenant 管理 — 概覽")
+    st.title("🔐 標註權限管理 — 概覽")
 
     if st.button("🔄 重新整理", key="m022_out_refresh"):
         st.session_state.pop("m022_out_tenant_list", None)

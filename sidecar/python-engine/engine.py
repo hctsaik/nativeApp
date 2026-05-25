@@ -314,8 +314,8 @@ class SQLiteToolAdapter(ToolAdapter):
             (8, "module_017", "\U0001f4ca \u7ba1\u7406\u4e2d\u5fc3"),
             (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
             (10, "module_021", "\U0001f52d Vision DIY"),
-            (11, "module_022", "\U0001f3e2 Tenant 管理"),
-            (12, "module_023", "\U0001f4cb 公海任務"),
+            (11, "module_022", "\U0001f510 標註權限管理"),
+            (12, "module_023", "\U0001f4cb 標註任務"),
             (13, "module_024", "✏️ 標注工作台"),
             (14, "module_025", "\U0001f4ca 完成報表"),
         ]

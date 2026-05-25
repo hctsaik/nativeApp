@@ -128,22 +128,23 @@ class AnnotationService:
 
         task_id = _new_uuid()
         images_dir = self.workspace.ensure_task_images_dir(task_id)
-
-        # 下載並解壓 ZIP
-        zip_bytes = _download_bytes(download_url)
         annotation_json: dict[str, Any] = {}
 
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            names = zf.namelist()
-            # 解壓 images/
-            for name in names:
-                if name.startswith("images/") and not name.endswith("/"):
-                    img_data = zf.read(name)
-                    dest = images_dir / Path(name).name
-                    dest.write_bytes(img_data)
+        if download_url:
+            # 下載並解壓 ZIP
+            zip_bytes = _download_bytes(download_url)
 
-            # 解析標注檔（嘗試用 FormatRegistry）
-            annotation_json = _parse_annotations_from_zip(zf, names, tenant.target_format, task_id, images_dir)
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                names = zf.namelist()
+                # 解壓 images/
+                for name in names:
+                    if name.startswith("images/") and not name.endswith("/"):
+                        img_data = zf.read(name)
+                        dest = images_dir / Path(name).name
+                        dest.write_bytes(img_data)
+
+                # 解析標注檔（嘗試用 FormatRegistry）
+                annotation_json = _parse_annotations_from_zip(zf, names, tenant.target_format, task_id, images_dir)
 
         now = utc_now_iso()
         task = AnnotationTask(
@@ -258,7 +259,13 @@ class AnnotationService:
     def _get_connector(self, tenant: SystemTenant) -> ExternalSystemConnector:
         if tenant.server_host_name.startswith("fake://"):
             from annotation.integrations.connectors.fake_connector import FakeConnector
-            return FakeConnector(tasks=[], download_url="")
+            _fake_tasks = [
+                {"antID": f"FAKE_TASK_{i:03d}", "antActive": 0,
+                 "antPeriod": "2026-05-26T08:00:00Z",
+                 "external_context": {"lot_id": f"L{i:02d}", "eqp_id": "AOI-01"}}
+                for i in range(1, 4)
+            ]
+            return FakeConnector(tasks=_fake_tasks, download_url="")
         from annotation.integrations.connectors.rest_connector import RestConnector
         return RestConnector(tenant)
 

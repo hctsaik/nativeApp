@@ -18,7 +18,7 @@ _ANT_ACTIVE_ICON = {0: "⚪", 1: "🟠", 2: "🟢"}
 
 
 def render_input() -> dict:
-    st.title("📋 公海任務")
+    st.title("📋 標註任務")
     st.caption("瀏覽外部系統的待標注任務清單並認領任務。")
 
     service = _get_service()
@@ -31,7 +31,7 @@ def render_input() -> dict:
         return {"mode": "idle"}
 
     if not tenants:
-        st.warning("尚無已註冊的 Tenant，請先至「Tenant 管理」頁面新增。")
+        st.warning("尚無已註冊的 Tenant，請先至「標註權限管理」頁面新增。")
         return {"mode": "idle"}
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
@@ -61,6 +61,15 @@ def render_input() -> dict:
         else:
             try:
                 tasks = service.get_ant_list(tenant_id)
+                # 與本地 DB 交叉比對：若任務已被認領，覆蓋 antActive 狀態
+                try:
+                    local_tasks = service.list_tasks(tenant_id)
+                    local_state = {t["ant_id"]: t["ant_active"] for t in local_tasks}
+                except Exception:
+                    local_state = {}
+                for t in tasks:
+                    if t["ant_id"] in local_state:
+                        t["ant_active"] = local_state[t["ant_id"]]
                 st.session_state["m023_task_list"] = tasks
                 st.session_state["m023_task_tenant_id"] = tenant_id
                 if "m023_claim_msg" in st.session_state:

@@ -18,6 +18,14 @@ def render_input() -> dict:
     st.title("✏️ 標注工作台")
     st.caption("對已認領的任務進行標注並標記完成。")
 
+    # 顯示上次完成任務的訊息（跨 task_id 持續顯示）
+    if "m024_completion_msg" in st.session_state:
+        msg = st.session_state.pop("m024_completion_msg")
+        if msg.get("ok"):
+            st.success(msg["text"])
+        else:
+            st.error(msg["text"])
+
     service = _get_service()
 
     # ── Tenant 選擇 ──────────────────────────────────────────────────────────
@@ -28,7 +36,7 @@ def render_input() -> dict:
         return {"mode": "idle"}
 
     if not tenants:
-        st.warning("尚無已註冊的 Tenant，請先至「Tenant 管理」頁面新增。")
+        st.warning("尚無已註冊的 Tenant，請先至「標註權限管理」頁面新增。")
         return {"mode": "idle"}
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
@@ -55,7 +63,7 @@ def render_input() -> dict:
     tasks: list[dict] = st.session_state.get(f"m024_tasks_{tenant_id}", [])
 
     if not tasks:
-        st.info("目前無「標注中（antActive=1）」任務。請至「公海任務」頁面認領。")
+        st.info("目前無「標注中（antActive=1）」任務。請至「標註任務」頁面認領。")
         return {"mode": "idle"}
 
     # ── 任務選擇 ─────────────────────────────────────────────────────────────
@@ -161,9 +169,9 @@ def render_input() -> dict:
 
             try:
                 service.complete_task(task_id=task_id, annotated_by=annotated_by.strip())
-                st.session_state[msg_key] = {
+                st.session_state["m024_completion_msg"] = {
                     "ok": True,
-                    "text": f"任務已標記完成（antActive→2）。",
+                    "text": f"✅ 任務 {task_id[:8]}… 已標記完成（antActive→2）。",
                 }
                 st.session_state.pop(f"m024_tasks_{tenant_id}", None)
                 st.session_state.pop("m024_task_selectbox", None)

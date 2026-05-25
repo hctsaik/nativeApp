@@ -18,7 +18,7 @@ _ANT_ACTIVE_LABEL = {0: "待標注", 1: "標注中", 2: "已完成"}
 
 
 def render_output(result: dict = None) -> None:
-    st.title("📋 公海任務 — 進行中")
+    st.title("📋 標註任務 — 進行中")
     st.caption("已認領但尚未完成的任務（antActive = 1：標注中）。")
 
     service = _get_service()

@@ -27,7 +27,7 @@ def render_input() -> dict:
         return {"mode": "idle"}
 
     if not tenants:
-        st.warning("尚無已註冊的 Tenant，請先至「Tenant 管理」頁面新增。")
+        st.warning("尚無已註冊的 Tenant，請先至「標註權限管理」頁面新增。")
         return {"mode": "idle"}
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}

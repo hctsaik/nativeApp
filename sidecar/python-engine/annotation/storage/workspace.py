@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PIL import Image
-
 from annotation.core.models import AnnotationSet, Dataset, ImageAsset, LabelSchema
 from annotation.storage.artifacts import LocalArtifactStore, sha256_file
 from annotation.storage.sqlite_store import SQLiteMetadataStore
@@ -49,6 +47,7 @@ class AnnotationWorkspace:
         existing = self.metadata.find_asset_by_checksum(dataset_id, checksum)
         if existing is not None:
             return existing
+        from PIL import Image  # lazy import — only needed by legacy ingest_image
         with Image.open(source) as img:
             width, height = img.size
         asset_id = f"asset_{checksum[:12]}"

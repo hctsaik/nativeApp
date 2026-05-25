@@ -2,7 +2,7 @@ id: module_023
 slug: task-browser
 vendor: cimcore
 domain: annotation
-name: 公海任務
+name: 標註任務
 version: "1.0.0"
 category: module
 description: 瀏覽外部系統的待標注任務清單並認領進入工作台。

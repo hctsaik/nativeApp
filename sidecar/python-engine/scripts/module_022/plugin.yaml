@@ -2,7 +2,7 @@ id: module_022
 slug: tenant-management
 vendor: cimcore
 domain: annotation
-name: Tenant 管理
+name: 標註權限管理
 version: "1.0.0"
 category: module
 description: 管理外部系統（AOI/MES）的 Tenant 設定與標注人員白名單。

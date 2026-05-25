@@ -21,10 +21,14 @@ def _get_service():
 
 
 def render_input() -> dict:
-    st.title("🏢 Tenant 管理")
+    st.title("🔐 標註權限管理")
     st.caption("新增外部系統連線設定（SystemTenant）並管理授權使用者白名單。")
 
     service = _get_service()
+
+    # 顯示上次新增成功的訊息（rerun 後持續顯示）
+    if "m022_add_success" in st.session_state:
+        st.success(st.session_state.pop("m022_add_success"))
 
     # ── Section 1: 新增 Tenant ────────────────────────────────────────────────
     st.subheader("1. 新增 Tenant")
@@ -65,8 +69,12 @@ def render_input() -> dict:
                     target_format=target_format,
                     api_token=api_token.strip() or None,
                 )
-                st.success(f"✅ 已新增 Tenant：{result['system_name']}（tenant_id: {result['tenant_id']}）")
+                st.session_state["m022_add_success"] = f"✅ 已新增 Tenant：{result['system_name']}（tenant_id: {result['tenant_id']}）"
                 st.session_state.pop("m022_tenant_list", None)
+                # 清空表單 session state，rerun 後欄位為空
+                for k in ("m022_form_system_name", "m022_form_server_host", "m022_form_api_token"):
+                    st.session_state.pop(k, None)
+                st.rerun()
             except Exception as exc:
                 st.error(f"❌ 新增失敗：{exc}")
 
