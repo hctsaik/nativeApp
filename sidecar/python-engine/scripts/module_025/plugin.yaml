@@ -1,0 +1,15 @@
+id: module_025
+slug: sponsor-dashboard
+vendor: cimcore
+domain: annotation
+name: 完成報表
+version: "1.0.0"
+category: module
+description: CIM Sponsor Dashboard — 標注進度統計與結果 ZIP 下載。
+author: system
+enabled: true
+tags: [annotation, dashboard, sponsor, export, stats]
+runner: cv_framework
+input_file: 025_input.py
+output_file: 025_output.py
+process_file: 025_process.py

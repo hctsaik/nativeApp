@@ -259,9 +259,8 @@ class AnnotationService:
         if tenant.server_host_name.startswith("fake://"):
             from annotation.integrations.connectors.fake_connector import FakeConnector
             return FakeConnector(tasks=[], download_url="")
-        raise NotImplementedError(
-            f"RestConnector for {tenant.server_host_name!r} is not yet implemented (Phase 5)."
-        )
+        from annotation.integrations.connectors.rest_connector import RestConnector
+        return RestConnector(tenant)
 
     # ── 舊版 API（FormatRegistry / dry-run 相容） ─────────────────────────────
 

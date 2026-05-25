@@ -1,0 +1,15 @@
+id: module_022
+slug: tenant-management
+vendor: cimcore
+domain: annotation
+name: Tenant 管理
+version: "1.0.0"
+category: module
+description: 管理外部系統（AOI/MES）的 Tenant 設定與標注人員白名單。
+author: system
+enabled: true
+tags: [annotation, tenant, management, admin]
+runner: cv_framework
+input_file: 022_input.py
+output_file: 022_output.py
+process_file: 022_process.py
