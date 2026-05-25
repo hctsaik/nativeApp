@@ -1,0 +1,32 @@
+[
+  {
+    "antID": "TASK_001",
+    "antActive": 0,
+    "antPeriod": "2026-05-26T08:00:00Z",
+    "external_context": {"lot_id": "L001", "eqp_id": "AOI-01", "product": "PANEL-A"}
+  },
+  {
+    "antID": "TASK_002",
+    "antActive": 0,
+    "antPeriod": "2026-05-26T09:00:00Z",
+    "external_context": {"lot_id": "L001", "eqp_id": "AOI-02", "product": "PANEL-B"}
+  },
+  {
+    "antID": "TASK_003",
+    "antActive": 1,
+    "antPeriod": "2026-05-25T14:00:00Z",
+    "external_context": {"lot_id": "L002", "eqp_id": "AOI-01", "product": "PANEL-C"}
+  },
+  {
+    "antID": "TASK_004",
+    "antActive": 1,
+    "antPeriod": "2026-05-25T10:00:00Z",
+    "external_context": {"lot_id": "L002", "eqp_id": "AOI-03", "product": "PANEL-D"}
+  },
+  {
+    "antID": "TASK_005",
+    "antActive": 2,
+    "antPeriod": "2026-05-24T16:00:00Z",
+    "external_context": {"lot_id": "L003", "eqp_id": "AOI-02", "product": "PANEL-E"}
+  }
+]

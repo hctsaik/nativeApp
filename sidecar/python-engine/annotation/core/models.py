@@ -14,6 +14,49 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+# ---------------------------------------------------------------------------
+# New industrial annotation platform models (Phase 0–3)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SystemTenant:
+    """已向平台註冊的外部標注系統（對應 system_tenants 表）。"""
+    tenant_id: str
+    system_name: str
+    server_host_name: str
+    target_format: str
+    api_token: str | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class TenantUserMapping:
+    """員工與租戶的對應關係（對應 tenant_user_mappings 表）。"""
+    id: str
+    tenant_id: str
+    user_id: str
+
+
+@dataclass
+class AnnotationTask:
+    """標注任務（對應 annotation_tasks 表）。ant_active: 0=Pending 1=Processing 2=Completed"""
+    task_id: str
+    tenant_id: str
+    ant_id: str
+    ant_active: int = 0
+    original_classification: str | None = None
+    new_classification: str | None = None
+    annotation_json: dict = field(default_factory=dict)
+    external_context: dict = field(default_factory=dict)
+    annotated_by: str | None = None
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+# ---------------------------------------------------------------------------
+# Legacy geometry / annotation models — kept for FormatRegistry compatibility
+# ---------------------------------------------------------------------------
+
 DatasetState = Literal["created", "ready", "active", "archived"]
 AnnotationSetState = Literal[
     "draft", "submitted", "approved", "changes_requested", "rejected", "deprecated"

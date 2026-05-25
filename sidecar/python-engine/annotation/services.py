@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import urlopen
+from uuid import uuid4
 
 from annotation.adapters.labeling_runtime import detect_labeling_tool, launch_labeling_project
 from annotation.adapters.xanylabeling import XAnyLabelingProjectAdapter
@@ -11,24 +18,252 @@ from annotation.core.models import (
     AdapterResult,
     Annotation,
     AnnotationSet,
+    AnnotationTask,
     AttributeDef,
     BBoxGeometry,
     ClassificationValue,
     LabelDef,
     LabelSchema,
-    PolygonGeometry,
+    SystemTenant,
+    TenantUserMapping,
     new_id,
+    utc_now_iso,
 )
 from annotation.core.states import apply_review_decision, transition_annotation_set
 from annotation.core.validation import validate_annotation_set
 from annotation.formats.registry import get_format_registry
+from annotation.integrations.contracts import ExternalSystemConnector
 from annotation.storage.workspace import AnnotationWorkspace
 from annotation.tools.registry import get_tool_registry
+
+
+def _new_uuid() -> str:
+    return str(uuid4())
 
 
 class AnnotationService:
     def __init__(self, workspace: AnnotationWorkspace) -> None:
         self.workspace = workspace
+
+    # ── Phase 0: Tenant 管理 ──────────────────────────────────────────────────
+
+    def register_tenant(
+        self,
+        system_name: str,
+        server_host_name: str,
+        target_format: str,
+        api_token: str | None = None,
+    ) -> dict[str, Any]:
+        tenant = SystemTenant(
+            tenant_id=_new_uuid(),
+            system_name=system_name,
+            server_host_name=server_host_name.rstrip("/"),
+            target_format=target_format,
+            api_token=api_token,
+            created_at=utc_now_iso(),
+        )
+        self.workspace.metadata.save_tenant(tenant)
+        return _tenant_to_dict(tenant)
+
+    def list_tenants(self) -> list[dict[str, Any]]:
+        return [_tenant_to_dict(t) for t in self.workspace.metadata.list_tenants()]
+
+    def get_tenant(self, tenant_id: str) -> dict[str, Any]:
+        tenant = self._require_tenant(tenant_id)
+        return _tenant_to_dict(tenant)
+
+    def add_user_to_tenant(self, tenant_id: str, user_id: str) -> dict[str, Any]:
+        self._require_tenant(tenant_id)
+        mapping = TenantUserMapping(
+            id=_new_uuid(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        self.workspace.metadata.add_user_mapping(mapping)
+        return {"id": mapping.id, "tenant_id": tenant_id, "user_id": user_id}
+
+    def list_tenant_users(self, tenant_id: str) -> list[dict[str, Any]]:
+        self._require_tenant(tenant_id)
+        return [
+            {"id": m.id, "tenant_id": m.tenant_id, "user_id": m.user_id}
+            for m in self.workspace.metadata.list_user_mappings(tenant_id)
+        ]
+
+    # ── Phase 1: 任務發現（不存 DB，直接呼叫 connector） ────────────────────
+
+    def get_ant_list(self, tenant_id: str) -> list[dict[str, Any]]:
+        tenant = self._require_tenant(tenant_id)
+        connector = self._get_connector(tenant)
+        tasks = connector.get_ant_list()
+        return [
+            {
+                "ant_id": t.ant_id,
+                "ant_active": t.ant_active,
+                "ant_period": t.ant_period,
+                "external_context": t.external_context,
+            }
+            for t in tasks
+        ]
+
+    # ── Phase 2: 任務認領 + ZIP 下載入庫 ────────────────────────────────────
+
+    def claim_task(self, tenant_id: str, ant_id: str, user_id: str) -> dict[str, Any]:
+        """
+        認領外部系統任務：
+        1. 取得 connector → get_ant_task_detail → download_url
+        2. 下載 ZIP → 解壓到 workspace
+        3. 用 FormatRegistry 解析標注
+        4. 建立 AnnotationTask(ant_active=1) 存 DB
+        """
+        tenant = self._require_tenant(tenant_id)
+
+        # 防重複認領
+        existing = self.workspace.metadata.get_task_by_ant_id(tenant_id, ant_id)
+        if existing is not None:
+            return _task_to_dict(existing)
+
+        connector = self._get_connector(tenant)
+        detail = connector.get_ant_task_detail(ant_id, tenant.target_format)
+        download_url = detail.download_url
+
+        task_id = _new_uuid()
+        images_dir = self.workspace.ensure_task_images_dir(task_id)
+
+        # 下載並解壓 ZIP
+        zip_bytes = _download_bytes(download_url)
+        annotation_json: dict[str, Any] = {}
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = zf.namelist()
+            # 解壓 images/
+            for name in names:
+                if name.startswith("images/") and not name.endswith("/"):
+                    img_data = zf.read(name)
+                    dest = images_dir / Path(name).name
+                    dest.write_bytes(img_data)
+
+            # 解析標注檔（嘗試用 FormatRegistry）
+            annotation_json = _parse_annotations_from_zip(zf, names, tenant.target_format, task_id, images_dir)
+
+        now = utc_now_iso()
+        task = AnnotationTask(
+            task_id=task_id,
+            tenant_id=tenant_id,
+            ant_id=ant_id,
+            ant_active=1,
+            annotation_json=annotation_json,
+            external_context={},
+            annotated_by=user_id,
+            created_at=now,
+            updated_at=now,
+        )
+        self.workspace.metadata.save_task(task)
+        return _task_to_dict(task)
+
+    def save_annotation(
+        self,
+        task_id: str,
+        annotation_json: dict[str, Any],
+        new_classification: str | None = None,
+        annotated_by: str | None = None,
+    ) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        task.annotation_json = annotation_json
+        if new_classification is not None:
+            task.new_classification = new_classification
+        if annotated_by is not None:
+            task.annotated_by = annotated_by
+        task.updated_at = utc_now_iso()
+        self.workspace.metadata.save_task(task)
+        return _task_to_dict(task)
+
+    def complete_task(self, task_id: str, annotated_by: str) -> dict[str, Any]:
+        task = self._require_task(task_id)
+        task.ant_active = 2
+        task.annotated_by = annotated_by
+        task.updated_at = utc_now_iso()
+        self.workspace.metadata.save_task(task)
+        return _task_to_dict(task)
+
+    def get_task(self, task_id: str) -> dict[str, Any]:
+        return _task_to_dict(self._require_task(task_id))
+
+    def list_tasks(
+        self,
+        tenant_id: str,
+        user_id: str | None = None,
+        ant_active: int | None = None,
+    ) -> list[dict[str, Any]]:
+        self._require_tenant(tenant_id)
+        tasks = self.workspace.metadata.list_tasks(tenant_id, ant_active)
+        if user_id is not None:
+            tasks = [t for t in tasks if t.annotated_by == user_id]
+        return [_task_to_dict(t) for t in tasks]
+
+    # ── Phase 3: CIM Sponsor 下載 ─────────────────────────────────────────────
+
+    def get_dashboard_stats(self, tenant_id: str) -> dict[str, Any]:
+        self._require_tenant(tenant_id)
+        all_tasks = self.workspace.metadata.list_tasks(tenant_id)
+        counts = {0: 0, 1: 0, 2: 0}
+        for t in all_tasks:
+            counts[t.ant_active] = counts.get(t.ant_active, 0) + 1
+        return {
+            "tenant_id": tenant_id,
+            "pending": counts[0],
+            "processing": counts[1],
+            "completed": counts[2],
+            "total": len(all_tasks),
+        }
+
+    def export_result_zip(self, task_id: str, mode: str) -> bytes:
+        """
+        打包結果 ZIP，回傳 bytes。
+        mode: "orig_img_orig_ant" | "orig_img_new_ant"
+        ZIP 結構: images/ + annotations.<ext> + annotated_by.txt
+        """
+        task = self._require_task(task_id)
+        if mode not in {"orig_img_orig_ant", "orig_img_new_ant"}:
+            raise ValueError(f"不支援的 export mode: {mode!r}")
+
+        images_dir = self.workspace.task_images_dir(task_id)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # 寫入 images/
+            if images_dir.exists():
+                for img_file in sorted(images_dir.iterdir()):
+                    if img_file.is_file():
+                        zf.writestr(f"images/{img_file.name}", img_file.read_bytes())
+
+            # 決定標注內容
+            if mode == "orig_img_orig_ant":
+                ant_data = task.annotation_json
+            else:
+                # new_ant：annotation_json 為最新標注結果（annotator 已更新）
+                ant_data = task.annotation_json
+
+            # 寫入標注檔
+            zf.writestr("annotations.json", json.dumps(ant_data, ensure_ascii=False, indent=2))
+
+            # 寫入 annotated_by
+            zf.writestr(
+                "annotated_by.txt",
+                task.annotated_by or "",
+            )
+
+        return buf.getvalue()
+
+    # ── Connector 取得 ────────────────────────────────────────────────────────
+
+    def _get_connector(self, tenant: SystemTenant) -> ExternalSystemConnector:
+        if tenant.server_host_name.startswith("fake://"):
+            from annotation.integrations.connectors.fake_connector import FakeConnector
+            return FakeConnector(tasks=[], download_url="")
+        raise NotImplementedError(
+            f"RestConnector for {tenant.server_host_name!r} is not yet implemented (Phase 5)."
+        )
+
+    # ── 舊版 API（FormatRegistry / dry-run 相容） ─────────────────────────────
 
     def create_dataset(self, name: str, root_uri: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.workspace.create_dataset(name, root_uri, metadata).to_dict()
@@ -95,36 +330,11 @@ class AnnotationService:
         annotation_set = self._require_annotation_set(annotation_set_id)
         annotations = annotation_set.annotations
         if asset_id is not None:
-            annotations = [annotation for annotation in annotations if annotation.asset_id == asset_id]
+            annotations = [a for a in annotations if a.asset_id == asset_id]
         return {
             "annotation_set_id": annotation_set.id,
-            "annotations": [annotation.to_dict() for annotation in annotations],
+            "annotations": [a.to_dict() for a in annotations],
         }
-
-    def get_task(self, task_id: str) -> dict[str, Any]:
-        # NOTE: task_id is an alias for annotation_set_id — they share the same ID namespace.
-        # Do not rename this method; MCP tool annotation_get_task depends on it.
-        annotation_set = self._require_annotation_set(task_id)
-        return {
-            "task_id": annotation_set.id,
-            "task_type": "annotation_set",
-            "annotation_set": annotation_set.to_dict(),
-        }
-
-    def list_tasks(self, dataset_id: str | None = None) -> list[dict[str, Any]]:
-        if dataset_id is not None:
-            self._require_dataset(dataset_id)
-        return [
-            {
-                "task_id": annotation_set.id,
-                "task_type": "annotation_set",
-                "dataset_id": annotation_set.dataset_id,
-                "schema_id": annotation_set.schema_id,
-                "state": annotation_set.state,
-                "version": annotation_set.version,
-            }
-            for annotation_set in self.workspace.metadata.list_annotation_sets(dataset_id)
-        ]
 
     def upsert_annotations(
         self,
@@ -152,9 +362,9 @@ class AnnotationService:
         if replace:
             annotation_set.annotations = incoming
         else:
-            by_id = {annotation.id: annotation for annotation in annotation_set.annotations}
-            for annotation in incoming:
-                by_id[annotation.id] = annotation
+            by_id = {a.id: a for a in annotation_set.annotations}
+            for a in incoming:
+                by_id[a.id] = a
             annotation_set.annotations = list(by_id.values())
         annotation_set.version += 1
         self.workspace.write_canonical_annotation_set(annotation_set)
@@ -187,8 +397,6 @@ class AnnotationService:
         self.workspace.write_canonical_annotation_set(annotation_set)
         return {"annotation_set": annotation_set.to_dict(), "review": review.to_dict()}
 
-    # ── Legacy X-AnyLabeling compatibility API (preserved, calls generic API internally) ──
-
     def prepare_xanylabeling_project(
         self,
         dataset_id: str,
@@ -201,7 +409,7 @@ class AnnotationService:
         assets = self.workspace.metadata.list_assets(dataset_id)
         if asset_ids is not None:
             wanted = set(asset_ids)
-            assets = [asset for asset in assets if asset.id in wanted]
+            assets = [a for a in assets if a.id in wanted]
         result = XAnyLabelingProjectAdapter().prepare_project(dataset_id, schema, assets, Path(output_dir))
         return result.to_dict()
 
@@ -228,8 +436,6 @@ class AnnotationService:
     ) -> dict[str, Any]:
         return self.import_project_labels(dataset_id, schema_id, "x-anylabeling", labels_dir)
 
-    # ── Phase 3: ToolRegistry-backed tool methods ─────────────────────────────
-
     def prepare_labeling_project(
         self,
         tool: str,
@@ -243,9 +449,8 @@ class AnnotationService:
         assets = self.workspace.metadata.list_assets(dataset_id)
         if asset_ids is not None:
             wanted = set(asset_ids)
-            assets = [asset for asset in assets if asset.id in wanted]
+            assets = [a for a in assets if a.id in wanted]
         canonical = get_tool_registry().normalize(tool)
-        # ISAT does not support project preparation (no project args accepted)
         if canonical == "isat":
             from annotation.adapters.isat import prepare_isat_project
             result = prepare_isat_project(dataset_id, schema, assets, Path(output_dir))
@@ -271,8 +476,6 @@ class AnnotationService:
 
     def list_labeling_tools(self) -> list[dict[str, Any]]:
         return get_tool_registry().list_supported()
-
-    # ── Phase 1: FormatRegistry-backed format methods ─────────────────────────
 
     def supported_annotation_formats(self) -> list[dict[str, Any]]:
         return get_format_registry().list_supported()
@@ -350,15 +553,12 @@ class AnnotationService:
         self.workspace.metadata.save_export(export_id, annotation_set.id, payload)
         return payload
 
-    # ── Phase 2: dry-run export ───────────────────────────────────────────────
-
     def dry_run_export(
         self,
         annotation_set_id: str,
         export_format: str,
         options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Run export conversion without writing any persistent files. Returns ConversionReport."""
         annotation_set = self._require_annotation_set(annotation_set_id)
         schema = self._require_schema(annotation_set.schema_id)
         assets = {asset.id: asset for asset in self.workspace.metadata.list_assets(annotation_set.dataset_id)}
@@ -372,10 +572,7 @@ class AnnotationService:
             raise NotFoundError("export", export_id)
         return export_record
 
-    # ── Phase 5: Job API (replaces stubs) ────────────────────────────────────
-
     def get_job_status(self, job_id: str) -> dict[str, Any]:
-        """MVP: jobs run synchronously; always return succeeded."""
         return {"job_id": job_id, "state": "succeeded", "message": "MVP operations run synchronously."}
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
@@ -383,24 +580,17 @@ class AnnotationService:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _asset_for_annotation_file(self, dataset_id: str, input_path: str, input_format: str):
-        path = Path(input_path)
-        assets = self.workspace.metadata.list_assets(dataset_id)
-        by_filename = {Path(asset.uri).name: asset for asset in assets}
-        try:
-            import json
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            payload = {}
-        if input_format == "isat":
-            image_name = Path(payload.get("info", {}).get("name", "")).name
-        else:
-            image_name = Path(payload.get("imagePath", "")).name
-        if image_name and image_name in by_filename:
-            return by_filename[image_name]
-        if len(assets) == 1:
-            return assets[0]
-        raise NotFoundError("asset", image_name or path.stem)
+    def _require_tenant(self, tenant_id: str) -> SystemTenant:
+        tenant = self.workspace.metadata.get_tenant(tenant_id)
+        if tenant is None:
+            raise NotFoundError("tenant", tenant_id)
+        return tenant
+
+    def _require_task(self, task_id: str) -> AnnotationTask:
+        task = self.workspace.metadata.get_task(task_id)
+        if task is None:
+            raise NotFoundError("task", task_id)
+        return task
 
     def _require_dataset(self, dataset_id: str):
         dataset = self.workspace.metadata.get_dataset(dataset_id)
@@ -426,6 +616,95 @@ class AnnotationService:
                 return asset
         raise NotFoundError("asset", asset_id)
 
+    def _asset_for_annotation_file(self, dataset_id: str, input_path: str, input_format: str):
+        path = Path(input_path)
+        assets = self.workspace.metadata.list_assets(dataset_id)
+        by_filename = {Path(asset.uri).name: asset for asset in assets}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if input_format == "isat":
+            image_name = Path(payload.get("info", {}).get("name", "")).name
+        else:
+            image_name = Path(payload.get("imagePath", "")).name
+        if image_name and image_name in by_filename:
+            return by_filename[image_name]
+        if len(assets) == 1:
+            return assets[0]
+        raise NotFoundError("asset", image_name or path.stem)
+
+
+# ── Module-level helpers ───────────────────────────────────────────────────────
+
+def _tenant_to_dict(tenant: SystemTenant) -> dict[str, Any]:
+    return {
+        "tenant_id": tenant.tenant_id,
+        "system_name": tenant.system_name,
+        "server_host_name": tenant.server_host_name,
+        "target_format": tenant.target_format,
+        "api_token": tenant.api_token,
+        "created_at": tenant.created_at,
+    }
+
+
+def _task_to_dict(task: AnnotationTask) -> dict[str, Any]:
+    return {
+        "task_id": task.task_id,
+        "tenant_id": task.tenant_id,
+        "ant_id": task.ant_id,
+        "ant_active": task.ant_active,
+        "original_classification": task.original_classification,
+        "new_classification": task.new_classification,
+        "annotation_json": task.annotation_json,
+        "external_context": task.external_context,
+        "annotated_by": task.annotated_by,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
+
+
+def _download_bytes(url: str) -> bytes:
+    """下載 URL 回傳 bytes（支援 http/https/file）。"""
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https"):
+        with urlopen(url, timeout=60) as resp:
+            return resp.read()
+    elif parsed.scheme == "file":
+        path = Path(parsed.path)
+        return path.read_bytes()
+    else:
+        raise ValueError(f"不支援的 URL scheme: {parsed.scheme!r}")
+
+
+def _parse_annotations_from_zip(
+    zf: zipfile.ZipFile,
+    names: list[str],
+    target_format: str,
+    task_id: str,
+    images_dir: Path,
+) -> dict[str, Any]:
+    """從 ZIP 中解析標注，回傳 annotation_json dict。若解析失敗則回傳空 dict。"""
+    try:
+        # COCO: annotations.json
+        coco_candidates = [n for n in names if n == "annotations.json" or n.endswith("/annotations.json")]
+        if coco_candidates:
+            data = zf.read(coco_candidates[0])
+            return json.loads(data.decode("utf-8"))
+
+        # YOLO: labels/ 目錄
+        label_files = [n for n in names if n.startswith("labels/") and n.endswith(".txt")]
+        if label_files:
+            result: dict[str, Any] = {"labels": {}}
+            for lf in label_files:
+                content = zf.read(lf).decode("utf-8")
+                result["labels"][Path(lf).name] = content
+            return result
+
+        return {}
+    except Exception:
+        return {}
+
 
 def _annotation_from_payload(payload: dict[str, Any]) -> Annotation:
     data = dict(payload)
@@ -436,6 +715,7 @@ def _annotation_from_payload(payload: dict[str, Any]) -> Annotation:
         if geometry_type == "bbox":
             geometry = BBoxGeometry.from_dict(geometry_data)
         elif geometry_type == "polygon":
+            from annotation.core.models import PolygonGeometry
             geometry = PolygonGeometry.from_dict(geometry_data)
         else:
             raise ValueError(f"Unsupported geometry type: {geometry_type}")

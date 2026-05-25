@@ -4,13 +4,17 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from annotation.core.models import (
     AnnotationSet,
+    AnnotationTask,
     Dataset,
     ImageAsset,
     LabelSchema,
     ReviewDecision,
+    SystemTenant,
+    TenantUserMapping,
 )
 
 
@@ -23,12 +27,48 @@ class SQLiteMetadataStore:
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(
                 """
+                PRAGMA journal_mode=WAL;
+
+                -- 新工業標注平台三張表
+                CREATE TABLE IF NOT EXISTS system_tenants (
+                    tenant_id   TEXT PRIMARY KEY,
+                    system_name TEXT UNIQUE NOT NULL,
+                    server_host_name TEXT NOT NULL,
+                    target_format TEXT NOT NULL,
+                    api_token   TEXT,
+                    created_at  TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS tenant_user_mappings (
+                    id          TEXT PRIMARY KEY,
+                    tenant_id   TEXT NOT NULL,
+                    user_id     TEXT NOT NULL,
+                    UNIQUE(tenant_id, user_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS annotation_tasks (
+                    task_id                 TEXT PRIMARY KEY,
+                    tenant_id               TEXT NOT NULL,
+                    ant_id                  TEXT NOT NULL,
+                    ant_active              INTEGER NOT NULL DEFAULT 0,
+                    original_classification TEXT,
+                    new_classification      TEXT,
+                    annotation_json         TEXT NOT NULL DEFAULT '{}',
+                    external_context        TEXT NOT NULL DEFAULT '{}',
+                    annotated_by            TEXT,
+                    created_at              TEXT NOT NULL,
+                    updated_at              TEXT NOT NULL,
+                    UNIQUE(tenant_id, ant_id)
+                );
+
+                -- 保留舊表以供 FormatRegistry / dry-run 測試使用
                 CREATE TABLE IF NOT EXISTS datasets (
                     id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL
@@ -65,6 +105,142 @@ class SQLiteMetadataStore:
                 );
                 """
             )
+
+    # ── SystemTenant ─────────────────────────────────────────────────────────
+
+    def save_tenant(self, tenant: SystemTenant) -> SystemTenant:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO system_tenants
+                    (tenant_id, system_name, server_host_name, target_format, api_token, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id) DO UPDATE SET
+                    system_name=excluded.system_name,
+                    server_host_name=excluded.server_host_name,
+                    target_format=excluded.target_format,
+                    api_token=excluded.api_token
+                """,
+                (
+                    tenant.tenant_id,
+                    tenant.system_name,
+                    tenant.server_host_name,
+                    tenant.target_format,
+                    tenant.api_token,
+                    tenant.created_at,
+                ),
+            )
+        return tenant
+
+    def get_tenant(self, tenant_id: str) -> SystemTenant | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM system_tenants WHERE tenant_id = ?", (tenant_id,)
+            ).fetchone()
+        return _row_to_tenant(row) if row else None
+
+    def list_tenants(self) -> list[SystemTenant]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM system_tenants ORDER BY system_name"
+            ).fetchall()
+        return [_row_to_tenant(row) for row in rows]
+
+    # ── TenantUserMapping ─────────────────────────────────────────────────────
+
+    def add_user_mapping(self, mapping: TenantUserMapping) -> TenantUserMapping:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tenant_user_mappings (id, tenant_id, user_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tenant_id, user_id) DO NOTHING
+                """,
+                (mapping.id, mapping.tenant_id, mapping.user_id),
+            )
+        return mapping
+
+    def list_user_mappings(self, tenant_id: str) -> list[TenantUserMapping]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tenant_user_mappings WHERE tenant_id = ? ORDER BY user_id",
+                (tenant_id,),
+            ).fetchall()
+        return [TenantUserMapping(id=row["id"], tenant_id=row["tenant_id"], user_id=row["user_id"]) for row in rows]
+
+    def is_user_authorized(self, tenant_id: str, user_id: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM tenant_user_mappings WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id, user_id),
+            ).fetchone()
+        return row is not None
+
+    # ── AnnotationTask ────────────────────────────────────────────────────────
+
+    def save_task(self, task: AnnotationTask) -> AnnotationTask:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO annotation_tasks
+                    (task_id, tenant_id, ant_id, ant_active,
+                     original_classification, new_classification,
+                     annotation_json, external_context,
+                     annotated_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    ant_active=excluded.ant_active,
+                    original_classification=excluded.original_classification,
+                    new_classification=excluded.new_classification,
+                    annotation_json=excluded.annotation_json,
+                    external_context=excluded.external_context,
+                    annotated_by=excluded.annotated_by,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    task.task_id,
+                    task.tenant_id,
+                    task.ant_id,
+                    task.ant_active,
+                    task.original_classification,
+                    task.new_classification,
+                    json.dumps(task.annotation_json, ensure_ascii=False),
+                    json.dumps(task.external_context, ensure_ascii=False),
+                    task.annotated_by,
+                    task.created_at,
+                    task.updated_at,
+                ),
+            )
+        return task
+
+    def get_task(self, task_id: str) -> AnnotationTask | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM annotation_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return _row_to_task(row) if row else None
+
+    def list_tasks(self, tenant_id: str, ant_active: int | None = None) -> list[AnnotationTask]:
+        if ant_active is None:
+            query = "SELECT * FROM annotation_tasks WHERE tenant_id = ? ORDER BY created_at"
+            params: tuple = (tenant_id,)
+        else:
+            query = "SELECT * FROM annotation_tasks WHERE tenant_id = ? AND ant_active = ? ORDER BY created_at"
+            params = (tenant_id, ant_active)
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [_row_to_task(row) for row in rows]
+
+    def get_task_by_ant_id(self, tenant_id: str, ant_id: str) -> AnnotationTask | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM annotation_tasks WHERE tenant_id = ? AND ant_id = ?",
+                (tenant_id, ant_id),
+            ).fetchone()
+        return _row_to_task(row) if row else None
+
+    # ── Legacy Dataset / Asset / Schema / AnnotationSet ──────────────────────
+    # 保留以供 FormatRegistry 與 dry-run 測試使用
 
     def save_dataset(self, dataset: Dataset) -> Dataset:
         self._upsert("datasets", dataset.id, dataset.to_dict())
@@ -150,7 +326,7 @@ class SQLiteMetadataStore:
 
     def list_annotation_sets(self, dataset_id: str | None = None) -> list[AnnotationSet]:
         query = "SELECT payload FROM annotation_sets"
-        params: tuple[str, ...] = ()
+        params: tuple = ()
         if dataset_id is not None:
             query += " WHERE dataset_id = ?"
             params = (dataset_id,)
@@ -193,6 +369,8 @@ class SQLiteMetadataStore:
         row = self._get("exports", export_id)
         return row
 
+    # ── Private helpers ───────────────────────────────────────────────────────
+
     def _upsert(self, table: str, row_id: str, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False)
         with self.connect() as conn:
@@ -209,3 +387,32 @@ class SQLiteMetadataStore:
         with self.connect() as conn:
             row = conn.execute(f"SELECT payload FROM {table} WHERE id = ?", (row_id,)).fetchone()
         return json.loads(row["payload"]) if row else None
+
+
+# ── Row helpers ───────────────────────────────────────────────────────────────
+
+def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
+    return SystemTenant(
+        tenant_id=row["tenant_id"],
+        system_name=row["system_name"],
+        server_host_name=row["server_host_name"],
+        target_format=row["target_format"],
+        api_token=row["api_token"],
+        created_at=row["created_at"],
+    )
+
+
+def _row_to_task(row: sqlite3.Row) -> AnnotationTask:
+    return AnnotationTask(
+        task_id=row["task_id"],
+        tenant_id=row["tenant_id"],
+        ant_id=row["ant_id"],
+        ant_active=row["ant_active"],
+        original_classification=row["original_classification"],
+        new_classification=row["new_classification"],
+        annotation_json=json.loads(row["annotation_json"]),
+        external_context=json.loads(row["external_context"]),
+        annotated_by=row["annotated_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )

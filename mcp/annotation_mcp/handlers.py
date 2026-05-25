@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Callable
 
@@ -39,6 +40,85 @@ def call_service(callback: Callable[[], Any]) -> str:
 class AnnotationMCPHandlers:
     def __init__(self, service: AnnotationService) -> None:
         self.service = service
+
+    # ── Phase 0: Tenant 管理 ──────────────────────────────────────────────────
+
+    def register_tenant(
+        self,
+        system_name: str,
+        server_host_name: str,
+        target_format: str,
+        api_token: str | None = None,
+    ) -> str:
+        return call_service(
+            lambda: self.service.register_tenant(system_name, server_host_name, target_format, api_token)
+        )
+
+    def list_tenants(self) -> str:
+        return call_service(self.service.list_tenants)
+
+    def get_tenant(self, tenant_id: str) -> str:
+        return call_service(lambda: self.service.get_tenant(tenant_id))
+
+    def add_user_to_tenant(self, tenant_id: str, user_id: str) -> str:
+        return call_service(lambda: self.service.add_user_to_tenant(tenant_id, user_id))
+
+    def list_tenant_users(self, tenant_id: str) -> str:
+        return call_service(lambda: self.service.list_tenant_users(tenant_id))
+
+    # ── Phase 1: 任務發現 ─────────────────────────────────────────────────────
+
+    def get_ant_list(self, tenant_id: str) -> str:
+        return call_service(lambda: self.service.get_ant_list(tenant_id))
+
+    # ── Phase 2: 任務認領 + 標注更新 ─────────────────────────────────────────
+
+    def claim_task(self, tenant_id: str, ant_id: str, user_id: str) -> str:
+        return call_service(lambda: self.service.claim_task(tenant_id, ant_id, user_id))
+
+    def save_annotation(
+        self,
+        task_id: str,
+        annotation_json_str: str,
+        new_classification: str | None = None,
+        annotated_by: str | None = None,
+    ) -> str:
+        return call_service(
+            lambda: self.service.save_annotation(
+                task_id,
+                _loads_object(annotation_json_str),
+                new_classification,
+                annotated_by,
+            )
+        )
+
+    def complete_task(self, task_id: str, annotated_by: str) -> str:
+        return call_service(lambda: self.service.complete_task(task_id, annotated_by))
+
+    def get_task(self, task_id: str) -> str:
+        return call_service(lambda: self.service.get_task(task_id))
+
+    def list_tasks(
+        self,
+        tenant_id: str,
+        user_id: str | None = None,
+        ant_active: int | None = None,
+    ) -> str:
+        return call_service(lambda: self.service.list_tasks(tenant_id, user_id, ant_active))
+
+    # ── Phase 3: CIM Sponsor 下載 ─────────────────────────────────────────────
+
+    def get_dashboard_stats(self, tenant_id: str) -> str:
+        return call_service(lambda: self.service.get_dashboard_stats(tenant_id))
+
+    def export_result_zip(self, task_id: str, mode: str) -> str:
+        """回傳 base64 編碼的 ZIP bytes。"""
+        def _export():
+            raw = self.service.export_result_zip(task_id, mode)
+            return {"zip_b64": base64.b64encode(raw).decode("ascii"), "size_bytes": len(raw)}
+        return call_service(_export)
+
+    # ── 舊版 FormatRegistry / dry-run / tool 相關 handler（保留以維持向後相容） ──
 
     def create_dataset(self, name: str, root_uri: str, metadata_json: str = "{}") -> str:
         return call_service(
@@ -95,12 +175,6 @@ class AnnotationMCPHandlers:
     def get_asset_annotations(self, annotation_set_id: str, asset_id: str | None = None) -> str:
         return call_service(lambda: self.service.get_asset_annotations(annotation_set_id, asset_id))
 
-    def get_task(self, task_id: str) -> str:
-        return call_service(lambda: self.service.get_task(task_id))
-
-    def list_tasks(self, dataset_id: str | None = None) -> str:
-        return call_service(lambda: self.service.list_tasks(dataset_id))
-
     def upsert_annotations(
         self,
         annotation_set_id: str,
@@ -123,7 +197,7 @@ class AnnotationMCPHandlers:
     def submit_for_review(self, annotation_set_id: str) -> str:
         return call_service(lambda: self.service.submit_for_review(annotation_set_id))
 
-    def review_task(self, annotation_set_id: str, decision: str, actor_id: str, comment: str = "") -> str:
+    def review_task_legacy(self, annotation_set_id: str, decision: str, actor_id: str, comment: str = "") -> str:
         return call_service(lambda: self.service.review_task(annotation_set_id, decision, actor_id, comment))
 
     def prepare_xanylabeling_project(

@@ -11,11 +11,30 @@ from annotation.storage.sqlite_store import SQLiteMetadataStore
 
 
 class AnnotationWorkspace:
+    """
+    工作區管理：負責本地目錄結構（ZIP 解壓後的 images、舊版標注集 canonical JSON）。
+    metadata 使用 SQLiteMetadataStore，同時支援新的三張表與保留的舊版 schema/dataset 表。
+    """
+
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.metadata = SQLiteMetadataStore(self.root / "catalog.sqlite")
         self.artifacts = LocalArtifactStore(self.root)
+
+    # ── 工作區目錄管理（ZIP 解壓後的 images 存放位置） ─────────────────────
+
+    def task_images_dir(self, task_id: str) -> Path:
+        """回傳指定 task 的 images 目錄（不自動建立）。"""
+        return self.root / "tasks" / task_id / "images"
+
+    def ensure_task_images_dir(self, task_id: str) -> Path:
+        """確保 task 的 images 目錄存在並回傳路徑。"""
+        d = self.task_images_dir(task_id)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    # ── 舊版 Dataset / Asset / Schema 介面（FormatRegistry 相容用） ─────────
 
     def create_dataset(self, name: str, root_uri: str, metadata: dict | None = None) -> Dataset:
         dataset = Dataset(name=name, root_uri=root_uri, metadata=metadata or {})
