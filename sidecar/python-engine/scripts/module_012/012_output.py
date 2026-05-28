@@ -375,10 +375,17 @@ def _find_venv_python_cmd(xany_exe: str) -> list[str]:
 
 
 def _launch_xany(file_path: str, labels: list[str], classes_path: str,
-                 xany_work_dir: str, xany_exe: str, ann_path: str = "") -> str | None:
-    """以 X-AnyLabeling 開啟圖片（非阻塞），輸出到影像所在目錄。"""
+                 xany_work_dir: str, xany_exe: str, ann_path: str = "",
+                 folder_mode: bool = False) -> tuple[str | None, object | None]:
+    """以 X-AnyLabeling 開啟圖片或資料夾（非阻塞）。回傳 (error, proc)。
+
+    folder_mode=True 時 file_path 應為資料夾路徑，output 指向同一資料夾。
+    """
     classes_txt = Path(classes_path) if classes_path else Path()
-    out_dir = Path(file_path).parent
+    if folder_mode:
+        out_dir = Path(file_path)
+    else:
+        out_dir = Path(file_path).parent
 
     xany_args = [
         "--filename", file_path,
@@ -400,8 +407,8 @@ def _launch_xany(file_path: str, labels: list[str], classes_path: str,
     cmd = python_cmd + ["-c", launch_stmt] + xany_args
 
     try:
-        subprocess.Popen(cmd)
-        return None
+        proc = subprocess.Popen(cmd)
+        return None, proc
     except Exception as e:
         if "4551" in str(e) or "policy" in str(e).lower() or "blocked" in str(e).lower():
             return (
@@ -409,9 +416,10 @@ def _launch_xany(file_path: str, labels: list[str], classes_path: str,
                 "【解決方法】請用已信任的 Python 重建 .venv-xanylabeling，例如：\n"
                 "  python -m uv venv --python 3.11 --clear .venv-xanylabeling\n"
                 "  python -m uv pip install --python .venv-xanylabeling\\Scripts\\python.exe --pre \"x-anylabeling-cvhub[cpu]\"\n"
-                "重建後重啟應用程式即可自動使用 py -3.11 啟動。"
+                "重建後重啟應用程式即可自動使用 py -3.11 啟動。",
+                None,
             )
-        return str(e)
+        return str(e), None
 
 
 def _launch_labelme(file_path: str, classes_path: str, labelme_exe: str) -> str | None:
@@ -498,8 +506,198 @@ def _launch_annotation_tool(
         return "LabelMe", _launch_labelme(file_path, classes_path, labelme_exe)
     if annotation_tool == "isat":
         return "ISAT", _launch_isat(file_path, isat_exe)
-    return "X-AnyLabeling", _launch_xany(
+    err, _proc = _launch_xany(
         file_path, labels, classes_path, xany_work_dir, xany_exe, ann_path=ann_path
+    )
+    return "X-AnyLabeling", err
+
+
+def _proc_alive(proc) -> bool:
+    """subprocess 是否仍在執行中。"""
+    if proc is None:
+        return False
+    try:
+        return proc.poll() is None
+    except Exception:
+        return False
+
+
+def _relaunch_xany_at(
+    fp: str,
+    labels: list[str],
+    classes_path: str,
+    xany_work_dir: str,
+    xany_exe: str,
+) -> None:
+    """資料夾模式下切換到指定影像：先 terminate 舊 proc，再啟動新 proc 並更新 session_state。
+
+    成功時：session_state["m012_folder_proc"] = 新 proc；m012_launch_ok 設文字提示。
+    失敗時：session_state["m012_folder_proc"] = None；m012_launch_error 設錯誤訊息。
+    """
+    with st.spinner(f"🚀 X-AnyLabeling 切換至 {Path(fp).name} 中…約需 3-5 秒"):
+        _old = st.session_state.get("m012_folder_proc")
+        if _proc_alive(_old):
+            try:
+                _old.terminate()
+            except Exception:
+                pass
+        _err, _new = _launch_xany(fp, labels, classes_path, xany_work_dir, xany_exe)
+    if _err:
+        st.session_state["m012_launch_error"] = _err
+        st.session_state["m012_folder_proc"] = None
+    else:
+        st.session_state["m012_folder_proc"] = _new
+        st.session_state["m012_launch_ok"] = f"🚀 X-AnyLabeling 重新啟動中（切換至 {Path(fp).name}，視窗約 3-5 秒後出現）"
+
+
+# ─── 強化圖批次標注：產生 / 同步 helpers ─────────────────────────────────────
+
+def _enhance_image_file(src: Path, dst: Path) -> None:
+    """讀原圖 → contrast/color 強化 → 寫 dst（JPEG，與 _draw_annotations(enhance=True) 同 factor）。"""
+    from PIL import Image, ImageEnhance, ImageOps
+    img = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
+    img = ImageEnhance.Contrast(img).enhance(2.2)
+    img = ImageEnhance.Color(img).enhance(1.8)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dst, format="JPEG", quality=92)
+
+
+def _generate_enhanced_batch(
+    items: list[dict],
+    enhanced_dir: Path,
+    progress_placeholder=None,
+) -> dict:
+    """批次產生強化圖到 enhanced_dir。回傳 {ok, skipped, errors}。
+
+    已存在且 mtime 比原圖新的會跳過，避免重複工作。
+    """
+    ok = skipped = errors = 0
+    total = len(items)
+    for i, it in enumerate(items):
+        fp = it.get("file_path", "")
+        if not fp:
+            errors += 1
+            continue
+        src = Path(fp)
+        if not src.exists():
+            errors += 1
+            continue
+        dst = enhanced_dir / src.name
+        if dst.exists():
+            try:
+                if dst.stat().st_mtime >= src.stat().st_mtime:
+                    skipped += 1
+                    if progress_placeholder is not None and (i % 20 == 0 or i == total - 1):
+                        progress_placeholder.progress(
+                            (i + 1) / total,
+                            text=f"產生強化圖中…{i + 1}/{total}",
+                        )
+                    continue
+            except Exception:
+                pass
+        try:
+            _enhance_image_file(src, dst)
+            ok += 1
+        except Exception as e:
+            _log.error("[012] _enhance_image_file failed src=%s dst=%s: %s", src, dst, e)
+            errors += 1
+        if progress_placeholder is not None and (i % 5 == 0 or i == total - 1):
+            progress_placeholder.progress(
+                (i + 1) / total,
+                text=f"產生強化圖中…{i + 1}/{total}",
+            )
+    return {"ok": ok, "skipped": skipped, "errors": errors}
+
+
+def _enhanced_to_original_map(items: list[dict], enhanced_dir: Path) -> dict[str, str]:
+    """{enhanced JSON path → original image path}，用於 sync 時改寫。"""
+    out: dict[str, str] = {}
+    for it in items:
+        fp = it.get("file_path", "")
+        if not fp:
+            continue
+        src = Path(fp)
+        enh_json = enhanced_dir / (src.stem + ".json")
+        out[str(enh_json)] = fp
+    return out
+
+
+def _sync_enhanced_annotations(items: list[dict], enhanced_dir: Path) -> int:
+    """將 enhanced_dir 內的 .json 標注同步回原圖目錄（改寫 imagePath、保持 mtime 新者）。
+
+    回傳同步的檔案數。
+    """
+    synced = 0
+    if not enhanced_dir.exists():
+        return 0
+    for it in items:
+        fp = it.get("file_path", "")
+        if not fp:
+            continue
+        src = Path(fp)
+        enh_json = enhanced_dir / (src.stem + ".json")
+        if not enh_json.exists():
+            continue
+        orig_json = src.with_suffix(".json")
+        try:
+            enh_mtime = enh_json.stat().st_mtime
+            if orig_json.exists() and orig_json.stat().st_mtime >= enh_mtime:
+                continue
+            data = json.loads(enh_json.read_text(encoding="utf-8"))
+            data["imagePath"] = src.name
+            orig_json.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            # 同步 mtime 確保 orig >= enh，下次 autorefresh 不重複 sync
+            os.utime(orig_json, (enh_mtime, enh_mtime))
+            synced += 1
+        except Exception as e:
+            _log.error("[012] _sync_enhanced_annotations failed %s → %s: %s", enh_json, orig_json, e)
+    return synced
+
+
+def _enhanced_progress(items: list[dict], enhanced_dir: Path) -> tuple[int, int]:
+    """回傳 (已存在強化圖數量, 總數)。"""
+    if not enhanced_dir.exists():
+        return 0, len(items)
+    done = sum(1 for it in items if (enhanced_dir / Path(it.get("file_path", "")).name).exists() and it.get("file_path"))
+    return done, len(items)
+
+
+def _launch_xany_folder(
+    items: list[dict],
+    labels: list[str],
+    classes_path: str,
+    xany_work_dir: str,
+    xany_exe: str,
+    folder_override: str | None = None,
+) -> tuple[str | None, object | None]:
+    """以資料夾模式開啟 X-AnyLabeling。回傳 (error, proc)。
+
+    folder_override 非 None 時直接用該資料夾（用於強化圖模式）；否則自動找出
+    包含最多 Manifest 影像的父目錄。
+    """
+    if not items:
+        return "無影像資料", None
+
+    if folder_override:
+        folder_path = Path(folder_override)
+        if not folder_path.exists():
+            return f"強化圖資料夾不存在：{folder_path}", None
+    else:
+        from collections import Counter
+        paths = [Path(it.get("file_path", "")) for it in items if it.get("file_path")]
+        if not paths:
+            return "無有效影像路徑", None
+        dir_counts = Counter(p.parent for p in paths)
+        folder_path = dir_counts.most_common(1)[0][0]
+
+    _log.info("[012] _launch_xany_folder folder=%s items=%d enhanced=%s",
+              folder_path, len(items), bool(folder_override))
+    return _launch_xany(
+        str(folder_path), labels, classes_path, xany_work_dir, xany_exe,
+        folder_mode=True,
     )
 
 
@@ -1054,6 +1252,20 @@ def render_output(result: dict) -> None:
         db_items = result.get("items", [])
 
     items     = _get_items(manifest_id, db_items)
+
+    # 強化圖模式 sync：把 enhanced_dir 內的標注 JSON 回寫到原圖目錄
+    # 條件：折疊區 toggle 啟用 OR 已有強化圖 JSON 存在（即使 toggle off 也清理一次）
+    if manifest_id and annotation_tool == "x-anylabeling":
+        _enh_dir_for_sync = _cfg.get_enhanced_dir(manifest_id)
+        if _enh_dir_for_sync.exists() and any(_enh_dir_for_sync.glob("*.json")):
+            _synced = _sync_enhanced_annotations(items, _enh_dir_for_sync)
+            if _synced:
+                _log.info("[012] enhanced→orig synced count=%d", _synced)
+                # cache 失效讓下方 incremental refresh 重掃
+                st.session_state.pop("m012_items", None)
+                st.session_state.pop("m012_mtimes", None)
+                items = _get_items(manifest_id, db_items)
+
     annotated = sum(1 for it in items if it["has_ann"])
     total     = len(items)
 
@@ -1070,6 +1282,8 @@ def render_output(result: dict) -> None:
     st.markdown(f"## 🏷️ {manifest_name}")
 
     # 顯示上次操作留下的錯誤（st.rerun 前無法即時顯示，改用 session_state 跨 rerun）
+    if _launch_ok := st.session_state.pop("m012_launch_ok", None):
+        st.success(f"🖊 {_launch_ok}")
     if _launch_err := st.session_state.pop("m012_launch_error", None):
         st.error(f"啟動失敗：{_launch_err}")
 
@@ -1097,26 +1311,121 @@ def render_output(result: dict) -> None:
         m2.metric("✅ 已標注", annotated)
         m3.metric("⏳ 待標注", total - annotated)
         m4.metric("完成率",   f"{pct * 100:.1f}%")
-    st.progress(pct, text=f"已標注 {annotated} / {total} 張（{pct * 100:.1f}%）")
-    if autorefresh_enabled:
-        st.caption(f"自動重新掃描：每 {autorefresh_seconds} 秒")
-    else:
-        st.caption("自動重新掃描：已關閉")
+    # ── Progress + 操作按鈕同列 ─────────────────────────────────────────────
+    _folder_proc = st.session_state.get("m012_folder_proc")
+    _folder_active = _proc_alive(_folder_proc)
+    # 清掉已結束的殘留引用；若 proc 是被外部關閉，通知使用者
+    if not _folder_active and _folder_proc is not None:
+        st.session_state["m012_folder_proc"] = None
+        st.session_state.setdefault("m012_launch_ok", "資料夾標注已關閉（外部關閉 X-AnyLabeling）")
+        _folder_proc = None
 
-    refresh_c, update_c = st.columns([1, 1])
-    with refresh_c:
-        if st.button("重新掃描標注", key="m012_refresh_annotations", use_container_width=True):
-            st.session_state.pop("m012_items", None)
-            st.session_state.pop("m012_mtimes", None)
-            st.session_state.pop("m012_cache_mid", None)
-            st.rerun()
-    with update_c:
-        if st.button("📁 前往 Update →", type="primary", key="m012_goto_update", use_container_width=True):
+    _autorefresh_hint = f"自動掃描 {autorefresh_seconds}s" if autorefresh_enabled else "自動掃描：關閉"
+    _prog_c, _btn_folder_c, _btn_update_c = st.columns([6, 2, 2], vertical_alignment="center")
+    with _prog_c:
+        st.progress(pct, text=f"已標注 {annotated} / {total} 張（{pct * 100:.1f}%）　·　{_autorefresh_hint}")
+    with _btn_folder_c:
+        if annotation_tool == "x-anylabeling":
+            if _folder_active:
+                if st.button("⏹ 關閉資料夾標注", key="m012_folder_close", use_container_width=True):
+                    _folder_proc.terminate()
+                    st.session_state["m012_folder_proc"] = None
+                    st.session_state["m012_folder_enhanced_mode"] = False
+                    st.session_state["m012_launch_ok"] = "資料夾標注已關閉"
+                    st.rerun()
+            else:
+                # 是否使用強化圖模式：toggle on 且強化圖已產生完成才可進入
+                _use_enh = bool(st.session_state.get("m012_use_enhanced", False))
+                _enh_dir = _cfg.get_enhanced_dir(manifest_id) if manifest_id else None
+                _enh_done, _enh_total = _enhanced_progress(items, _enh_dir) if _enh_dir else (0, len(items))
+                _enh_ready = _use_enh and _enh_total > 0 and _enh_done == _enh_total
+                _btn_label = "🗂️ 開啟資料夾標注（強化圖）" if _enh_ready else "🗂️ 開啟資料夾標注"
+                _btn_disabled = _use_enh and not _enh_ready
+                _btn_help = (
+                    "請先在下方「強化圖批次標注」展開區產生完所有強化圖"
+                    if _btn_disabled
+                    else "以 X-AnyLabeling 開啟本 Manifest 的所有影像，標注後自動同步回 GUI"
+                )
+                if st.button(
+                    _btn_label,
+                    key="m012_folder_open",
+                    use_container_width=True,
+                    help=_btn_help,
+                    disabled=_btn_disabled,
+                ):
+                    _folder_override = str(_enh_dir) if _enh_ready else None
+                    with st.spinner("🚀 X-AnyLabeling 啟動中…首次約需 3-5 秒"):
+                        _err, _proc = _launch_xany_folder(
+                            items, labels, classes_path, xany_work_dir, xany_exe,
+                            folder_override=_folder_override,
+                        )
+                    if _err:
+                        st.session_state["m012_launch_error"] = _err
+                    else:
+                        st.session_state["m012_folder_proc"] = _proc
+                        st.session_state["m012_folder_enhanced_mode"] = bool(_enh_ready)
+                        st.session_state["m012_launch_ok"] = (
+                            f"🚀 X-AnyLabeling 啟動中…（{len(items)} 張{'強化圖' if _enh_ready else '影像'}，視窗約 3-5 秒後出現）"
+                        )
+                    st.rerun()
+        else:
+            if st.button("重新掃描標注", key="m012_refresh_annotations", use_container_width=True):
+                st.session_state.pop("m012_items", None)
+                st.session_state.pop("m012_mtimes", None)
+                st.session_state.pop("m012_cache_mid", None)
+                st.rerun()
+    with _btn_update_c:
+        if st.button("➡️ 前往 Update", type="primary", key="m012_goto_update", use_container_width=True):
             _post_message("SWITCH_TAB", {"plugin_id": "module_013", "tab": "input"})
 
-    st.divider()
+    if _folder_active:
+        _enh_mode_active = bool(st.session_state.get("m012_folder_enhanced_mode", False))
+        st.caption(
+            f"🗂️ 資料夾標注模式執行中（{'強化圖' if _enh_mode_active else '原圖'}）— "
+            "任何標注皆自動同步至 GUI"
+            + ("，並回寫至原圖目錄" if _enh_mode_active else "")
+        )
+    elif annotation_tool != "x-anylabeling":
+        st.caption("ℹ️ 目前標注工具不支援資料夾模式（僅 X-AnyLabeling 支援）")
 
-    # ── session_state：選取索引 ───────────────────────────────────────────────
+    # ── 強化圖批次標注（可選）─────────────────────────────────────────────────
+    if annotation_tool == "x-anylabeling" and manifest_id and not _folder_active:
+        _enh_dir = _cfg.get_enhanced_dir(manifest_id)
+        _enh_done, _enh_total = _enhanced_progress(items, _enh_dir)
+        _expander_title = f"⚙️ 強化圖批次標注（可選）— 已產生 {_enh_done}/{_enh_total}"
+        with st.expander(_expander_title, expanded=False):
+            st.toggle(
+                "啟用：用強化圖開啟資料夾標注",
+                key="m012_use_enhanced",
+                help="切換後上方按鈕會改用強化圖；標注完成的 JSON 會自動回寫到原圖目錄",
+            )
+            _gen_c1, _gen_c2 = st.columns([3, 5])
+            with _gen_c1:
+                _need_regen = _enh_done < _enh_total
+                _gen_label = (
+                    f"📸 產生強化圖（{_enh_total - _enh_done} 張待產生）"
+                    if _need_regen else "📸 全部已產生（重新產生會覆蓋舊圖）"
+                )
+                if st.button(
+                    _gen_label, key="m012_gen_enhanced",
+                    use_container_width=True,
+                    help=f"輸出至：{_enh_dir}",
+                ):
+                    _prog = st.progress(0.0, text="準備中…")
+                    with st.spinner("📸 產生強化圖中…"):
+                        _stats = _generate_enhanced_batch(items, _enh_dir, progress_placeholder=_prog)
+                    _prog.empty()
+                    st.session_state["m012_launch_ok"] = (
+                        f"📸 強化圖完成：✅{_stats['ok']} ⏭️{_stats['skipped']} ❌{_stats['errors']}"
+                    )
+                    st.rerun()
+            with _gen_c2:
+                st.caption(
+                    "💡 強化圖採用對比 ×2.2、飽和度 ×1.8（與 GUI 的「🔆 對比」一致）。"
+                    "強化圖獨立存放於 cim_log，不會污染原圖目錄。"
+                )
+
+    # ── session_state：選取索引（m012_folder_proc 於上方 toolbar 區已初始化 via .get()）
     if "m012_selected_idx" not in st.session_state:
         st.session_state["m012_selected_idx"] = 0
 
@@ -1129,7 +1438,7 @@ def render_output(result: dict) -> None:
     with left_col:
         st.markdown("**圖片列表**")
 
-        search_col, filter_col = st.columns([3, 2])
+        search_col, filter_col = st.columns([1, 1])
         with search_col:
             search_q = st.text_input(
                 "搜尋檔名", value="", key="m012_search",
@@ -1143,22 +1452,23 @@ def render_output(result: dict) -> None:
                 key="m012_filter",
             )
 
-        # 分類篩選（有 classification_labels 才顯示）
+        # 分類篩選 + AI 信心度篩選（同一行）— ratio 與上一列對齊
         clf_filter_options = ["全部分類", "（未分類）"] + (classification_labels or [])
-        clf_filter = st.selectbox(
-            "分類篩選",
-            clf_filter_options,
-            label_visibility="collapsed",
-            key="m012_clf_filter",
-        )
-
-        # AI 信心度篩選
-        ai_conf_filter = st.selectbox(
-            "AI 信心度",
-            ["全部", "🤖 低信心度 AI 標注"],
-            label_visibility="collapsed",
-            key="m012_ai_conf_filter",
-        )
+        _clf_c, _ai_conf_c = st.columns([1, 1])
+        with _clf_c:
+            clf_filter = st.selectbox(
+                "分類篩選",
+                clf_filter_options,
+                label_visibility="collapsed",
+                key="m012_clf_filter",
+            )
+        with _ai_conf_c:
+            ai_conf_filter = st.selectbox(
+                "AI 信心度",
+                ["全部 conf", "🤖 低 conf"],
+                label_visibility="collapsed",
+                key="m012_ai_conf_filter",
+            )
 
         # 套用篩選
         visible = items
@@ -1170,7 +1480,7 @@ def render_output(result: dict) -> None:
             visible = [it for it in visible if not classifications.get(it.get("item_id", ""))]
         elif clf_filter != "全部分類":
             visible = [it for it in visible if classifications.get(it.get("item_id", "")) == clf_filter]
-        if ai_conf_filter == "🤖 低信心度 AI 標注":
+        if ai_conf_filter == "🤖 低 conf":
             def _low_conf(it: dict) -> bool:
                 try:
                     meta = json.loads(it.get("metadata") or "{}")
@@ -1187,8 +1497,6 @@ def render_output(result: dict) -> None:
         if st.session_state.get("m012_prev_filter") != _filter_key:
             st.session_state["m012_page"]        = 0
             st.session_state["m012_prev_filter"] = _filter_key
-
-        st.caption(f"顯示 {len(visible)} 張")
 
         # O(1) 全域索引表（item_id → items 中的位置）
         item_id_to_global = {it.get("item_id", ""): i for i, it in enumerate(items)}
@@ -1216,7 +1524,7 @@ def render_output(result: dict) -> None:
         if not visible:
             st.info("目前篩選條件下沒有圖片。")
         else:
-            # ─ 分頁控制列（上方）────────────────────────────────────
+            # ─ 分頁控制列（上方）── 兼顯示總數 ─────────────────────
             if n_pages > 1:
                 pg_prev, pg_info, pg_next = st.columns([1, 3, 1])
                 with pg_prev:
@@ -1224,20 +1532,26 @@ def render_output(result: dict) -> None:
                                  use_container_width=True):
                         st.session_state["m012_page"] = page - 1
                 with pg_info:
-                    st.caption(f"第 {page + 1} / {n_pages} 頁（共 {n_visible} 張）")
+                    st.caption(f"第 {page + 1}/{n_pages} 頁　共 {n_visible} 張")
                 with pg_next:
                     if st.button("▶", key="m012_pg_next_top", disabled=(page == n_pages - 1),
                                  use_container_width=True):
                         st.session_state["m012_page"] = page + 1
+            else:
+                st.caption(f"共 {n_visible} 張")
 
-            # ─ 當頁 AI Pre-label ──────────────────────────────────
+            # ─ AI label 按鈕 + inline 模型資訊 ───────────────────────
             _ai_cfg_now = _ai_cfg.load_config()
             _ai_model = _ai_cfg_now.get("model_path", "")
+            _conf_now  = float(_ai_cfg_now.get("conf_threshold", 0.25))
+            _ai_model_name = Path(_ai_model).name if _ai_model else "未設定"
             if _ai_model and Path(_ai_model).exists():
-                if st.button(
-                    f"⚡ AI label this page（{len(page_items)} 張）",
+                _ai_info_c, _ai_btn_c = st.columns([1, 1], vertical_alignment="center")
+                _ai_info_c.caption(f"⚡ `{_ai_model_name}`　conf {_conf_now:.2f}")
+                if _ai_btn_c.button(
+                    f"⚡ AI label 本頁（{len(page_items)}）",
                     key="m012_ai_page", use_container_width=True,
-                    help="對當頁所有圖片執行 AI 預標注",
+                    help=f"對當頁 {len(page_items)} 張用模型 {_ai_model_name} 推論（conf {_conf_now:.2f}）",
                 ):
                     _prog = st.progress(0.0, text="準備中…")
                     _stats = _run_ai_items(
@@ -1265,8 +1579,8 @@ def render_output(result: dict) -> None:
                             f"完成 — 偵測 {_det_b} 個物件　✅{_stats['ok']} ⏭️{_stats['skipped']} ❌{_stats['errors']}",
                             icon="⚡",
                         )
-                    st.session_state.pop("items", None)
-                    st.session_state.pop("mtimes", None)
+                    st.session_state.pop("m012_items", None)
+                    st.session_state.pop("m012_mtimes", None)
                     st.rerun()
             else:
                 st.caption("⚡ 請先在右欄 AI 設定選擇模型")
@@ -1291,36 +1605,26 @@ def render_output(result: dict) -> None:
                     if has_ann and item["ann_path"] else None
                 )
 
-                # 原圖縮圖 | 標注縮圖 | 資訊
-                thumb_c, ann_c, info_c = st.columns([1, 1, 2])
+                # 縮圖（點 ▶ 選取）| 標注縮圖 | 檔名 + 狀態 + 操作按鈕
+                thumb_c, ann_c, info_c = st.columns([1, 1, 3])
                 with thumb_c:
                     if thumb_bytes:
-                        border = "#1a73e8" if is_selected else "#cbd5e1"
-                        html = _thumb_html(
-                            thumb_bytes,
-                            img_path=fp,
-                            tag=fname,
-                            color="#1a73e8",
-                            border=border,
-                            preview_bytes=preview_bytes,
-                        )
-                        if is_selected:
-                            html = f'<div class="thumb-selected">{html}</div>'
-                        st.markdown(html, unsafe_allow_html=True)
+                        st.image(thumb_bytes, width=120)
                     else:
-                        st.markdown("🖼️")
+                        st.caption("—")
+                    # ▶ 選取按鈕放縮圖正下方
+                    if st.button(
+                        "▶ 選取" if not is_selected else "● 已選",
+                        key=f"sel_{item['item_id']}",
+                        type="primary" if is_selected else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["m012_selected_idx"] = global_idx
+                        st.rerun()
 
                 with ann_c:
                     if ann_thumb_bytes:
-                        ann_html = _thumb_html(
-                            ann_thumb_bytes,
-                            img_path=fp,
-                            tag=f"{fname} (標注)",
-                            color="#16a34a",
-                            border="#16a34a",
-                            preview_bytes=ann_preview_bytes,
-                        )
-                        st.markdown(ann_html, unsafe_allow_html=True)
+                        st.image(ann_thumb_bytes, width=120)
                     elif has_ann:
                         st.markdown('<span style="color:#94a3b8;font-size:10px">無框</span>',
                                     unsafe_allow_html=True)
@@ -1341,33 +1645,64 @@ def render_output(result: dict) -> None:
                     clf_status = f"　🏷 {clf_label}" if clf_label else ""
                     st.caption(f"{ann_status}{clf_status}")
 
-                    sel_c, ann_c = st.columns(2)
-                    with sel_c:
-                        if st.button(
-                            "選取",
-                            key=f"sel_{item['item_id']}",
-                            type="primary" if is_selected else "secondary",
-                            use_container_width=True,
-                        ):
-                            st.session_state["m012_selected_idx"] = global_idx
-                            st.rerun()
-                    with ann_c:
+                    # 兩個操作按鈕：🖊 標注工具 | ⚡ AI 標注
+                    _item_folder_active = _proc_alive(
+                        st.session_state.get("m012_folder_proc")
+                    ) and annotation_tool == "x-anylabeling"
+                    _item_enh_mode = _item_folder_active and bool(
+                        st.session_state.get("m012_folder_enhanced_mode", False)
+                    )
+                    btn_ann, btn_ai = st.columns(2)
+                    with btn_ann:
                         if st.button(
                             "🖊 標注工具",
                             key=f"xany_{item['item_id']}",
                             use_container_width=True,
                         ):
                             st.session_state["m012_selected_idx"] = global_idx
-                            tool_name, err = _launch_annotation_tool(
-                                annotation_tool, fp, labels, classes_path,
-                                xany_work_dir, xany_exe, labelme_exe,
-                                isat_exe=isat_exe,
-                                ann_path=item["ann_path"],
-                            )
-                            if err:
-                                st.session_state["m012_launch_error"] = err
+                            if _item_folder_active:
+                                _target_fp = fp
+                                if _item_enh_mode and manifest_id:
+                                    _enh_cand = _cfg.get_enhanced_dir(manifest_id) / Path(fp).name
+                                    if _enh_cand.exists():
+                                        _target_fp = str(_enh_cand)
+                                _relaunch_xany_at(
+                                    _target_fp, labels, classes_path, xany_work_dir, xany_exe,
+                                )
                             else:
-                                st.toast(f"{tool_name} 已開啟：{fname}", icon="🖊")
+                                with st.spinner(f"🚀 啟動標注工具中…首次約需 3-5 秒"):
+                                    tool_name, err = _launch_annotation_tool(
+                                        annotation_tool, fp, labels, classes_path,
+                                        xany_work_dir, xany_exe, labelme_exe,
+                                        isat_exe=isat_exe,
+                                        ann_path=item["ann_path"],
+                                    )
+                                if err:
+                                    st.session_state["m012_launch_error"] = err
+                                else:
+                                    st.session_state["m012_launch_ok"] = (
+                                        f"🚀 {tool_name} 啟動中…（{fname}，視窗約 3-5 秒後出現）"
+                                    )
+                            st.rerun()
+                    with btn_ai:
+                        if st.button(
+                            "⚡ AI 標注",
+                            key=f"ai_{item['item_id']}",
+                            use_container_width=True,
+                            disabled=not bool(_ai_model),
+                            help="對此張執行 AI 預標注" if _ai_model else "請先在頂部設定 AI 模型",
+                        ):
+                            with st.spinner("AI 標注中…"):
+                                _stats = _run_ai_items(
+                                    [item], _ai_model,
+                                    _ai_cfg_now.get("model_type", "yolo"),
+                                    float(_ai_cfg_now.get("conf_threshold", 0.25)),
+                                    bool(_ai_cfg_now.get("overwrite_existing", False)),
+                                )
+                            st.session_state.pop("m012_items", None)
+                            st.session_state.pop("m012_mtimes", None)
+                            det = _stats.get("detected", 0)
+                            st.session_state["m012_launch_ok"] = f"AI 完成：偵測 {det} 個物件（{fname}）"
                             st.rerun()
 
             # ─ 分頁控制列 ────────────────────────────────────────────
@@ -1479,24 +1814,27 @@ setTimeout(function() {
             st.divider()
 
             # ── AI Pre-label 面板 ─────────────────────────────────────────
-            with st.expander("⚙️ AI 模型設定 / 單張預標注", expanded=False):
-                _ai_c = _ai_cfg.load_config()
-                _ai_type_key = _ai_c.get("model_type", "yolo")
-
+            _ai_c = _ai_cfg.load_config()
+            _ai_type_key = _ai_c.get("model_type", "yolo")
+            with st.expander(
+                f"⚙️ AI 模型設定（{_ai_type_key.upper()}）", expanded=False,
+            ):
                 # 模型路徑
                 if "_m012_ai_model_chosen" in st.session_state:
                     st.session_state["m012_ai_model_path"] = st.session_state.pop("_m012_ai_model_chosen")
                 if "m012_ai_model_path" not in st.session_state:
                     st.session_state["m012_ai_model_path"] = _ai_c.get("model_path", "")
 
-                _mp_col, _br_col = st.columns([5, 1])
+                # 第 1 列：模型路徑 + 📂
+                _mp_col, _br_col = st.columns([7, 1])
                 with _mp_col:
                     _ai_model_path = st.text_input(
                         "模型路徑（.pt）", key="m012_ai_model_path",
                         placeholder="C:/models/best.pt", label_visibility="collapsed",
                     )
                 with _br_col:
-                    if st.button("📂", key="m012_ai_browse"):
+                    if st.button("📂", key="m012_ai_browse",
+                                 help="瀏覽 .pt 模型檔（YOLO / Classifier 可在 AI Pre-labeling 頁切換）"):
                         try:
                             _chosen = subprocess.run(
                                 [sys.executable, "-c",
@@ -1512,16 +1850,19 @@ setTimeout(function() {
                         except Exception:
                             pass
 
-                _ai_conf = st.slider(
-                    "Confidence", 0.01, 1.0,
-                    value=float(_ai_c.get("conf_threshold", 0.25)),
-                    step=0.05, format="%.2f", key="m012_ai_conf",
-                )
-                _ai_overwrite = st.checkbox(
-                    "覆蓋已有標注", value=bool(_ai_c.get("overwrite_existing", False)),
-                    key="m012_ai_overwrite",
-                )
-                st.caption(f"模式：{_ai_type_key.upper()}　｜　在 AI Pre-labeling 頁可切換 YOLO / Classifier")
+                # 第 2 列：Confidence slider + 覆蓋已有標注 checkbox（同列）
+                _conf_col, _ow_col = st.columns([3, 2], vertical_alignment="center")
+                with _conf_col:
+                    _ai_conf = st.slider(
+                        "Confidence", 0.01, 1.0,
+                        value=float(_ai_c.get("conf_threshold", 0.25)),
+                        step=0.05, format="%.2f", key="m012_ai_conf",
+                    )
+                with _ow_col:
+                    _ai_overwrite = st.checkbox(
+                        "覆蓋已有標注", value=bool(_ai_c.get("overwrite_existing", False)),
+                        key="m012_ai_overwrite",
+                    )
 
                 # 只有在值有變動時才寫檔
                 _new_vals = {"model_path": _ai_model_path,
@@ -1565,13 +1906,36 @@ setTimeout(function() {
                                     f"偵測到 {_det} 個物件　✅{_s.get('ok',0)} ⏭️{_s.get('skipped',0)} ❌{_s.get('errors',0)}",
                                     icon="⚡",
                                 )
-                        st.session_state.pop("items", None)
-                        st.session_state.pop("mtimes", None)
+                        st.session_state.pop("m012_items", None)
+                        st.session_state.pop("m012_mtimes", None)
                         st.rerun()
                 else:
                     st.caption("請選擇模型檔案後才能推論")
 
             st.divider()
+
+            # ── 資料夾模式：切換到此圖按鈕（緊貼圖片上方，凸顯層次感）─────────
+            if _proc_alive(st.session_state.get("m012_folder_proc")) and fp and Path(fp).exists():
+                _nav_c1, _nav_c2 = st.columns([3, 5])
+                _nav_enh_mode = bool(st.session_state.get("m012_folder_enhanced_mode", False))
+                with _nav_c1:
+                    if st.button(
+                        "🎯 切換到此圖",
+                        key=f"m012_nav_{item_id}",
+                        use_container_width=True,
+                        help="重啟 X-AnyLabeling 並開啟此圖（約需 3-5 秒）",
+                    ):
+                        _nav_target_fp = fp
+                        if _nav_enh_mode and manifest_id:
+                            _nav_enh_cand = _cfg.get_enhanced_dir(manifest_id) / Path(fp).name
+                            if _nav_enh_cand.exists():
+                                _nav_target_fp = str(_nav_enh_cand)
+                        _relaunch_xany_at(_nav_target_fp, labels, classes_path, xany_work_dir, xany_exe)
+                        st.rerun()
+                with _nav_c2:
+                    st.caption(
+                        "💡 較快的方法：直接在 X-AnyLabeling 視窗內用左側列表切換影像"
+                    )
 
             # 圖片顯示
             if not fp or not Path(fp).exists():

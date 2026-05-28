@@ -50,14 +50,18 @@ def get_manifest_db_path() -> Path:
     return db_dir / "manifest.sqlite"
 
 
-def get_shared_manifest_id() -> str:
+def read_shared() -> dict:
     p = _CIM_LOG_DIR / "config" / "shared.json"
     if not p.exists():
-        return ""
+        return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
+        return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
-        return ""
+        return {}
+
+
+def get_shared_manifest_id() -> str:
+    return read_shared().get("last_manifest_id", "")
 
 
 def _manifest_key(manifest_id: str) -> str:

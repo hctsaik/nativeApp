@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import importlib.util as _ilu
 import os
 from pathlib import Path
 
 import streamlit as st
+
+_HERE = Path(__file__).resolve().parent
+_ui_spec = _ilu.spec_from_file_location("_ui_components", _HERE.parent / "shared" / "ui_components.py")
+_ui = _ilu.module_from_spec(_ui_spec)
+_ui_spec.loader.exec_module(_ui)
 
 
 def _get_service():
@@ -17,8 +23,23 @@ _ANT_ACTIVE_LABEL = {0: "待標注", 1: "標注中", 2: "已完成"}
 _ANT_ACTIVE_ICON = {0: "⚪", 1: "🟠", 2: "🟢"}
 
 
+def _format_context(ctx: dict) -> str:
+    """將 external_context 格式化為可讀字串。"""
+    if not ctx:
+        return "（無外部資訊）"
+    parts = []
+    for key in ("lot_id", "eqp_id", "recipe", "machine", "line", "product"):
+        if key in ctx:
+            parts.append(f"{key}: {ctx[key]}")
+    if not parts:
+        # fallback: 取前 3 個 key-value
+        parts = [f"{k}: {v}" for k, v in list(ctx.items())[:3]]
+    return " | ".join(parts)
+
+
 def render_input() -> dict:
-    st.title("📋 標註任務")
+    _ui.inject_streamlit_zh_overrides()
+    st.title("📋 待認領任務")
     st.caption("瀏覽外部系統的待標注任務清單並認領任務。")
 
     service = _get_service()
@@ -36,7 +57,7 @@ def render_input() -> dict:
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
     selected_label = st.selectbox(
-        "選擇 Tenant",
+        "選擇外部系統",
         options=list(tenant_options.keys()),
         key="m023_selected_tenant",
     )
@@ -49,11 +70,12 @@ def render_input() -> dict:
         key="m023_user_id",
         placeholder="user001",
     )
+    st.caption("請填入您的工號，再點擊「查看可認領任務」顯示任務清單。有使用者限制的任務僅授權人員可認領。")
 
     # ── 取得任務清單 ──────────────────────────────────────────────────────────
     col_btn, _ = st.columns([2, 5])
     with col_btn:
-        fetch_btn = st.button("🔄 取得任務清單", key="m023_fetch_tasks")
+        fetch_btn = st.button("🔄 查看可認領任務", key="m023_fetch_tasks")
 
     if fetch_btn:
         if not user_id.strip():
@@ -74,6 +96,15 @@ def render_input() -> dict:
                 st.session_state["m023_task_tenant_id"] = tenant_id
                 if "m023_claim_msg" in st.session_state:
                     del st.session_state["m023_claim_msg"]
+            except OSError as exc:
+                if exc.errno in (10061, 111):  # ConnectionRefusedError (Windows/Linux)
+                    st.session_state["m023_task_error"] = (
+                        "無法連線至 AOI 系統，請確認外部伺服器是否已啟動。\n"
+                        f"（技術資訊：{exc}）"
+                    )
+                else:
+                    st.session_state["m023_task_error"] = str(exc)
+                st.session_state.pop("m023_task_list", None)
             except Exception as exc:
                 st.session_state["m023_task_error"] = str(exc)
                 st.session_state.pop("m023_task_list", None)
@@ -87,7 +118,10 @@ def render_input() -> dict:
     if "m023_claim_msg" in st.session_state:
         msg = st.session_state["m023_claim_msg"]
         if msg.get("ok"):
-            st.success(f"✅ 認領成功！task_id: `{msg['task_id']}`。請前往「標注工作台」繼續。")
+            st.success(
+                f"✅ 認領成功！\n\n"
+                f"**下一步：請切換到上方的「✏️ 標注工作台」標籤開始標注。**"
+            )
         else:
             st.error(f"❌ 認領失敗：{msg['error']}")
 
@@ -124,8 +158,7 @@ def render_input() -> dict:
         ant_active = task.get("ant_active", 0)
         ant_period = task.get("ant_period", "")
         ext_ctx = task.get("external_context", {})
-        ctx_str = str(ext_ctx)
-        ctx_preview = ctx_str[:60] + "…" if len(ctx_str) > 60 else ctx_str
+        ctx_preview = _format_context(ext_ctx)
 
         icon = _ANT_ACTIVE_ICON.get(ant_active, "⚪")
         label = _ANT_ACTIVE_LABEL.get(ant_active, str(ant_active))

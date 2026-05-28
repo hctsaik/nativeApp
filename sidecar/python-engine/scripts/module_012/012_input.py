@@ -73,13 +73,14 @@ def _duplicate_labels(labels: list[str]) -> list[str]:
 
 def render_input() -> dict:
     _help.render_help_button("module_012", "input", "🏷️ 開始標注前確認")
+    st.caption("設定標注類別與工具，確認後按「執行」開啟標注工作台。")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
 
     if not manifests:
         st.warning(
-            "尚未建立任何 Manifest，請先執行 **010 - Data Feeder** 選取圖片資料夾。"
+            "尚未建立任何 Manifest，請先至「📥 資料來源」執行並建立資料集。"
         )
         return {
             "manifest_id": "",

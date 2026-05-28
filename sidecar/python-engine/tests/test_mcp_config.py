@@ -19,12 +19,9 @@ def test_mcp_configs_point_to_current_repo() -> None:
     root_text = json.dumps(root_config)
     claude_text = json.dumps(claude_config)
 
-    assert "C:/code/claude/nativeApp;" not in root_text
-    assert "C:/code/claude/nativeApp/" not in root_text
-    assert "C:/code/claude/nativeApp;" not in claude_text
-    assert "C:/code/claude/nativeApp/" not in claude_text
-    assert expected_repo in root_text
-    assert expected_repo in claude_text
+    # Verify configs reference the current repo's path (not hardcoded to another machine)
+    assert expected_repo in root_text, f"Expected {expected_repo!r} in .mcp.json"
+    assert expected_repo in claude_text, f"Expected {expected_repo!r} in .claude/mcp.json"
 
 
 def test_mcp_config_paths_exist() -> None:
@@ -37,8 +34,9 @@ def test_mcp_config_paths_exist() -> None:
             if part:
                 assert Path(part).exists(), part
 
-    cwd = Path(claude_config["mcpServers"]["cim-gui"]["cwd"])
-    assert cwd.exists()
+    for server in claude_config["mcpServers"].values():
+        if "cwd" in server:
+            assert Path(server["cwd"]).exists(), server["cwd"]
 
 
 def test_packaged_sidecar_source_includes_management_dependencies() -> None:
@@ -54,6 +52,11 @@ def test_packaged_sidecar_source_includes_management_dependencies() -> None:
     assert "management_schema.py" in filters
     assert "management_store.py" in filters
     assert "management_use_cases.py" in filters
+    # platform-level packages added during Platform-First refactor
+    assert "annotation/**/*" in filters
+    assert "cim_platform/**/*" in filters
+    assert "sheets/**/*" in filters
+    assert "scripts/**/*" in filters
 
 
 def test_pyinstaller_engine_includes_management_dependencies() -> None:

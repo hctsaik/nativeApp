@@ -32,7 +32,7 @@ def render_output(result: dict = None) -> None:
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
     selected_label = st.selectbox(
-        "選擇 Tenant",
+        "選擇外部系統",
         options=list(tenant_options.keys()),
         key="m024_out_selected_tenant",
     )

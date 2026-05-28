@@ -31,10 +31,12 @@ class SystemTenant:
 
 @dataclass
 class TenantUserMapping:
-    """員工與租戶的對應關係（對應 tenant_user_mappings 表）。"""
+    """員工與外部系統任務的授權對應（對應 tenant_user_mappings 表）。
+    ant_id=None 表示系統層級授權（所有任務）；非 None 表示僅限特定任務。"""
     id: str
     tenant_id: str
     user_id: str
+    ant_id: str | None = None
 
 
 @dataclass
@@ -47,6 +49,7 @@ class AnnotationTask:
     original_classification: str | None = None
     new_classification: str | None = None
     annotation_json: dict = field(default_factory=dict)
+    original_annotation_json: dict = field(default_factory=dict)
     external_context: dict = field(default_factory=dict)
     annotated_by: str | None = None
     created_at: str = field(default_factory=utc_now_iso)

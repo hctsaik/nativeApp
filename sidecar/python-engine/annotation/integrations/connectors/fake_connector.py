@@ -9,11 +9,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from annotation.integrations.contracts import (
-    AntTask,
+from cim_platform.connector import (
     ConnectorHealth,
     ExternalSystemConnector,
-    TaskDetailResponse,
+    ExternalTask as AntTask,
+    ExternalTaskDetail as TaskDetailResponse,
 )
 
 

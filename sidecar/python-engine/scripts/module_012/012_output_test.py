@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -224,7 +225,7 @@ def test_launch_xany_uses_security_flags_and_never_runs_trampoline_directly(tmp_
     monkeypatch.setattr(mod, "_find_venv_python_cmd", lambda _exe: ["py", "-3.11"])
     monkeypatch.setattr(mod.subprocess, "Popen", lambda cmd: launched.append(cmd) or _FakeProc())
 
-    err = mod._launch_xany(
+    err, proc = mod._launch_xany(
         str(img),
         ["defect"],
         str(classes),
@@ -233,6 +234,7 @@ def test_launch_xany_uses_security_flags_and_never_runs_trampoline_directly(tmp_
     )
 
     assert err is None
+    assert proc is not None
     cmd = launched[0]
     assert cmd[:3] == ["py", "-3.11", "-c"]
     assert str(xany_exe) not in cmd
@@ -346,3 +348,140 @@ def test_classification_survives_manifest_change_via_filepath_store(tmp_path, mo
 
     assert classifications_b["item_B1"] == "A", "frame_00001 should still be classified A in new manifest"
     assert classifications_b["item_B2"] == "B", "frame_00002 should still be classified B in new manifest"
+
+
+# ─── 強化圖批次標注：產生 → 標注 → sync 回原圖 round-trip 測試 ──────────────────
+
+
+def _make_real_image(path: Path, color=(40, 60, 80)) -> None:
+    """寫一張真實可解碼的影像（供 PIL 強化用）。"""
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 24), color=color).save(path)
+
+
+def _make_items(orig_dir: Path, n: int) -> list[dict]:
+    items = []
+    for i in range(n):
+        fp = orig_dir / f"frame_{i:05d}.jpg"
+        _make_real_image(fp, color=(20 + i * 10, 40, 60))
+        items.append({"item_id": f"item_{i:05d}", "file_path": str(fp)})
+    return items
+
+
+def test_generate_enhanced_batch_creates_files_and_reports_counts(tmp_path):
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 3)
+
+    stats = mod._generate_enhanced_batch(items, enhanced_dir)
+
+    assert stats == {"ok": 3, "skipped": 0, "errors": 0}
+    for it in items:
+        dst = enhanced_dir / Path(it["file_path"]).name
+        assert dst.exists(), f"強化圖應產生：{dst}"
+        # 強化後的位元組應與原圖不同（套用了對比/飽和度）
+        assert dst.read_bytes() != Path(it["file_path"]).read_bytes()
+
+
+def test_generate_enhanced_batch_skips_up_to_date_and_counts_missing_as_error(tmp_path):
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 2)
+    # 加一筆檔案不存在的 item，應計為 error
+    items.append({"item_id": "ghost", "file_path": str(orig_dir / "missing.jpg")})
+
+    first = mod._generate_enhanced_batch(items, enhanced_dir)
+    assert first == {"ok": 2, "skipped": 0, "errors": 1}
+
+    # 第二次跑：原圖未變動 → 既有強化圖較新 → 應跳過，不重做
+    second = mod._generate_enhanced_batch(items, enhanced_dir)
+    assert second == {"ok": 0, "skipped": 2, "errors": 1}
+
+
+def test_enhanced_progress_counts_generated(tmp_path):
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 4)
+
+    assert mod._enhanced_progress(items, enhanced_dir) == (0, 4)
+    mod._generate_enhanced_batch(items[:2], enhanced_dir)
+    assert mod._enhanced_progress(items, enhanced_dir) == (2, 4)
+
+
+def test_sync_enhanced_annotations_writes_back_to_original_dir(tmp_path):
+    """完整 round-trip：強化圖目錄被標注後，JSON 同步回原圖目錄並改寫 imagePath。"""
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 3)
+    mod._generate_enhanced_batch(items, enhanced_dir)
+
+    # 模擬使用者在 X-AnyLabeling 對「強化圖」標注：JSON 落在 enhanced_dir，
+    # imagePath 指向強化圖檔名（X-AnyLabeling 行為）
+    target = items[0]
+    enh_stem = Path(target["file_path"]).stem
+    enh_json = enhanced_dir / f"{enh_stem}.json"
+    enh_json.write_text(
+        json.dumps({
+            "imagePath": f"{enh_stem}.jpg",
+            "shapes": [{"label": "car", "shape_type": "rectangle",
+                        "points": [[1, 2], [10, 12]]}],
+        }),
+        encoding="utf-8",
+    )
+
+    synced = mod._sync_enhanced_annotations(items, enhanced_dir)
+    assert synced == 1
+
+    orig_json = Path(target["file_path"]).with_suffix(".json")
+    assert orig_json.exists(), "標注應同步回原圖目錄"
+    data = json.loads(orig_json.read_text(encoding="utf-8"))
+    # imagePath 必須改寫成原圖檔名（而非強化圖檔名）
+    assert data["imagePath"] == Path(target["file_path"]).name
+    assert data["shapes"][0]["label"] == "car"
+    # 其餘未標注的原圖不應產生 JSON
+    assert not Path(items[1]["file_path"]).with_suffix(".json").exists()
+
+
+def test_sync_enhanced_annotations_is_idempotent(tmp_path):
+    """第二次 sync 不應重複回寫（orig mtime >= enh mtime 時跳過）。"""
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 1)
+    mod._generate_enhanced_batch(items, enhanced_dir)
+
+    enh_stem = Path(items[0]["file_path"]).stem
+    enh_json = enhanced_dir / f"{enh_stem}.json"
+    enh_json.write_text(
+        json.dumps({"imagePath": f"{enh_stem}.jpg", "shapes": []}),
+        encoding="utf-8",
+    )
+
+    assert mod._sync_enhanced_annotations(items, enhanced_dir) == 1
+    # 沒有新標注 → 第二次應為 0
+    assert mod._sync_enhanced_annotations(items, enhanced_dir) == 0
+
+    # 強化圖標注又更新（mtime 變新）→ 再次 sync 應回寫
+    orig_json = Path(items[0]["file_path"]).with_suffix(".json")
+    new_mtime = orig_json.stat().st_mtime + 100
+    os.utime(enh_json, (new_mtime, new_mtime))
+    assert mod._sync_enhanced_annotations(items, enhanced_dir) == 1
+
+
+def test_enhanced_to_original_map_maps_json_to_original(tmp_path):
+    mod = _load_output_module()
+    orig_dir = tmp_path / "orig"
+    enhanced_dir = tmp_path / "enhanced"
+    items = _make_items(orig_dir, 2)
+
+    mapping = mod._enhanced_to_original_map(items, enhanced_dir)
+
+    for it in items:
+        enh_json = enhanced_dir / (Path(it["file_path"]).stem + ".json")
+        assert mapping[str(enh_json)] == it["file_path"]

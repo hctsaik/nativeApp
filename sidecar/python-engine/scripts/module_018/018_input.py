@@ -32,7 +32,7 @@ def render_input() -> dict:
     manifests = _mdb.list_manifests(db_path)
 
     if not manifests:
-        st.warning("尚未建立任何 Manifest，請先執行 **010 - Data Feeder**。")
+        st.warning("尚未建立任何 Manifest，請先至「📥 資料來源」執行並建立資料集。")
         return {"manifest_id": ""}
 
     shared_id = _cfg.get_shared_manifest_id()

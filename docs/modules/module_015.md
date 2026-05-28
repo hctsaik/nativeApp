@@ -11,8 +11,8 @@
 |------|-----|
 | ID | `module_015` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow` |
-| 上游依賴 | module_010（manifest）、module_012（分類）、module_014（匯出記錄） |
+| Sheet | `sheet-annotation` |
+| 上游依賴 | module_026（manifest）、module_012（分類）、module_014（匯出記錄） |
 
 顯示當前 Manifest 的標注進度、資料品質指標和匯出歷史，協助判斷資料集是否可進入訓練。
 

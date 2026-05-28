@@ -8,11 +8,11 @@
 |------|-----|
 | ID | `module_012` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow`（與 module_010、module_013 組合） |
-| 上游依賴 | module_010（Data Feeder）寫入 `shared.json` |
+| Sheet | `sheet-annotation`（與 module_026、module_013 組合） |
+| 上游依賴 | module_026（資料來源）寫入 `shared.json` |
 | 下游 | module_013（Update）讀同一 manifest 與分類 config |
 
-從 Data Feeder 建立的 DatasetManifest 開啟標注工作階段，逐張以 X-AnyLabeling 標注，並支援圖片快速分類。
+從資料來源（module_026）建立的 DatasetManifest 開啟標注工作階段，逐張以 X-AnyLabeling 標注，並支援圖片快速分類。
 
 ---
 
@@ -48,11 +48,11 @@ _config.py     → 設定持久化 + manifest-scoped 分類/labels 檔
 
 ### Manifest 解析順序
 
-`get_shared_manifest_id()` **只讀 `shared.json`**（由 Data Feeder 寫入），不讀 `module_012.json` 自身的 `last_manifest_id`。這確保每次都對齊最新一次 Data Feeder 執行的資料集。
+`get_shared_manifest_id()` **只讀 `shared.json`**（由資料來源（module_026）寫入），不讀 `module_012.json` 自身的 `last_manifest_id`。這確保每次都對齊最新一次資料來源（module_026）執行的資料集。
 
 ```
 {CIM_LOG_DIR}/config/shared.json
-  → last_manifest_id  ← Data Feeder 每次執行後更新
+  → last_manifest_id  ← 資料來源（module_026）每次執行後更新
 ```
 
 ### Manifest-scoped 檔案
@@ -71,7 +71,7 @@ _config.py     → 設定持久化 + manifest-scoped 分類/labels 檔
 
 Input Page 是「開始標注前確認」頁，不是完整設定中心。主路徑只要求使用者確認資料集與標注類別，其他選項收進可選/進階區塊。
 
-- **目前資料集**：自動從 `shared.json` 取 `last_manifest_id`，顯示 `目前資料集：<name>｜<N> 張圖片`；若資料集不正確，回 Data Feeder 重新選取。
+- **目前資料集**：自動從 `shared.json` 取 `last_manifest_id`，顯示 `目前資料集：<name>｜<N> 張圖片`；若資料集不正確，回資料來源（module_026）重新選取。
 - **標注類別（annotation_labels）**：主要欄位，每行一個標注框類別；預設空白，避免 demo 類別被誤用。空白行會忽略，畫面會顯示將建立的類別數。
 - **圖片快速分類（classification_labels）**：可選 expander，用於標注列表頁替整張圖片分類，不會寫入標注框 JSON。
 - **進階設定**：包含 `X-AnyLabeling` / `LabelMe` 標注工具選擇，以及自動重新掃描標注 JSON 的設定。
@@ -181,6 +181,20 @@ Output 頁的「🖊 標注工具」依 Input 頁的 `annotation_tool` 設定啟
 
 這些限制是為了避免 Windows WDAC 封鎖 uv trampoline、避免 GUI 啟動時連外更新檢查，並確保 labels 不會被輸入成非預期類別。回歸測試在 `012_output_test.py`。
 
+### 強化圖批次標注 + sync 回原圖
+
+當原圖對比/飽和度偏低、肉眼難以標注時，可在「⚙️ 強化圖批次標注（可選）」展開區產生強化圖後，以資料夾模式開啟 X-AnyLabeling 對強化圖標注，完成的 JSON 會自動同步回原圖目錄。
+
+| 階段 | Helper | 說明 |
+|------|--------|------|
+| 產生 | `_generate_enhanced_batch()` | 對每張原圖套用對比 ×2.2、飽和度 ×1.8 寫入 `{CIM_LOG_DIR}/m012_enhanced/{manifest_id[:12]}/`（與原圖完全隔離）。既有且 mtime 較新者跳過 |
+| 進度 | `_enhanced_progress()` | 回傳 `(已產生數, 總數)`，顯示於展開區標題「已產生 N/M」 |
+| 同步 | `_sync_enhanced_annotations()` | 把強化圖目錄的 `.json` 回寫到原圖同名 JSON，並將 `imagePath` 改寫成原圖檔名；以 mtime 保證 `orig >= enh` → 冪等，不重複回寫 |
+
+`render_output` 在每次 render（含 autorefresh）只要偵測到強化圖目錄存在 `.json` 就會跑一次 sync，因此使用者在 X-AnyLabeling 標完即自動回填，無需手動觸發。
+
+完整 round-trip（產生 → 模擬標注 → sync → 冪等 → skip）回歸測試在 `012_output_test.py`（`test_generate_enhanced_batch_*` / `test_sync_enhanced_annotations_*` / `test_enhanced_progress_*`）。
+
 ### 自動更新
 
 由 Input 頁設定：
@@ -208,7 +222,7 @@ Output 依設定呼叫 `st_autorefresh(interval=autorefresh_seconds * 1000)`。
 
 ### 分類後到 Update 看不到結果
 
-原因：Data Feeder 重新執行會建立新的 `manifest_id`，因此分類 config key 不同。確認 Annotation 和 Update 都顯示同一個 manifest 名稱（info bar）。
+原因：資料來源（module_026）重新執行會建立新的 `manifest_id`，因此分類 config key 不同。確認 Annotation 和 Update 都顯示同一個 manifest 名稱（info bar）。
 
 ### X-AnyLabeling 標注後沒更新
 

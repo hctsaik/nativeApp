@@ -82,8 +82,8 @@ def annotation_get_task(task_id: str) -> str:
 
 
 @mcp.tool()
-def annotation_list_tasks(dataset_id: str | None = None) -> str:
-    return _handlers.list_tasks(dataset_id)
+def annotation_list_tasks(tenant_id: str, user_id: str | None = None, ant_active: int | None = None) -> str:
+    return _handlers.list_tasks(tenant_id, user_id, ant_active)
 
 
 @mcp.tool()
@@ -108,7 +108,7 @@ def annotation_submit_for_review(annotation_set_id: str) -> str:
 
 @mcp.tool()
 def annotation_review_task(annotation_set_id: str, decision: str, actor_id: str, comment: str = "") -> str:
-    return _handlers.review_task(annotation_set_id, decision, actor_id, comment)
+    return _handlers.review_task_legacy(annotation_set_id, decision, actor_id, comment)
 
 
 @mcp.tool()

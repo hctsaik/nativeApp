@@ -13,7 +13,7 @@
 ... → 🔄 Sync Back (013) → 🗂️ 我的上傳記錄 (020) → 📤 Export (014) → ...
 ```
 
-- **module_019（Data Downloader）**：下載「Service 上公共原始資料集」
+- **module_019（Data Downloader，已廢棄）**：下載「Service 上公共原始資料集」
 - **module_020（Upload Archive）**：找回「我自己 Sync Back 過的標注批次」
 
 ---
@@ -28,11 +28,11 @@
 | `scripts/module_020/020_input.py` | 新建 |
 | `scripts/module_020/020_process.py` | 新建 |
 | `scripts/module_020/020_output.py` | 新建 |
-| `scripts/sheets/annotation_workflow/sheet.yaml` | 新增 module_020 tab（tab_order=4，Sync Back 之後） |
+| `sidecar/python-engine/sheets/annotation.yaml` | 新增 module_020 tab（tab_order=4，Sync Back 之後） |
 | `engine.py` | DB migration 新增 module_020 tab |
 | `config/tools.sqlite` | 直接更新（避免重啟等待） |
 
-不異動：module_013、module_019、module_010。
+不異動：module_013、module_019、module_026。
 
 ---
 
@@ -115,7 +115,7 @@ Client 不感知 chunk 分片，Service 負責合併成完整 ZIP。
 ```
 
 下載完成後，`_config.write_shared_suggested_folder()` 可選寫入 shared.json，
-讓使用者透過「→ 送至 Data Feeder」按鈕自動跳回 module_010。
+讓使用者透過「→ 送至資料來源」按鈕自動跳回 module_026。
 
 ---
 
@@ -158,7 +158,7 @@ Input `render_input()` 回傳的 params 作為查詢條件，不觸發下載。
   ⬇ 下載中... 204 KB / ?
   ✅ 下載完成 → {CIM_LOG_DIR}/downloads/archive/{submit_id}/
 
-[→ 送至 Data Feeder]   （可選，下載完成後才顯示）
+[→ 送至資料來源（module_026）]   （可選，下載完成後才顯示）
 
 ─────── 分頁 ───────
   << 上一頁   第 1 / 3 頁   下一頁 >>

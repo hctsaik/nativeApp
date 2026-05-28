@@ -50,9 +50,9 @@ def render_output(result: dict = None) -> None:
                 f"\n`{tenant_id}`"
             )
             col1, col2, col3 = st.columns(3)
-            col1.metric("伺服器", tenant["server_host_name"])
-            col2.metric("目標格式", tenant["target_format"])
-            col3.metric("API Token", _mask_token(tenant.get("api_token")))
+            col1.metric("AOI 系統位址", tenant["server_host_name"])
+            col2.metric("標注結果格式", tenant["target_format"])
+            col3.metric("API 金鑰", _mask_token(tenant.get("api_token")))
 
             # 授權使用者
             try:

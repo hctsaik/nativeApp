@@ -45,15 +45,50 @@ def _browse_directory() -> str:
         return ""
 
 
+def _render_iwsc_deliver(shared: dict, manifest_id: str) -> dict:
+    """iWISC 來源時顯示回傳區塊，回傳 deliver 所需 params。"""
+    tenant_id = shared.get("iwsc_tenant_id", "")
+    task_id   = shared.get("iwsc_task_id", "")
+    ant_id    = shared.get("iwsc_ant_id", "")
+
+    st.subheader("🏭 回傳至 iWISC")
+    c1, c2 = st.columns(2)
+    c1.info(f"**任務**：{ant_id}")
+    c2.info(f"**Task ID**：`{task_id[:12]}…`" if task_id else "")
+
+    new_clf = st.text_input(
+        "最終分類結果（如 OK / NG，可留空）",
+        key="m014_iwsc_clf",
+        placeholder="NG",
+    )
+    annotated_by = st.text_input(
+        "標注員 ID（可留空）",
+        key="m014_iwsc_annotator",
+        placeholder="user001",
+    )
+
+    deliver_only = st.checkbox("僅回傳，不匯出本地檔案", value=True, key="m014_deliver_only")
+    return {
+        "source_type": "iwsc",
+        "manifest_id": manifest_id,
+        "iwsc_tenant_id": tenant_id,
+        "iwsc_task_id": task_id,
+        "iwsc_ant_id": ant_id,
+        "new_classification": new_clf.strip() or None,
+        "annotated_by": annotated_by.strip() or None,
+        "deliver_only": deliver_only,
+    }
+
+
 def render_input() -> dict:
-    _help.render_help_button("module_014", "input", "📤 Export — 多格式標注匯出")
-    st.caption("將標注結果匯出為各種 ML 訓練框架所需格式。")
+    _help.render_help_button("module_014", "input", "📤 匯出 / 回傳")
+    st.caption("將標注結果匯出為訓練格式，或回傳至 iWISC 外部系統。")
 
     db_path = _cfg.get_manifest_db_path()
     manifests = _mdb.list_manifests(db_path)
 
     if not manifests:
-        st.warning("尚未建立任何 Manifest，請先執行 **010 - Data Feeder**。")
+        st.warning("尚未建立任何 Manifest，請先至「📥 資料來源」執行並建立資料集。")
         return {
             "manifest_id": "",
             "export_formats": [],
@@ -75,12 +110,21 @@ def render_input() -> dict:
 
     clf = _cfg.load_classifications(manifest_id)
     clf_count = len(clf)
+
+    # ── iWISC 模式：顯示回傳 UI ──────────────────────────────────────────────
+    shared = _cfg.read_shared()
+    source_type = shared.get("source_type", "local")
+    if source_type == "iwsc":
+        deliver_params = _render_iwsc_deliver(shared, manifest_id)
+        if deliver_params.get("deliver_only"):
+            return deliver_params
+        st.divider()
+        st.subheader("📤 同時匯出本地備份（可選）")
+
     col1, col2 = st.columns(2)
     col1.metric("圖片數", selected.get("item_count", 0))
     col2.metric("已分類數", clf_count, help="module_012 分類結果（ImageFolder 格式需要）")
-    st.info(
-        f"📦 **{selected['name']}**　｜　若要切換請回 Data Feeder 重新執行"
-    )
+    st.info(f"📦 **{selected['name']}**　｜　若要切換請回「資料來源」重新執行")
 
     st.divider()
 
@@ -113,58 +157,54 @@ def render_input() -> dict:
 
     st.divider()
 
-    # ── 資料分割（可選） ────────────────────────────────────────────────────
-    st.subheader("2. Train / Val / Test 分割")
+    # ── 資料分割（進階選項，預設收起）────────────────────────────────────────
+    enable_split = False
+    split_train, split_val, split_test, stratified = 100, 0, 0, False
 
-    enable_split = st.checkbox(
-        "啟用 Train / Val / Test 分割",
-        value=cfg.get("enable_split", False),
-        key="m014_enable_split",
-    )
-
-    if enable_split:
-        col_tr, col_va, col_te = st.columns(3)
-        with col_tr:
-            split_train = st.number_input("Train (%)", 0, 100,
-                                          value=cfg.get("split_train", 70), step=5,
-                                          key="m014_split_train")
-        with col_va:
-            split_val = st.number_input("Val (%)", 0, 100,
-                                        value=cfg.get("split_val", 15), step=5,
-                                        key="m014_split_val")
-        with col_te:
-            split_test = st.number_input("Test (%)", 0, 100,
-                                         value=cfg.get("split_test", 15), step=5,
-                                         key="m014_split_test")
-
-        total_pct = int(split_train) + int(split_val) + int(split_test)
-        if total_pct != 100:
-            st.warning(f"加總 {total_pct}%，執行時會自動正規化")
-        else:
-            st.success("加總 100% ✓")
-
-        stratified = st.checkbox(
-            "Stratified Split（依分類標籤均勻分配）",
-            value=cfg.get("stratified_split", True),
-            key="m014_stratified",
+    with st.expander("⚙️ Train / Val / Test 分割（進階）", expanded=cfg.get("enable_split", False)):
+        enable_split = st.checkbox(
+            "啟用分割",
+            value=cfg.get("enable_split", False),
+            key="m014_enable_split",
         )
-    else:
-        st.caption("停用分割時，所有圖片匯出至同一個目錄（不建立 train/val/test 子資料夾）。")
-        split_train, split_val, split_test, stratified = 100, 0, 0, False
+        if enable_split:
+            col_tr, col_va, col_te = st.columns(3)
+            with col_tr:
+                split_train = st.number_input("Train (%)", 0, 100,
+                                              value=cfg.get("split_train", 70), step=5,
+                                              key="m014_split_train")
+            with col_va:
+                split_val = st.number_input("Val (%)", 0, 100,
+                                            value=cfg.get("split_val", 15), step=5,
+                                            key="m014_split_val")
+            with col_te:
+                split_test = st.number_input("Test (%)", 0, 100,
+                                             value=cfg.get("split_test", 15), step=5,
+                                             key="m014_split_test")
+            total_pct = int(split_train) + int(split_val) + int(split_test)
+            if total_pct != 100:
+                st.warning(f"加總 {total_pct}%，執行時會自動正規化")
+            else:
+                st.success("加總 100% ✓")
+            stratified = st.checkbox(
+                "Stratified Split（依分類標籤均勻分配）",
+                value=cfg.get("stratified_split", True),
+                key="m014_stratified",
+            )
 
     st.divider()
 
     # ── 匯出目錄 ────────────────────────────────────────────────────────────
-    st.subheader("3. 匯出目錄")
+    st.subheader("2. 匯出目錄")
 
     default_dir = str(_cfg.get_default_export_dir(manifest_id))
     col_dir, col_btn = st.columns([4, 1])
     with col_dir:
         export_dir = st.text_input(
             "匯出根目錄",
-            value=st.session_state.get("m014_export_dir", default_dir),
+            value=st.session_state.get("m014_export_dir", ""),
             key="m014_export_dir",
-            placeholder=default_dir,
+            placeholder="請按右側「📂 瀏覽」選擇匯出位置",
         )
     with col_btn:
         st.write("")
@@ -173,6 +213,10 @@ def render_input() -> dict:
             if chosen:
                 st.session_state["m014_export_dir"] = chosen
                 st.rerun()
+
+    if not export_dir.strip():
+        st.warning("⚠️ 請選擇匯出目錄後才能執行匯出。")
+        st.caption(f"💡 預設可用路徑（複製貼上即可）：`{default_dir}`")
 
     # 儲存設定
     try:
@@ -186,7 +230,7 @@ def render_input() -> dict:
     except Exception:
         pass
 
-    return {
+    base = {
         "manifest_id": manifest_id,
         "export_formats": export_formats,
         "export_dir": export_dir,
@@ -196,3 +240,15 @@ def render_input() -> dict:
         "split_test": int(split_test),
         "stratified": stratified,
     }
+    # iWISC: 同時回傳 deliver 參數以便 process.py 一次處理
+    if source_type == "iwsc":
+        base.update({
+            "source_type": "iwsc",
+            "iwsc_tenant_id": shared.get("iwsc_tenant_id", ""),
+            "iwsc_task_id":   shared.get("iwsc_task_id", ""),
+            "iwsc_ant_id":    shared.get("iwsc_ant_id", ""),
+            "new_classification": st.session_state.get("m014_iwsc_clf", "").strip() or None,
+            "annotated_by":       st.session_state.get("m014_iwsc_annotator", "").strip() or None,
+            "deliver_only": False,
+        })
+    return base

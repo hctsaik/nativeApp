@@ -36,6 +36,9 @@ dynamically loads modules from the `scripts/` directory.
 ### Module layout
 
 ```
+annotation/          # Annotation 領域服務（services, models, storage, integrations）
+cim_platform/        # 通用外部連接介面（ExternalSystemConnector, SystemTenant）
+sheets/              # Sheet workflow YAML 定義（annotation.yaml）
 scripts/
 ├── shared/                    # Reusable UI helpers
 │   ├── ui_components.py       # Date pickers, Parts input, toast, download button
@@ -94,23 +97,29 @@ reg.publish("module_003", changelog="Initial release", author="me")
 
 Or use the **Management Center** (tool id `management-center`) from the Portal.
 
-### Workflow / Suite
+### Workflow Sheet（YAML 驅動）
 
-A workflow groups multiple modules into a single tabbed UI.
-Define `scripts/workflows/{id}/workflow.yaml`:
+Workflow sheet 由 `sheets/*.yaml` 定義，engine 啟動時自動載入。
+**新增 sheet 只需新增 YAML 檔，不需修改 engine.py。**
 
-```yaml
-id: edge_analysis
-name: 邊緣品質分析
-steps:
-  - plugin_id: module_003
-    tab_label: "影像來源"
-    optional: true
-  - plugin_id: module_004
-    tab_label: "偵測分析"
-```
+目前的 sheet：
 
-The state from step N is injected into step N+1 via `st.session_state`.
+| 檔案 | Sheet 名稱 | Tabs |
+|------|-----------|------|
+| `sheets/annotation.yaml` | 🐜 影像標註 | 📥 資料來源（026）、✏️ 標注工作台（012）、🖼️ 審查（018）、📤 匯出/回傳（014）|
+
+廢棄模組（已標記 `enabled: false`，程式碼保留）：
+- module_010（Data Feeder）[廢棄]
+- module_019（Data Downloader）[廢棄]
+- module_022（標註權限管理）[廢棄]
+- module_023（待認領任務）[廢棄]
+- module_024（標注工作台 iWISC 版）[廢棄]
+- module_025（完成報表）[廢棄]
+
+新增的模組：
+- module_026（資料來源）— 本地資料夾 / 外部任務系統（含 iWISC 整合）
+
+舊有的 `scripts/workflows/` 檔案系統機制已由 `sheets/` YAML 驅動取代。
 
 ### Adding a new module
 
@@ -148,13 +157,13 @@ provider always returns `True` (placeholder), but the permission rows in
 
 ### Syncing Workflows to DB (prod mode)
 
-Dev mode discovers workflows from the filesystem on every request.
-For prod mode (`CIM_DEV_MODE=0`), workflows must first be synced to the DB:
+Dev mode discovers sheets from the filesystem on every request.
+For prod mode (`CIM_DEV_MODE=0`), sheet configs must first be synced to the DB:
 
 ```python
 from plugin_registry import PluginRegistry
 reg = PluginRegistry(db_path=Path("logs/data/tools.sqlite"))
-reg.sync_workflows()   # reads all scripts/workflows/*/workflow.yaml → DB
+reg.sync_workflows()   # reads all sheets/*.yaml → DB
 ```
 
 Or click **"同步 Workflow 到 DB"** in the Management Center's workflow tab.

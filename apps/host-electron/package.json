@@ -73,6 +73,10 @@
           "management_use_cases.py",
           "requirements.txt",
           "tools/**/*",
+          "scripts/**/*",
+          "annotation/**/*",
+          "cim_platform/**/*",
+          "sheets/**/*",
           "!tools/sample_csv_tool.py",
           "!tools/opencv_tool.py",
           "!tools/opencv_tool_input.py",
@@ -81,7 +85,8 @@
           "!tools/animal_tagger_input.py",
           "!**/__pycache__/**",
           "!**/*.pyc",
-          "!**/*_test.py"
+          "!**/*_test.py",
+          "!**/tests/**"
         ]
       }
     ],

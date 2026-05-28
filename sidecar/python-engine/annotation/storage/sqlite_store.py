@@ -50,7 +50,8 @@ class SQLiteMetadataStore:
                     id          TEXT PRIMARY KEY,
                     tenant_id   TEXT NOT NULL,
                     user_id     TEXT NOT NULL,
-                    UNIQUE(tenant_id, user_id)
+                    ant_id      TEXT,
+                    UNIQUE(tenant_id, ant_id, user_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS annotation_tasks (
@@ -106,14 +107,32 @@ class SQLiteMetadataStore:
                 """
             )
             # 遷移舊資料庫：delivery_status 欄位若不存在則新增
-            # SQLite 不支援 ALTER TABLE ... ADD COLUMN IF NOT EXISTS，改用 exception 忽略
-            try:
-                conn.execute(
-                    "ALTER TABLE annotation_tasks ADD COLUMN delivery_status TEXT"
-                )
-                conn.commit()
-            except Exception:
-                pass  # 欄位已存在，忽略錯誤
+            for _col_ddl in [
+                "ALTER TABLE annotation_tasks ADD COLUMN delivery_status TEXT",
+                "ALTER TABLE annotation_tasks ADD COLUMN original_annotation_json TEXT NOT NULL DEFAULT '{}'",
+            ]:
+                try:
+                    conn.execute(_col_ddl)
+                    conn.commit()
+                except Exception:
+                    pass
+
+            # 遷移 tenant_user_mappings：舊版無 ant_id 欄位，需重建以加入新 UNIQUE 約束
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(tenant_user_mappings)").fetchall()}
+            if "ant_id" not in cols:
+                conn.executescript("""
+                    CREATE TABLE _tenant_user_mappings_new (
+                        id        TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        user_id   TEXT NOT NULL,
+                        ant_id    TEXT,
+                        UNIQUE(tenant_id, ant_id, user_id)
+                    );
+                    INSERT OR IGNORE INTO _tenant_user_mappings_new (id, tenant_id, user_id, ant_id)
+                        SELECT id, tenant_id, user_id, NULL FROM tenant_user_mappings;
+                    DROP TABLE tenant_user_mappings;
+                    ALTER TABLE _tenant_user_mappings_new RENAME TO tenant_user_mappings;
+                """)
 
     # ── SystemTenant ─────────────────────────────────────────────────────────
 
@@ -155,32 +174,77 @@ class SQLiteMetadataStore:
             ).fetchall()
         return [_row_to_tenant(row) for row in rows]
 
+    def delete_tenant(self, tenant_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM tenant_user_mappings WHERE tenant_id = ?", (tenant_id,)
+            )
+            conn.execute(
+                "DELETE FROM annotation_tasks WHERE tenant_id = ?", (tenant_id,)
+            )
+            conn.execute(
+                "DELETE FROM system_tenants WHERE tenant_id = ?", (tenant_id,)
+            )
+
     # ── TenantUserMapping ─────────────────────────────────────────────────────
 
     def add_user_mapping(self, mapping: TenantUserMapping) -> TenantUserMapping:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO tenant_user_mappings (id, tenant_id, user_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(tenant_id, user_id) DO NOTHING
+                INSERT OR IGNORE INTO tenant_user_mappings (id, tenant_id, user_id, ant_id)
+                VALUES (?, ?, ?, ?)
                 """,
-                (mapping.id, mapping.tenant_id, mapping.user_id),
+                (mapping.id, mapping.tenant_id, mapping.user_id, mapping.ant_id),
             )
         return mapping
 
-    def list_user_mappings(self, tenant_id: str) -> list[TenantUserMapping]:
+    def list_user_mappings(self, tenant_id: str, ant_id: str | None = None) -> list[TenantUserMapping]:
+        with self.connect() as conn:
+            if ant_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM tenant_user_mappings WHERE tenant_id = ? AND ant_id IS NULL ORDER BY user_id",
+                    (tenant_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tenant_user_mappings WHERE tenant_id = ? AND ant_id = ? ORDER BY user_id",
+                    (tenant_id, ant_id),
+                ).fetchall()
+        return [
+            TenantUserMapping(id=row["id"], tenant_id=row["tenant_id"], user_id=row["user_id"], ant_id=row["ant_id"])
+            for row in rows
+        ]
+
+    def list_all_user_mappings(self, tenant_id: str) -> list[TenantUserMapping]:
+        """回傳該 tenant 下所有授權記錄（含系統層級與各任務層級）。"""
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tenant_user_mappings WHERE tenant_id = ? ORDER BY user_id",
+                "SELECT * FROM tenant_user_mappings WHERE tenant_id = ? ORDER BY ant_id, user_id",
                 (tenant_id,),
             ).fetchall()
-        return [TenantUserMapping(id=row["id"], tenant_id=row["tenant_id"], user_id=row["user_id"]) for row in rows]
+        return [
+            TenantUserMapping(id=row["id"], tenant_id=row["tenant_id"], user_id=row["user_id"], ant_id=row["ant_id"])
+            for row in rows
+        ]
+
+    def remove_user_mapping(self, tenant_id: str, user_id: str, ant_id: str | None = None) -> None:
+        with self.connect() as conn:
+            if ant_id is None:
+                conn.execute(
+                    "DELETE FROM tenant_user_mappings WHERE tenant_id = ? AND user_id = ? AND ant_id IS NULL",
+                    (tenant_id, user_id),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM tenant_user_mappings WHERE tenant_id = ? AND user_id = ? AND ant_id = ?",
+                    (tenant_id, user_id, ant_id),
+                )
 
     def is_user_authorized(self, tenant_id: str, user_id: str) -> bool:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM tenant_user_mappings WHERE tenant_id = ? AND user_id = ?",
+                "SELECT 1 FROM tenant_user_mappings WHERE tenant_id = ? AND user_id = ? AND ant_id IS NULL",
                 (tenant_id, user_id),
             ).fetchone()
         return row is not None
@@ -194,9 +258,9 @@ class SQLiteMetadataStore:
                 INSERT INTO annotation_tasks
                     (task_id, tenant_id, ant_id, ant_active,
                      original_classification, new_classification,
-                     annotation_json, external_context,
+                     annotation_json, original_annotation_json, external_context,
                      annotated_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
                     ant_active=excluded.ant_active,
                     original_classification=excluded.original_classification,
@@ -214,6 +278,7 @@ class SQLiteMetadataStore:
                     task.original_classification,
                     task.new_classification,
                     json.dumps(task.annotation_json, ensure_ascii=False),
+                    json.dumps(task.original_annotation_json, ensure_ascii=False),
                     json.dumps(task.external_context, ensure_ascii=False),
                     task.annotated_by,
                     task.created_at,
@@ -420,7 +485,9 @@ def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
 
 
 def _row_to_task(row: sqlite3.Row) -> AnnotationTask:
-    raw_delivery = row["delivery_status"] if "delivery_status" in row.keys() else None
+    keys = row.keys()
+    raw_delivery = row["delivery_status"] if "delivery_status" in keys else None
+    raw_orig_ant = row["original_annotation_json"] if "original_annotation_json" in keys else None
     return AnnotationTask(
         task_id=row["task_id"],
         tenant_id=row["tenant_id"],
@@ -429,6 +496,7 @@ def _row_to_task(row: sqlite3.Row) -> AnnotationTask:
         original_classification=row["original_classification"],
         new_classification=row["new_classification"],
         annotation_json=json.loads(row["annotation_json"]),
+        original_annotation_json=json.loads(raw_orig_ant) if raw_orig_ant else {},
         external_context=json.loads(row["external_context"]),
         annotated_by=row["annotated_by"],
         created_at=row["created_at"],

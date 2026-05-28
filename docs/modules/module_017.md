@@ -8,8 +8,8 @@
 |------|-----|
 | ID | `module_017` |
 | Tab 標籤 | `📊 管理中心` |
-| Sheet | `annotation_workflow` |
-| 上游依賴 | module_010（manifest）、module_012（標注 JSON / 分類）、module_014（匯出記錄）|
+| Sheet | `sheet-annotation` |
+| 上游依賴 | module_026（manifest）、module_012（標注 JSON / 分類）、module_014（匯出記錄）|
 
 原 module_015（Dashboard）與 module_017（Label Manager）合併為單一頁籤。
 Output 頁以 `st.tabs` 分成兩層：

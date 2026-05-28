@@ -32,7 +32,7 @@ from annotation.core.models import (
 from annotation.core.states import apply_review_decision, transition_annotation_set
 from annotation.core.validation import validate_annotation_set
 from annotation.formats.registry import get_format_registry
-from annotation.integrations.contracts import ExternalSystemConnector
+from cim_platform.connector import ExternalSystemConnector
 from annotation.storage.workspace import AnnotationWorkspace
 from annotation.tools.registry import get_tool_registry
 
@@ -72,22 +72,40 @@ class AnnotationService:
         tenant = self._require_tenant(tenant_id)
         return _tenant_to_dict(tenant)
 
-    def add_user_to_tenant(self, tenant_id: str, user_id: str) -> dict[str, Any]:
+    def delete_tenant(self, tenant_id: str) -> None:
+        self._require_tenant(tenant_id)
+        self.workspace.metadata.delete_tenant(tenant_id)
+
+    def add_user_to_tenant(self, tenant_id: str, user_id: str, ant_id: str | None = None) -> dict[str, Any]:
         self._require_tenant(tenant_id)
         mapping = TenantUserMapping(
             id=_new_uuid(),
             tenant_id=tenant_id,
             user_id=user_id,
+            ant_id=ant_id,
         )
         self.workspace.metadata.add_user_mapping(mapping)
-        return {"id": mapping.id, "tenant_id": tenant_id, "user_id": user_id}
+        return {"id": mapping.id, "tenant_id": tenant_id, "user_id": user_id, "ant_id": ant_id}
 
-    def list_tenant_users(self, tenant_id: str) -> list[dict[str, Any]]:
+    def list_tenant_users(self, tenant_id: str, ant_id: str | None = None) -> list[dict[str, Any]]:
         self._require_tenant(tenant_id)
         return [
-            {"id": m.id, "tenant_id": m.tenant_id, "user_id": m.user_id}
-            for m in self.workspace.metadata.list_user_mappings(tenant_id)
+            {"id": m.id, "tenant_id": m.tenant_id, "user_id": m.user_id, "ant_id": m.ant_id}
+            for m in self.workspace.metadata.list_user_mappings(tenant_id, ant_id=ant_id)
         ]
+
+    def remove_user_from_tenant(self, tenant_id: str, user_id: str, ant_id: str | None = None) -> None:
+        self._require_tenant(tenant_id)
+        self.workspace.metadata.remove_user_mapping(tenant_id, user_id, ant_id=ant_id)
+
+    def get_task_restriction_map(self, tenant_id: str) -> dict[str, list[str]]:
+        """回傳 {ant_id: [user_id, ...]} — 僅包含有 per-task 限制的任務。"""
+        self._require_tenant(tenant_id)
+        result: dict[str, list[str]] = {}
+        for m in self.workspace.metadata.list_all_user_mappings(tenant_id):
+            if m.ant_id is not None:
+                result.setdefault(m.ant_id, []).append(m.user_id)
+        return result
 
     # ── Phase 1: 任務發現（不存 DB，直接呼叫 connector） ────────────────────
 
@@ -117,12 +135,36 @@ class AnnotationService:
         """
         tenant = self._require_tenant(tenant_id)
 
+        # 授權檢查：若任務有設定 per-task 白名單，則驗證 user_id
+        task_users = self.workspace.metadata.list_user_mappings(tenant_id, ant_id=ant_id)
+        if task_users:
+            allowed = {m.user_id for m in task_users}
+            if user_id not in allowed:
+                raise PermissionError(
+                    f"使用者 {user_id} 未獲授權認領任務 {ant_id}。"
+                    f"（已授權：{', '.join(sorted(allowed))}）"
+                )
+
         # 防重複認領
         existing = self.workspace.metadata.get_task_by_ant_id(tenant_id, ant_id)
         if existing is not None:
             return _task_to_dict(existing)
 
         connector = self._get_connector(tenant)
+
+        # 通知外部系統認領（best-effort：連線失敗不阻斷流程）
+        try:
+            connector.mark_task_claimed(ant_id)
+        except RuntimeError as exc:
+            if "已被他人認領" in str(exc):
+                raise ConflictError(f"此任務已被他人認領（ant_id={ant_id}）") from exc
+            raise
+        except ConnectionRefusedError:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "mark_task_claimed 連線失敗，跳過回寫（ant_id=%s）", ant_id
+            )
+
         detail = connector.get_ant_task_detail(ant_id, tenant.target_format)
         download_url = detail.download_url
 
@@ -153,6 +195,7 @@ class AnnotationService:
             ant_id=ant_id,
             ant_active=1,
             annotation_json=annotation_json,
+            original_annotation_json=annotation_json,
             external_context={},
             annotated_by=user_id,
             created_at=now,
@@ -200,6 +243,7 @@ class AnnotationService:
             delivery = {"status": "error", "error": str(exc)}
         # store delivery result in task record
         self.workspace.update_task_delivery(task_id, delivery)
+        task = self._require_task(task_id)  # reload so delivery_status is current
 
         return {**_task_to_dict(task), "delivery": delivery}
 
@@ -255,7 +299,7 @@ class AnnotationService:
 
             # 決定標注內容
             if mode == "orig_img_orig_ant":
-                ant_data = task.annotation_json
+                ant_data = task.original_annotation_json
             else:
                 # new_ant：annotation_json 為最新標注結果（annotator 已更新）
                 ant_data = task.annotation_json
@@ -680,6 +724,7 @@ def _task_to_dict(task: AnnotationTask) -> dict[str, Any]:
         "original_classification": task.original_classification,
         "new_classification": task.new_classification,
         "annotation_json": task.annotation_json,
+        "original_annotation_json": task.original_annotation_json,
         "external_context": task.external_context,
         "annotated_by": task.annotated_by,
         "created_at": task.created_at,

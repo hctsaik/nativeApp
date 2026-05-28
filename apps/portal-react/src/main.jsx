@@ -76,17 +76,17 @@ function SidecarError({ restarting, onRestart }) {
     return (
       <div className="sidecar-error sidecar-restarting">
         <RefreshCw size={16} className="spin" />
-        Local engine restarting…
+        本地引擎重新啟動中…
       </div>
     );
   }
   return (
     <div className="sidecar-error">
       <AlertTriangle size={16} />
-      Local engine stopped.
+      本地引擎已停止。
       {onRestart && (
         <button className="btn-restart" onClick={onRestart}>
-          <RefreshCw size={14} /> Restart
+          <RefreshCw size={14} /> 重新啟動
         </button>
       )}
     </div>
@@ -100,6 +100,96 @@ function ToolError({ message }) {
       {message}
     </div>
   );
+}
+
+// ── Streamlit 錯誤彈窗攔截 ────────────────────────────────
+// Streamlit 在程序崩潰或重連時，會在 iframe 內部彈出英文錯誤 Dialog。
+// 由於 iframe 使用 localhost 同源，可注入 MutationObserver 攔截並中文化。
+
+const STREAMLIT_ERROR_MAP = [
+  {
+    from: "Is Streamlit still running? If you accidentally stopped Streamlit, just restart it in your terminal:",
+    to: "工具程序已停止回應。請按下「Stop」後重新啟動工具。",
+  },
+  {
+    from: "streamlit run yourscript.py",
+    to: "",
+  },
+  {
+    from: "Streamlit server is not responding. Are you connected to the internet?",
+    to: "工具伺服器未回應，請確認工具程序正常運行。",
+  },
+  {
+    from: "Cannot connect to Streamlit",
+    to: "無法連接到工具程序，請重新啟動工具。",
+  },
+  {
+    from: "Connection timed out.",
+    to: "連線逾時，工具程序可能已停止。",
+  },
+  {
+    from: "Connection failed",
+    to: "連線失敗，請重新啟動工具。",
+  },
+  // Streamlit 漢堡選單 → 管理快取對話框
+  {
+    from: "Clear cache",
+    to: "清除快取",
+  },
+  {
+    from: "Are you sure you want to clear the app's cache? This will remove all cached entries.",
+    to: "確定要清除應用程式快取嗎？所有快取資料將會被移除。",
+  },
+  {
+    from: "Clear All",
+    to: "全部清除",
+  },
+  {
+    from: "Cancel",
+    to: "取消",
+  },
+];
+
+function translateStreamlitErrors(doc) {
+  if (!doc) return;
+  // Streamlit 的連線錯誤 Dialog 會用 BaseUI Modal 渲染，
+  // 內容放在 <p>、<div> 文字節點。用 TreeWalker 掃所有文字節點效率最高。
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    const orig = node.nodeValue;
+    if (!orig) continue;
+    for (const { from, to } of STREAMLIT_ERROR_MAP) {
+      if (orig.includes(from)) {
+        node.nodeValue = to ? orig.replace(from, to) : "";
+      }
+    }
+  }
+}
+
+function injectStreamlitErrorTranslator(iframeEl) {
+  if (!iframeEl) return null;
+  let observer = null;
+  function setup() {
+    try {
+      const doc = iframeEl.contentDocument;
+      if (!doc || !doc.body) return;
+      // 立即掃一次（避免 load 後才注入的情況）
+      translateStreamlitErrors(doc);
+      // 監聽後續 DOM 變化（Streamlit 動態注入 Modal）
+      observer = new MutationObserver(() => translateStreamlitErrors(doc));
+      observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
+    } catch {
+      // cross-origin guard — 若 origin 不允許則靜默略過
+    }
+  }
+  iframeEl.addEventListener("load", setup);
+  // 若已載入完成則立即執行
+  if (iframeEl.contentDocument?.readyState === "complete") setup();
+  return () => {
+    iframeEl.removeEventListener("load", setup);
+    observer?.disconnect();
+  };
 }
 
 
@@ -163,6 +253,16 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
 // ── Regular (module) panel ────────────────────────────────
 
 function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, isStarting }) {
+  const inputIframeRef = useRef(null);
+  const outputIframeRef = useRef(null);
+
+  // 注入 Streamlit 錯誤訊息中文化攔截器
+  useEffect(() => {
+    const cleanupInput = injectStreamlitErrorTranslator(inputIframeRef.current);
+    const cleanupOutput = injectStreamlitErrorTranslator(outputIframeRef.current);
+    return () => { cleanupInput?.(); cleanupOutput?.(); };
+  }, [inputUrl, outputUrl]);
+
   return (
     <div className="left-panel">
       <div className="tab-bar">
@@ -176,11 +276,11 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 
       <div className="tab-content">
         {inputUrl
-          ? <iframe title="Input" src={inputUrl} style={{ display: activeTab === "input" ? "block" : "none" }} />
+          ? <iframe ref={inputIframeRef} title="Input" src={inputUrl} style={{ display: activeTab === "input" ? "block" : "none" }} />
           : activeTab === "input" && <div className="tab-empty">請先選擇功能並按下 Start Tool</div>
         }
         {outputUrl
-          ? <iframe title="Output" src={outputUrl} style={{ display: activeTab === "output" ? "block" : "none" }} />
+          ? <iframe ref={outputIframeRef} title="Output" src={outputUrl} style={{ display: activeTab === "output" ? "block" : "none" }} />
           : activeTab === "output" && <div className="tab-empty">尚未執行，請在 Input 頁籤完成輸入</div>
         }
       </div>
@@ -205,6 +305,16 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // ── Sheet panel ───────────────────────────────────────────
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
+
+// SheetIframe：每個 sheet tab 的 iframe，掛載 Streamlit 錯誤訊息攔截器
+function SheetIframe({ title, src, style }) {
+  const iframeRef = useRef(null);
+  useEffect(() => {
+    const cleanup = injectStreamlitErrorTranslator(iframeRef.current);
+    return () => cleanup?.();
+  }, [src]);
+  return <iframe ref={iframeRef} title={title} src={src} style={style} />;
+}
 
 function SheetLayout({
   sheetTabs,
@@ -261,12 +371,12 @@ function SheetLayout({
             if (!hasBeenVisited || !tab.ready) return null;
             return (
               <React.Fragment key={tab.plugin_id}>
-                <iframe
+                <SheetIframe
                   title={`${tab.plugin_id}-input`}
                   src={tab.input_url}
                   style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
                 />
-                <iframe
+                <SheetIframe
                   title={`${tab.plugin_id}-output`}
                   src={outputSrc}
                   style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
@@ -286,7 +396,7 @@ function SheetLayout({
       {!isStarting && activeTabStarting && (
         <div className="loading-overlay">
           <div className="loading-spinner" />
-          <span>Starting tab...</span>
+          <span>頁籤啟動中，請稍候…</span>
         </div>
       )}
       {!isStarting && !activeTabStarting && isExecuting && (
@@ -523,14 +633,14 @@ function App() {
             started_at: s.started_at ?? prev.started_at,
           } : prev);
           if (!s.input_alive || !s.output_alive) {
-            setToolError(`${activeTool.name} has stopped. Please start it again.`);
-            setStatus(`${activeTool.name} stopped`);
+            setToolError(`⚠️ ${activeTool.name} 已停止，請重新啟動工具`);
+            setStatus(`${activeTool.name} 已停止`);
           }
         } else {
           // Regular tool: heartbeat + result watch
           if (!s.input_alive || !s.output_alive) {
-            const layer = !s.input_alive ? "Input" : "Output";
-            setToolError(`${layer} process crashed — please Stop and restart the tool`);
+            const layer = !s.input_alive ? "Input（輸入）" : "Output（輸出）";
+            setToolError(`⚠️ ${layer} 程序已停止 — 請按下 Stop 後重新啟動工具`);
             cimLog("warn", `heartbeat: ${layer} process dead for ${s.tool_id}`);
           }
           const mtime = s.result_mtime ?? -1;

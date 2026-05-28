@@ -395,20 +395,21 @@ def render_output(result: dict) -> None:
                     badge += f"🏷️ {it['classification']}"
 
                 st.caption(badge or fname)
-                btn_col1, btn_col2, btn_col3 = st.columns(3)
-                with btn_col1:
+                # 緊湊橫排：🔍 ✅ ❌ 靠左對齊，不撐滿整欄
+                _b1, _b2, _b3, _gap = st.columns([1, 1, 1, 3])
+                with _b1:
                     if st.button("🔍", key=f"m018_detail_{it['item_id']}",
                                  help="詳細檢視"):
                         st.session_state["m018_selected"] = it["item_id"]
                         st.rerun()
-                with btn_col2:
+                with _b2:
                     if st.button("✅", key=f"m018_approve_{it['item_id']}",
                                  help="核准", type="primary" if rev_st == "approved" else "secondary"):
                         _set_review(it["file_path"], "approved")
                         _overlay_cache.clear()
                         st.session_state.pop("m018_items_cache", None)
                         st.rerun()
-                with btn_col3:
+                with _b3:
                     if st.button("❌", key=f"m018_reject_{it['item_id']}",
                                  help="退回"):
                         _set_review(it["file_path"], "rejected")

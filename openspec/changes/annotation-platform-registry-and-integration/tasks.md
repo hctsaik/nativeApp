@@ -10,26 +10,26 @@
 
 ## Phase 1 — FormatRegistry
 
-- [ ] 1-1. 新增 `tests/annotation/test_format_registry.py`（failing tests first）
+- [x] 1-1. 新增 `tests/annotation/test_format_registry.py`（failing tests first）
   - `test_register_and_get_by_id`
   - `test_get_by_alias_normalizes`
   - `test_unknown_format_raises_value_error`
   - `test_coco_requires_asset_false`
   - `test_list_supported_shape_matches_legacy`
   - `test_all_builtins_registered`
-- [ ] 1-2. 建立 `annotation/formats/contracts.py`（`FormatCapabilities`, `FormatDescriptor`, `FormatAdapter` Protocol）
-- [ ] 1-3. 建立 `annotation/formats/registry.py`（`FormatRegistry` singleton, `register`, `get`, `normalize`, `list_supported`）
-- [ ] 1-4. 建立 `annotation/formats/builtins.py`（6 個 adapter 的 `FormatDescriptor` + 自動 register）
-- [ ] 1-5. 修改 `services.py`：
+- [x] 1-2. 建立 `annotation/formats/contracts.py`（`FormatCapabilities`, `FormatDescriptor`, `FormatAdapter` Protocol）
+- [x] 1-3. 建立 `annotation/formats/registry.py`（`FormatRegistry` singleton, `register`, `get`, `normalize`, `list_supported`）
+- [x] 1-4. 建立 `annotation/formats/builtins.py`（6 個 adapter 的 `FormatDescriptor` + 自動 register）
+- [x] 1-5. 修改 `services.py`：
   - 移除 10 個 adapter import（lines 6–13），改為 `from annotation.formats.registry import get_format_registry`
   - `supported_annotation_formats()` 改讀 `registry.list_supported()`
   - `import_annotations()` dispatch 改用 registry；COCO `requires_asset=False` 透過 `FormatCapabilities` 決定
   - `import_project_labels()` dispatch 改用 registry
   - `create_export()` dispatch 改用 registry
   - 刪除 `_normalize_format()`（lines 462–475），所有呼叫改為 `registry.normalize()`
-- [ ] 1-6. 跑 `npm run test:python`，確認既有 `test_services.py` / `test_adapters.py` 全過
-- [ ] 1-7. 確認 `supported_annotation_formats()` 回傳結果與舊版完全相同
-- [ ] 1-8. 更新 OpenSpec tasks（本檔）與 design.md 備忘事項
+- [x] 1-6. 跑 `npm run test:python`，確認既有 `test_services.py` / `test_adapters.py` 全過
+- [x] 1-7. 確認 `supported_annotation_formats()` 回傳結果與舊版完全相同
+- [x] 1-8. 更新 OpenSpec tasks（本檔）與 design.md 備忘事項
 
 ---
 

@@ -114,3 +114,46 @@ def download_image_button(
         icon=":material/image:",
         key=key,
     )
+
+
+def inject_streamlit_zh_overrides() -> None:
+    """Inject JS to replace Streamlit's hardcoded English error dialogs with Chinese.
+
+    Call once at the top of any render_input() / render_output() function.
+    Handles the "Connection error" / "server is not responding" dialog.
+    """
+    st.markdown(
+        """
+<script>
+(function patchStreamlitDialogs() {
+  const REPLACEMENTS = [
+    ["Connection error", "連線中斷"],
+    ["Streamlit server is not responding. Are you connected to the internet?",
+     "與伺服器的連線已中斷，請點擊右上角 ✕ 關閉後重新整理頁面。"],
+    ["Are you connected to the internet?", "請重新整理頁面以恢復連線。"],
+  ];
+  function replaceText(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      for (const [en, zh] of REPLACEMENTS) {
+        if (node.nodeValue && node.nodeValue.includes(en)) {
+          node.nodeValue = node.nodeValue.replace(en, zh);
+        }
+      }
+    }
+  }
+  const obs = new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) {
+        if (n.nodeType === 1) replaceText(n);
+      }
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+  replaceText(document.body);
+})();
+</script>
+""",
+        unsafe_allow_html=True,
+    )

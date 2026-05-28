@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import base64
+import importlib.util as _ilu
 import json
 import os
 from pathlib import Path
 
 import streamlit as st
+
+_HERE = Path(__file__).resolve().parent
+_ui_spec = _ilu.spec_from_file_location("_ui_components", _HERE.parent / "shared" / "ui_components.py")
+_ui = _ilu.module_from_spec(_ui_spec)
+_ui_spec.loader.exec_module(_ui)
 
 
 def _get_service():
@@ -15,6 +22,7 @@ def _get_service():
 
 
 def render_input() -> dict:
+    _ui.inject_streamlit_zh_overrides()
     st.title("✏️ 標注工作台")
     st.caption("對已認領的任務進行標注並標記完成。")
 
@@ -41,7 +49,7 @@ def render_input() -> dict:
 
     tenant_options = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
     selected_label = st.selectbox(
-        "選擇 Tenant",
+        "選擇外部系統",
         options=list(tenant_options.keys()),
         key="m024_selected_tenant",
     )
@@ -63,7 +71,7 @@ def render_input() -> dict:
     tasks: list[dict] = st.session_state.get(f"m024_tasks_{tenant_id}", [])
 
     if not tasks:
-        st.info("目前無「標注中（antActive=1）」任務。請至「標註任務」頁面認領。")
+        st.info("目前無「標注中」任務。請至「**📋 待認領任務**」頁面認領任務後再回到此頁。")
         return {"mode": "idle"}
 
     # ── 任務選擇 ─────────────────────────────────────────────────────────────
@@ -95,33 +103,98 @@ def render_input() -> dict:
         with st.expander("🔍 外部資訊 (external_context)", expanded=False):
             st.json(ext_ctx)
 
-    # ── 標注 JSON 編輯 ────────────────────────────────────────────────────────
-    ann_json = task.get("annotation_json") or {}
-    ann_json_str = json.dumps(ann_json, ensure_ascii=False, indent=2)
+    # ── 圖片預覽 ──────────────────────────────────────────────────────────────
+    ws_path = Path(os.environ.get("CIM_LOG_DIR", "/tmp")) / "annotation_workspace"
+    img_dir = ws_path / "tasks" / task_id / "images"
+    if img_dir.exists():
+        img_files = (
+            sorted(img_dir.glob("*.png"))
+            + sorted(img_dir.glob("*.jpg"))
+            + sorted(img_dir.glob("*.jpeg"))
+        )
+        if img_files:
+            st.subheader("📷 圖片預覽")
+            cols = st.columns(min(len(img_files), 3))
+            for i, img_path in enumerate(img_files[:6]):  # 最多顯示 6 張
+                with cols[i % 3]:
+                    suffix = img_path.suffix.lower().lstrip(".")
+                    mime = "jpeg" if suffix in ("jpg", "jpeg") else suffix
+                    b64 = base64.b64encode(img_path.read_bytes()).decode()
+                    st.markdown(
+                        f'<img src="data:image/{mime};base64,{b64}" '
+                        f'style="width:100%;border-radius:4px;display:block">'
+                        f'<p style="text-align:center;font-size:0.8em;'
+                        f'color:gray;margin-top:4px">{img_path.name}</p>',
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.warning("此任務尚無圖片，請稍後按「🔄 重新載入任務」，或聯繫管理員確認資料是否已同步。")
+    else:
+        st.warning("圖片尚未載入，請稍後按「🔄 重新載入任務」，或聯繫管理員確認任務資料是否已同步。")
 
-    st.subheader("標注內容 (annotation_json)")
-    edited_json_str = st.text_area(
-        "以 JSON 格式編輯標注",
-        value=ann_json_str,
-        height=200,
-        key=f"m024_ann_json_{task_id}",
-    )
+    # ── 標注結果 ──────────────────────────────────────────────────────────────
+    st.subheader("📋 標注結果")
 
-    # ── 新分類標籤 ────────────────────────────────────────────────────────────
+    # 快速分類按鈕（key 含 task_id，切換任務時不殘留）
+    _cls_key = f"mod024_cls_{task_id}"
+    if _cls_key not in st.session_state:
+        st.session_state[_cls_key] = task.get("new_classification") or ""
+
+    st.write("**分類判定**")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("✅ OK", use_container_width=True, type="primary", key=f"m024_btn_ok_{task_id}"):
+            st.session_state[_cls_key] = "OK"
+    with col2:
+        if st.button("❌ NG", use_container_width=True, key=f"m024_btn_ng_{task_id}"):
+            st.session_state[_cls_key] = "NG"
+    with col3:
+        if st.button("⚠️ 待確認", use_container_width=True, key=f"m024_btn_pend_{task_id}"):
+            st.session_state[_cls_key] = "待確認"
+
+    # 顯示目前選擇
+    current_cls = st.session_state[_cls_key]
+    if current_cls:
+        st.success(f"已選擇：{current_cls}")
+
     new_classification = st.text_input(
-        "新的分類標籤 (new_classification)",
-        value=task.get("new_classification") or "",
-        key=f"m024_new_cls_{task_id}",
+        "或手動輸入分類",
+        value=current_cls,
         placeholder="OK / NG / 待確認",
+        key=f"m024_new_cls_{task_id}",
     )
+    # 同步手動輸入回 session_state
+    if new_classification != current_cls:
+        st.session_state[_cls_key] = new_classification
+    current_cls = st.session_state[_cls_key]
 
-    # ── 作業員工號 ────────────────────────────────────────────────────────────
+    # ── 作業員工號（跨任務持久化，切換任務不需重填）────────────────────────────
+    _worker_key = "m024_global_worker_id"
+    _default_worker = (
+        task.get("annotated_by")
+        or st.session_state.get(_worker_key)
+        or ""
+    )
     annotated_by = st.text_input(
-        "作業員工號 (annotated_by)",
-        value=task.get("annotated_by") or "",
+        "作業員工號",
+        value=_default_worker,
         key=f"m024_annotated_by_{task_id}",
         placeholder="user001",
     )
+    if annotated_by:
+        st.session_state[_worker_key] = annotated_by  # 儲存供下個任務使用
+
+    # ── 標注 JSON（進階，預設折疊） ───────────────────────────────────────────
+    ann_json = task.get("annotation_json") or {}
+    ann_json_str = json.dumps(ann_json, ensure_ascii=False, indent=2)
+
+    with st.expander("🔧 進階：原始標注 JSON（技術人員用）", expanded=False):
+        edited_json_str = st.text_area(
+            "標注 JSON",
+            value=ann_json_str,
+            height=200,
+            key=f"m024_ann_json_{task_id}",
+        )
 
     st.divider()
 
@@ -171,6 +244,14 @@ def render_input() -> dict:
                 result = service.complete_task(task_id=task_id, annotated_by=annotated_by.strip())
                 delivery = result.get("delivery", {})
                 delivery_status = delivery.get("status", "unknown")
+
+                status_labels = {
+                    "success": "✅ 結果已成功送出至 iWISC",
+                    "error": "❌ 送出失敗，請通知管理員或重試",
+                    "pending": "⏳ 等待送出",
+                }
+                display_status = status_labels.get(delivery_status, delivery_status)
+
                 if delivery_status == "error":
                     st.session_state["m024_completion_msg"] = {
                         "ok": False,
@@ -184,7 +265,7 @@ def render_input() -> dict:
                         "ok": True,
                         "text": (
                             f"✅ 任務 {task_id[:8]}… 已標記完成（antActive→2）。"
-                            f"回饋狀態：{delivery_status}"
+                            f"回饋狀態：{display_status}"
                         ),
                     }
                 st.session_state.pop(f"m024_tasks_{tenant_id}", None)

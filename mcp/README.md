@@ -3,7 +3,34 @@
 This folder contains MCP servers for the CIM platform.
 
 - `cim_gui_mcp`: GUI and E2E automation for the desktop app.
+- `platform_mcp`: 平台層管理（tools、sheets、health）。
 - `annotation_mcp`: data/workflow API for the annotation common component.
+
+## platform_mcp — 平台層管理
+
+提供 Claude 查詢與管理 CIM 平台本身的工具：
+
+| 工具 | 說明 |
+|------|------|
+| `platform_health` | 確認 Python engine 健康狀態 |
+| `platform_list_tools` | 列出所有已註冊的平台工具（modules） |
+| `platform_get_tool` | 取得指定 tool 的詳細資訊 |
+| `platform_list_sheets` | 列出所有 workflow sheet 及其 tab 配置 |
+| `platform_get_sheet` | 取得指定 sheet 的 tab 詳細資訊 |
+| `platform_start_tool` | 啟動指定工具 |
+| `platform_stop_tool` | 停止目前執行中的工具 |
+
+設定（`.mcp.json`）：
+```json
+"platform": {
+  "command": "python",
+  "args": ["-m", "platform_mcp.server"],
+  "cwd": "C:/code/claude/nativeApp/mcp",
+  "env": { "CIM_SIDECAR_PORT": "8765" }
+}
+```
+
+---
 
 ## Annotation MCP Server
 

@@ -280,7 +280,11 @@ class SQLiteToolAdapter(ToolAdapter):
                      "1.0.0", None, "seed", "system", None, 1),
                     ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
                      "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-annotation_workflow", "標注工作流", "sheet_runner.py",
+                    ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
+                     "1.0.0", None, "seed", "system", None, 1),
+                    ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
+                     "1.0.0", None, "seed", "system", None, 1),
+                    ("sheet-annotation", "🐜 影像標註", "sheet_runner.py",
                      "1.0.0", None, "seed", "system", None, 1),
                     ("management-center", "管理中心", "management_runner.py",
                      "1.0.0", None, "seed", "system", None, 1),
@@ -290,113 +294,112 @@ class SQLiteToolAdapter(ToolAdapter):
             )
             # Disable legacy tools no longer in the product
             connection.execute(
-                "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?)",
-                ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder"),
+                "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+                ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
+                 "sheet-annotation_workflow", "sheet-iwsc-annotation"),
             )
             # Ensure all static-seed active tools are prod-enabled
             connection.execute(
-                "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?)",
-                ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation_workflow",
-                 "management-center", "labelme-dino"),
+                "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+                ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation",
+                 "management-center", "labelme-dino", "sheet-annotation"),
             )
-            self._reconcile_annotation_workflow_tabs(connection)
+            # Rename display name for existing installs
+            connection.execute(
+                "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+                ("本地標注作業", "sheet-annotation_workflow", "標注工作流"),
+            )
+            connection.execute(
+                "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+                ("🐜 影像標註", "sheet-annotation", "Annotation"),
+            )
+            # one-time migration: remove iWISC modules from the local annotation sheet
+            connection.execute(
+                "DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'"
+                " AND plugin_id IN (?,?,?,?)",
+                ("module_022", "module_023", "module_024", "module_025"),
+            )
+            self._reconcile_sheets_from_yaml(connection)
 
-    def _reconcile_annotation_workflow_tabs(self, connection) -> None:
-        desired_tabs = [
-            (0, "module_019", "\U0001f310 Data Downloader"),
-            (1, "module_010", "\U0001f4e6 Data Feeder"),
-            (2, "module_012", "\U0001f3f7\ufe0f Annotation"),
-            (3, "module_008", "\U0001f3ac Video Annotation"),
-            (4, "module_013", "\U0001f504 Sync Back"),
-            (5, "module_020", "\U0001f4e5 Download"),
-            (6, "module_014", "\U0001f4e4 Export"),
-            (7, "module_016", "\U0001f916 AI Pre-labeling"),
-            (8, "module_017", "\U0001f4ca \u7ba1\u7406\u4e2d\u5fc3"),
-            (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
-            (10, "module_021", "\U0001f52d Vision DIY"),
-            (11, "module_022", "\U0001f510 標註權限管理"),
-            (12, "module_023", "\U0001f4cb 標註任務"),
-            (13, "module_024", "✏️ 標注工作台"),
-            (14, "module_025", "\U0001f4ca 完成報表"),
-        ]
-        plugin_ids = [plugin_id for _, plugin_id, _ in desired_tabs]
-        placeholders = ",".join("?" for _ in plugin_ids)
-        existing = {
-            row["tool_id"]
-            for row in connection.execute(
-                f"SELECT tool_id FROM tools WHERE tool_id IN ({placeholders})",
-                plugin_ids,
-            )
-        }
-        if any(plugin_id not in existing for plugin_id in plugin_ids):
+    def _reconcile_sheets_from_yaml(self, connection) -> None:
+        """Read sheets/*.yaml and reconcile sheet rows + tabs for each definition.
+
+        Adding a new workflow sheet no longer requires touching engine.py —
+        just drop a YAML file in sidecar/python-engine/sheets/.
+        """
+        try:
+            import yaml
+        except ImportError:
+            logging.warning("PyYAML not available; skipping sheet YAML reconciliation")
             return
 
-        current = [
-            (row["tab_order"], row["plugin_id"], row["label"])
-            for row in connection.execute(
-                "SELECT tab_order, plugin_id, label FROM sheet_tabs "
-                "WHERE sheet_id='annotation_workflow' ORDER BY tab_order"
-            )
-        ]
-        if current == desired_tabs:
+        sheets_dir = ROOT_DIR / "sheets"
+        if not sheets_dir.exists():
             return
 
-        connection.execute(
-            """
-            INSERT OR IGNORE INTO sheets (sheet_id, name, description, enabled_dev, enabled_prod)
-            VALUES ('annotation_workflow', 'Annotation Workflow',
-                    'End-to-end annotation workflow', 1, 0)
-            """
-        )
-        connection.execute("DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'")
-        connection.executemany(
-            "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label) VALUES (?, ?, ?, ?)",
-            [("annotation_workflow", tab_order, plugin_id, label) for tab_order, plugin_id, label in desired_tabs],
-        )
+        for yaml_path in sorted(sheets_dir.glob("*.yaml")):
+            try:
+                data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            except Exception as exc:
+                logging.warning("Failed to parse %s: %s", yaml_path, exc)
+                continue
 
-        # migration: update module_013 label to Sync Back
-        try:
+            sheet_id = data.get("sheet_id")
+            if not sheet_id:
+                continue
+
+            desired_tabs = [
+                (int(t["order"]), t["module_id"], t["label"])
+                for t in data.get("tabs", [])
+            ]
+            if not desired_tabs:
+                continue
+
+            # Skip if any required module is missing from the DB
+            plugin_ids = [mid for _, mid, _ in desired_tabs]
+            placeholders = ",".join("?" for _ in plugin_ids)
+            existing = {
+                row["tool_id"]
+                for row in connection.execute(
+                    f"SELECT tool_id FROM tools WHERE tool_id IN ({placeholders})",
+                    plugin_ids,
+                )
+            }
+            if any(mid not in existing for mid in plugin_ids):
+                continue
+
+            current = [
+                (row["tab_order"], row["plugin_id"], row["label"])
+                for row in connection.execute(
+                    "SELECT tab_order, plugin_id, label FROM sheet_tabs"
+                    " WHERE sheet_id=? ORDER BY tab_order",
+                    (sheet_id,),
+                )
+            ]
+            if current == desired_tabs:
+                continue
+
+            name         = data.get("name", sheet_id)
+            description  = data.get("description", "")
+            enabled_dev  = 1 if data.get("enabled_dev", True)  else 0
+            enabled_prod = 1 if data.get("enabled_prod", False) else 0
+
             connection.execute(
-                "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
-                ("\U0001f504 Sync Back", "annotation_workflow", "module_013"),
+                """
+                INSERT OR IGNORE INTO sheets
+                    (sheet_id, name, description, enabled_dev, enabled_prod)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (sheet_id, name, description, enabled_dev, enabled_prod),
             )
-        except Exception:
-            pass
-
-        # migration: rename module_020 label to Download
-        try:
             connection.execute(
-                "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
-                ("\U0001f4e5 Download", "annotation_workflow", "module_020"),
+                "DELETE FROM sheet_tabs WHERE sheet_id=?", (sheet_id,)
             )
-        except Exception:
-            pass
-
-        # migration: insert module_020 (Upload Archive) at tab_order=4
-        try:
-            exists = connection.execute(
-                "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
-                ("annotation_workflow", "module_020"),
-            ).fetchone()
-            if not exists:
-                connection.execute(
-                    "UPDATE sheet_tabs SET tab_order=-(tab_order+1)"
-                    " WHERE sheet_id=? AND tab_order>=4",
-                    ("annotation_workflow",),
-                )
-                connection.execute(
-                    "UPDATE sheet_tabs SET tab_order=-tab_order"
-                    " WHERE sheet_id=? AND tab_order<0",
-                    ("annotation_workflow",),
-                )
-                connection.execute(
-                    "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
-                    " VALUES (?,?,?,?)",
-                    ("annotation_workflow", 4, "module_020",
-                     "\U0001f4e5 Download"),
-                )
-        except Exception:
-            pass
+            connection.executemany(
+                "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                " VALUES (?, ?, ?, ?)",
+                [(sheet_id, order, mid, label) for order, mid, label in desired_tabs],
+            )
 
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
@@ -1290,6 +1293,12 @@ def run_streamlit_script(script_path: str, port: int) -> None:
         str(port),
         "--server.headless",
         "true",
+        "--server.runOnSave",
+        "false",
+        "--server.fileWatcherType",
+        "none",
+        "--client.toolbarMode",
+        "minimal",
         "--browser.gatherUsageStats",
         "false",
     ]

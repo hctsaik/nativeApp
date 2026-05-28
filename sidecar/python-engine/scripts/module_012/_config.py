@@ -103,6 +103,13 @@ def get_xany_work_dir(manifest_id: str) -> Path:
     return path
 
 
+def get_enhanced_dir(manifest_id: str) -> Path:
+    """強化圖批次標注的工作資料夾（每個 manifest 獨立、與原圖完全隔離）。"""
+    path = _CIM_LOG_DIR / "m012_enhanced" / _manifest_key(manifest_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_filepath_classifications_path() -> Path:
     """分類結果的 file_path 索引（跨 manifest 存活，key 為 file_path）。"""
     return _CIM_LOG_DIR / "config" / "module_012_classifications_by_path.json"

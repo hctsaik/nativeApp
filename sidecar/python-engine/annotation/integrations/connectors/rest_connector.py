@@ -20,13 +20,13 @@ import time
 
 import httpx
 
-from annotation.integrations.contracts import (
-    AntTask,
+from cim_platform.connector import (
     ConnectorHealth,
     ExternalSystemConnector,
-    TaskDetailResponse,
+    ExternalTask as AntTask,
+    ExternalTaskDetail as TaskDetailResponse,
 )
-from annotation.integrations.profiles import SystemTenant
+from cim_platform.tenant import SystemTenant
 
 
 class RestConnector(ExternalSystemConnector):
@@ -107,35 +107,27 @@ class RestConnector(ExternalSystemConnector):
         data: dict = resp.json()
         return TaskDetailResponse(download_url=data["download_url"])
 
-    def deliver_result(
-        self,
-        ant_id: str,
-        platform_task_id: str,
-        annotation_json: dict,
-        new_classification: str | None,
-        annotated_by: str | None,
-    ) -> dict:
+    def mark_task_claimed(self, ant_id: str) -> None:
         """
-        POST {base}/tasks/{ant_id}/result
-        Body: platform_task_id, annotation_json, new_classification, annotated_by
-        成功 (200) → 回傳 response JSON dict
-        其他非 200 → raise RuntimeError
+        PATCH {base}/tasks/{ant_id}/claim
+        成功 (200) → 靜默 return
+        409        → raise RuntimeError（任務已被他人認領）
+        連線失敗   → raise ConnectionRefusedError
         """
-        url = f"{self._base}/tasks/{ant_id}/result"
-        payload = {
-            "platform_task_id": platform_task_id,
-            "annotation_json": annotation_json,
-            "new_classification": new_classification,
-            "annotated_by": annotated_by,
-        }
-        resp = httpx.post(url, json=payload, headers=self._headers, timeout=self._timeout)
+        url = f"{self._base}/tasks/{ant_id}/claim"
+        try:
+            resp = httpx.patch(url, headers=self._headers, timeout=self._timeout)
+        except httpx.ConnectError as exc:
+            raise ConnectionRefusedError(f"無法連線至外部系統：{url}") from exc
 
+        if resp.status_code == 409:
+            raise RuntimeError("任務已被他人認領")
+        if resp.status_code == 404:
+            raise RuntimeError(f"外部系統找不到任務 {ant_id!r}（404）")
         if resp.status_code != 200:
             raise RuntimeError(
-                f"iWISC deliver failed: {resp.status_code} {resp.text[:200]}"
+                f"PATCH {url} 回傳非預期狀態碼 {resp.status_code}：{resp.text[:200]}"
             )
-
-        return resp.json()
 
     def health_check(self) -> ConnectorHealth:
         """

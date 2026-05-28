@@ -33,6 +33,12 @@ start-dev.bat
       → Streamlit 子程序（按需啟動，含注入環境變數）
 ```
 
+### Sheet 驅動機制
+新 workflow sheet 由 `sidecar/python-engine/sheets/*.yaml` 定義，engine 啟動時自動載入。
+加一個新 sheet 只需新增 YAML 檔，不需修改 engine.py。
+
+目前只有一個 annotation sheet：`sheets/annotation.yaml`（🐜 影像標註，4 tabs）。
+
 ### 環境變數由 engine 注入，不可手動設定
 `CIM_SHEET_ID`、`CIM_PLUGIN_ID`、`CIM_TOOL_ID`、`CIM_LOG_DIR` 等變數由
 `ToolProcessManager._make_env()`（engine.py ~line 596）在 spawn Streamlit 子程序時自動注入。
@@ -47,6 +53,7 @@ start-dev.bat
 | `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
 | `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
+| iWISC 任務列表空白 | 外部 iWISC server 未啟動，或 Tenant 尚未在管理中心設定 | 啟動 iwsc-sample-server（port 8765）；或至管理中心新增 Tenant |
 
 ## 架構地雷（容易踩的坑）
 
@@ -60,6 +67,8 @@ start-dev.bat
 - 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py` + `*_output.py`
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
 - 新工具需在 `engine.py` 的 seed 區塊（`source="seed"`）新增 inline entry，並確認 `seed_tools()` 函式有呼叫到
+- 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 建立或修改 YAML，而非修改 engine.py
+- 廢棄模組（010、019、022-025）：已標記 `enabled: false`，程式碼保留不刪除
 
 詳見 `README.md` 的「開發新工具」章節。
 
