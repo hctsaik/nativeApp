@@ -51,6 +51,7 @@ a = Analysis(
         'annotation.integrations.connectors.rest_connector',
         'annotation.integrations.contracts',
         'annotation.integrations.profiles',
+        'annotation.label_ops',
         'annotation.services',
         'annotation.storage',
         'annotation.storage.artifacts',
