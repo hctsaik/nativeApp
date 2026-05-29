@@ -14,7 +14,7 @@ annotation.integrations.contracts
 """
 from __future__ import annotations
 
-from cim_platform.connector import (
+from core.integrations.connector import (
     ConnectorHealth,
     ExternalSystemConnector,
     ExternalTask as AntTask,

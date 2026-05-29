@@ -9,6 +9,7 @@ a = Analysis(
         ('tools',        'tools'),
         ('scripts',      'scripts'),
         ('annotation',   'annotation'),
+        ('core',         'core'),
         ('cim_platform', 'cim_platform'),
         ('sheets',       'sheets'),
     ],
@@ -62,7 +63,12 @@ a = Analysis(
         'annotation.tools.builtins',
         'annotation.tools.contracts',
         'annotation.tools.registry',
-        # platform connector abstraction
+        # platform core (canonical home)
+        'core',
+        'core.integrations',
+        'core.integrations.connector',
+        'core.integrations.tenant',
+        # platform connector abstraction (back-compat shims → core.integrations)
         'cim_platform',
         'cim_platform.connector',
         'cim_platform.tenant',

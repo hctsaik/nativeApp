@@ -32,7 +32,7 @@ from annotation.core.models import (
 from annotation.core.states import apply_review_decision, transition_annotation_set
 from annotation.core.validation import validate_annotation_set
 from annotation.formats.registry import get_format_registry
-from cim_platform.connector import ExternalSystemConnector
+from core.integrations.connector import ExternalSystemConnector
 from annotation.storage.workspace import AnnotationWorkspace
 from annotation.tools.registry import get_tool_registry
 

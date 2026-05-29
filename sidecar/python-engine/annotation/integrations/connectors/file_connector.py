@@ -15,13 +15,13 @@ import json
 import time
 from pathlib import Path
 
-from cim_platform.connector import (
+from core.integrations.connector import (
     ConnectorHealth,
     ExternalSystemConnector,
     ExternalTask as AntTask,
     ExternalTaskDetail as TaskDetailResponse,
 )
-from cim_platform.tenant import SystemTenant
+from core.integrations.tenant import SystemTenant
 
 
 class FileConnector(ExternalSystemConnector):

@@ -75,6 +75,7 @@ def _files(*relpaths: str) -> list[Path]:
 
 
 CORE_CANDIDATE_FILES = _files(
+    "core",
     "cim_platform",
     "management_insights.py", "management_oracle_store.py",
     "management_package_importer.py", "management_schema.py",

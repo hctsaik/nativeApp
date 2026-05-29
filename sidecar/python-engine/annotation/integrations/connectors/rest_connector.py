@@ -20,13 +20,13 @@ import time
 
 import httpx
 
-from cim_platform.connector import (
+from core.integrations.connector import (
     ConnectorHealth,
     ExternalSystemConnector,
     ExternalTask as AntTask,
     ExternalTaskDetail as TaskDetailResponse,
 )
-from cim_platform.tenant import SystemTenant
+from core.integrations.tenant import SystemTenant
 
 
 class RestConnector(ExternalSystemConnector):

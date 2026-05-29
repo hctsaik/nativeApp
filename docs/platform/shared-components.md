@@ -18,8 +18,8 @@
 | 影像預覽元件 | `image_widget` | `render_image_preview(...)` | `scripts/shared/image_widget.py` | 同上 |
 | 說明按鈕（? 徽章）| `_help` | `render_help_button(module_id, side, title)` | `scripts/shared/_help.py` | 同上 |
 | 資料來源連接器（ZIP/遠端）| `_data_connector` | `DataConnector` ABC / `ZipPackageConnector` | `scripts/shared/_data_connector.py` | `plugins/labeling/integrations` |
-| 接外部任務系統（iWISC 等）| `ExternalSystemConnector` | `from cim_platform.connector import ExternalSystemConnector` | `cim_platform/connector.py` | `core/integrations`（平台級，領域無關）|
-| 外部系統租戶設定 | `SystemTenant` | `from cim_platform.tenant import SystemTenant` | `cim_platform/tenant.py` | `core/integrations` |
+| 接外部任務系統（iWISC 等）| `ExternalSystemConnector` | `from core.integrations import ExternalSystemConnector` | `core/integrations/connector.py`（`cim_platform.connector` 為相容 shim）| ✅ 已在 core |
+| 外部系統租戶設定 | `SystemTenant` | `from core.integrations import SystemTenant, load_tenant_from_file` | `core/integrations/tenant.py`（`cim_platform.tenant` 為相容 shim）| ✅ 已在 core |
 | 標注領域服務（資料集/標注集/匯出）| `AnnotationService` | `from annotation.services import AnnotationService` | `annotation/services.py` | `plugins/labeling/domain` |
 | 標注資料模型 | `annotation.core.models` | `DatasetManifest` / `AnnotationSet` / `AnnotationItem` | `annotation/core/models.py` | `plugins/labeling/domain` |
 | 格式轉換（COCO/YOLO/x-anylabeling…）| `annotation/adapters` | 見 `annotation/formats` + `adapters/` | `annotation/adapters/`、`annotation/formats/` | `plugins/labeling/domain` |

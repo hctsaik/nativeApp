@@ -8,7 +8,7 @@ SystemTenant 與載入函式已移至 platform.tenant；此模組保留舊名稱
 """
 from __future__ import annotations
 
-from cim_platform.tenant import (
+from core.integrations.tenant import (
     SystemTenant,
     load_tenant as load_profile,
     load_tenant_from_file as load_profile_from_file,
