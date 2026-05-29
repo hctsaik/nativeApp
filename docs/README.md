@@ -1,5 +1,19 @@
 # CIM Hybrid Edge Platform
 
+## 🗺️ 文件地圖（權威來源）
+
+| 想找什麼 | 看這裡（唯一權威） |
+|----------|-------------------|
+| 平台整體架構 | [`docs/platform/ARCHITECTURE.md`](platform/ARCHITECTURE.md) |
+| AI 助理導覽 | [`docs/platform/AI_CONTEXT.md`](platform/AI_CONTEXT.md) |
+| 系統資料流 | [`docs/platform/system-flow.md`](platform/system-flow.md) |
+| **共用功能（DB / Log / config / UI 元件）在哪、怎麼用** | [`docs/platform/shared-components.md`](platform/shared-components.md) |
+| 架構重構計畫與討論記錄 | [`docs/platform/architecture-restructure-discussion.md`](platform/architecture-restructure-discussion.md) |
+| 模組總覽 | [`docs/MODULES.md`](MODULES.md) + [`docs/modules/`](modules/) |
+| Labeling / X-AnyLabeling | [`docs/ANNOTATION_XANYLABELING.md`](ANNOTATION_XANYLABELING.md)、[`docs/Annotation_Platform_Interface.md`](Annotation_Platform_Interface.md) |
+
+> 平台級文件一律放 `docs/platform/`，請勿在 `docs/` 根目錄建立同名重複檔（CI 之後會擋）。
+
 ## Current Annotation Workstream
 
 The annotation common component and X-AnyLabeling integration are documented in:
@@ -323,8 +337,14 @@ nativeApp/
 │       ├── checkpoint.md        # 工作狀態儲存
 │       └── resume.md            # 工作狀態還原
 ├── docs/                        # 文件
-│   ├── README.md                # 本文件
-│   └── AI_CONTEXT.md            # AI 助理導覽文件
+│   ├── README.md                # 本文件（文件地圖）
+│   ├── MODULES.md               # 模組總覽
+│   ├── modules/                 # 各模組詳細文件
+│   └── platform/                # 平台級權威文件
+│       ├── ARCHITECTURE.md      # 平台架構（唯一權威）
+│       ├── AI_CONTEXT.md        # AI 助理導覽
+│       ├── system-flow.md       # 系統資料流
+│       └── shared-components.md # 共用功能索引（DB/Log/config/UI）
 ├── start-dev.bat                # DEV 模式一鍵啟動
 ├── start-prod.bat               # PROD 模式一鍵啟動
 └── package.json                 # Monorepo 根設定

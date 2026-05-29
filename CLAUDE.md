@@ -46,6 +46,23 @@ start-dev.bat
 **不可直接執行任何 `sidecar/python-engine/tools/*.py`**（包括 `sheet_runner.py`），
 必須透過 Electron 啟動整個 app，engine 才會正確注入這些變數。
 
+## 共用功能在哪（DB / Log / config / 共用 UI）
+
+**開發新模組/plugin 前先查權威索引：[`docs/platform/shared-components.md`](docs/platform/shared-components.md)**，不要各自重造。重點：
+
+- **Log**：`tools/log_utils.py` 的 `get_logger(name)`
+- **Manifest DB DAL**：`scripts/shared/_manifest_db.py`（函式收 `db_path`）
+- **通用 SQLite**：`tools/db_utils.py` 的 `SimpleDAO`
+- **工具結果/通訊**：`tools/tool_result.py`、`tools/tool_comms.py`
+- **模組設定/路徑**：各模組 `scripts/module_NNN/_config.py`（目前重複，重構 P2 會抽共用 helper）
+- **共用 Streamlit UI**：`scripts/shared/ui_components.py`、`image_widget.py`、`_help.py`（見 `/common-component`）
+- **外部系統連接**：`cim_platform/connector.py`（`ExternalSystemConnector`）
+- **標注領域服務**：`annotation/services.py`（`AnnotationService`）
+
+> 平台正進行架構重構（共用碼→`core/`、Labeling→`plugins/labeling/`、凍結數字 ID）。
+> 路線圖與決策見 [`docs/platform/architecture-restructure-discussion.md`](docs/platform/architecture-restructure-discussion.md)。
+> 平台級文件一律放 `docs/platform/`，勿在 `docs/` 根目錄建同名重複檔。
+
 ## 常見錯誤與處理
 
 | 錯誤 | 原因 | 解法 |

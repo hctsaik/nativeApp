@@ -318,6 +318,26 @@ flowchart TD
 | `module_004` | 邊緣完整度偵測 | 偵測物件邊緣的完整性 |
 | `module_005` | 邊緣記錄查詢 | 查詢歷史邊緣偵測記錄 |
 | `module_006` | 動物影像標記 | 整合標注面板的動物分類工具 |
+| `module_012` | 標注工作台 | X-AnyLabeling/LabelMe/ISAT 標注作業管理（🐜 影像標註 Tab 2） |
+| `module_013` | Update | 更新/同步標注結果至資料集 |
+| `module_014` | 匯出/回傳 | 多格式匯出（COCO/YOLO/Pascal VOC/ImageFolder/CSV）+ iWISC deliver_result（🐜 影像標註 Tab 4） |
+| `module_015` | Export Dashboard | 歷史匯出記錄查詢 |
+| `module_016` | AI Pre-labeling | YOLO 預標注，整合至標注工作台 expander |
+| `module_017` | 統計/分析 | 標注統計分析 |
+| `module_018` | 審查 Gallery | Grid 縮圖 + BBox overlay 快速審查（🐜 影像標註 Tab 3） |
+| `module_021` | 管理中心擴充 | 管理中心附屬功能 |
+| `module_026` | 資料來源 | 統一資料來源入口，整合本地資料夾與外部任務系統（🐜 影像標註 Tab 1） |
+
+#### 廢棄模組（`enabled: false`，程式碼保留但不載入）
+
+| 模組 ID | 名稱 | 廢棄原因 |
+|---------|------|---------|
+| `module_010` [廢棄] | Data Feeder | 整合至 module_026 本地資料夾模式 |
+| `module_019` [廢棄] | Data Downloader | 整合至 module_026 外部任務系統模式 |
+| `module_022` [廢棄] | 標註權限管理 | 移至管理中心（待完整實作） |
+| `module_023` [廢棄] | 標註任務 | 整合至 module_026 外部任務系統模式 |
+| `module_024` [廢棄] | 標注工作台（iWISC 版） | 整合至 module_012 通用版 |
+| `module_025` [廢棄] | 完成報表 | 整合至 module_014 匯出/回傳 |
 
 ---
 
@@ -529,38 +549,99 @@ erDiagram
 
 ## 9. 標注資料流
 
-平台中有兩個使用標注功能的模組，共享相同的 JSON 格式。
+### 9.1 Annotation 領域架構（annotation/ package）
+
+`sidecar/python-engine/annotation/` 是標注資料語意的**唯一擁有者**，GUI 工具、MCP 工具、匯出功能都透過此 package 存取標注資料。
 
 ```mermaid
 flowchart TB
-    subgraph AnnotationFormat["共用標注 JSON 格式"]
-        JSON["_annotations.json\n─────────────────────────\n{\n  image: 'road.png',\n  bboxes: [[x,y,w,h], ...],\n  labels: [0, 1, 2, ...],\n  label_list: ['物件A', '物件B', ...],\n  updated_at: '2026-05-02 10:00:00'\n}"]
+    subgraph AnnotationPackage["annotation/ — 領域服務層"]
+        Services["annotation/services.py\nAnnotationService\n• 資料集 CRUD\n• 標注集管理\n• 匯出/回傳"]
+        Models["annotation/core/models.py\nDatasetManifest / AnnotationSet\nAnnotationItem / ExportRecord"]
+        Storage["annotation/storage/\n• sqlite_store.py（SQLite 實作）\n• ports.py（儲存 ABC 介面）\n• workspace.py（路徑管理）"]
+        Integrations["annotation/integrations/\n• connectors/rest_connector.py\n• contracts.py（ExternalSystemConnector ABC）"]
+        Adapters["annotation/adapters/\n• xanylabeling.py\n• labelme.py\n• coco.py / yolo.py\n（格式轉換器）"]
     end
 
-    subgraph Module006["module_006：動物影像標記（整合標注）"]
-        M006Input["006_input.py\n選擇動物 DB 路徑\n設定篩選條件"]
-
-        M006Process["006_process.py\n查詢 SQLite 影像記錄\n回傳 db_path, image_dir"]
-
-        M006Output["006_output.py\nrender_output(result)\n1. 顯示影像資料表格\n2. 選擇單筆記錄\n3. 顯示影像預覽\n4. 提供分類標記下拉\n5. Submit → 更新 DB"]
+    subgraph CimPlatform["cim_platform/ — 通用外部連接"]
+        Connector["ExternalSystemConnector ABC\n• list_available_tasks()\n• claim_task()\n• fetch_task_data()\n• deliver_result()"]
+        Tenant["SystemTenant\n• tenant_id, system_type\n• connection config"]
     end
 
-    subgraph SharedPath["共用路徑"]
-        ImageFile["原始圖片\n.png / .jpg"]
-        AnnFile["同目錄\n{stem}_annotations.json"]
-        AnnImg["標注結果圖\n{stem}_annotated.png"]
+    subgraph SheetAnnotation["sheets/annotation.yaml — Sheet 驅動"]
+        Tab0["Tab 0: module_026\n📥 資料來源"]
+        Tab1["Tab 1: module_012\n✏️ 標注工作台"]
+        Tab2["Tab 2: module_018\n🖼️ 審查"]
+        Tab3["Tab 3: module_014\n📤 匯出/回傳"]
     end
 
-    M006Input -.->|"使用同格式"| AnnFile
+    subgraph McpLayer["mcp/ — MCP Server 層"]
+        AnnMCP["annotation_mcp/\n31 個 annotation_* 工具"]
+        PlatMCP["platform_mcp/\nplatform_health / list_tools / list_sheets"]
+        GuiMCP["cim_gui_mcp/\n瀏覽器自動化 + sidecar HTTP 呼叫"]
+    end
 
-    AnnFile -.->|"跨模組互通"| AnnotationFormat
+    subgraph ExternalSystems["外部系統"]
+        iWISC["iWISC\n（AOI/MES 任務系統）"]
+        OtherSystems["其他 AOI/MES 系統\n（實作同一 ABC 即可對接）"]
+    end
+
+    Tab0 -->|"DatasetManifest\n寫入 shared.json"| Tab1
+    Tab1 --> Tab2 --> Tab3
+
+    Tab0 --> Services
+    Tab1 --> Services
+    Tab2 --> Services
+    Tab3 --> Services
+
+    Services --> Storage
+    Services --> Adapters
+    Services --> Integrations
+
+    Integrations --> Connector
+    Connector --> iWISC
+    Connector -.->|"同一 ABC 介面"| OtherSystems
+    Connector --> Tenant
+
+    AnnMCP --> Services
 ```
 
-### 標注系統設計決策
+### 9.2 統一 Annotation Sheet 資料流
 
-**為什麼 module_006 不用 bbox 標注而用分類標記？**
+`🐜 影像標註` sheet 採用 4-tab 線性工作流程，tab 之間透過 `shared.json` 傳遞狀態：
 
-`module_006` 的使用案例是**影像分類**（貓/狗/大象），而不是物件偵測。資料已存在 SQLite 資料庫中，只需為每筆記錄打上分類標籤，設計上更符合工作流程。
+```
+shared.json（{CIM_LOG_DIR}/config/）
+  ├─ last_manifest_id    ← module_026 寫入
+  ├─ source_type         ← "local" | "iwsc"
+  ├─ iwsc_tenant_id      ← （iWISC 模式）
+  └─ iwsc_task_id        ← （iWISC 模式）
+```
+
+**資料流向：**
+
+```
+module_026（資料來源）
+  ├─ 本地模式：掃描本地資料夾 → 建立 DatasetManifest → 寫入 shared.json
+  └─ iWISC 模式：認領任務 → 下載 ZIP → 解壓影像 → 儲存 original_annotation_json
+
+module_012（標注工作台）
+  ├─ 讀 shared.json → manifest_id
+  ├─ 開啟 X-AnyLabeling/LabelMe 進行標注
+  └─ 寫入 {image_dir}/{stem}.json（標注 JSON）
+
+module_018（審查 Gallery）
+  ├─ 讀 manifest → 掃描標注 JSON
+  └─ Grid 縮圖 + BBox overlay → 標記需重工項目
+
+module_014（匯出/回傳）
+  ├─ 本地匯出：COCO / YOLO / Pascal VOC / ImageFolder / CSV
+  └─ iWISC 回傳：POST deliver_result → 外部系統
+```
+
+### 9.3 舊格式相容說明
+
+`module_006`（動物影像標記）使用早期的 `{stem}_annotations.json` 格式（分類標籤，非物件偵測），屬於獨立的工具，不屬於 `sheet-annotation` 工作流。新的 annotation 工作流使用 X-AnyLabeling 原生 JSON 格式（同目錄同名 `.json`）。
 
 ---
 
@@ -720,12 +801,27 @@ nativeApp/
 ├── packages/
 │   └── shared-protocol/        # 共用 TypeScript 套件
 │       └── (MessageTypes 等常數)
+├── mcp/
+│   ├── platform_mcp/           # 平台層 MCP server（health/list_tools/list_sheets）
+│   ├── annotation_mcp/         # 標注領域 MCP server（31 個 annotation_* 工具）
+│   └── cim_gui_mcp/            # GUI 瀏覽器自動化 MCP server
+├── external-systems/
+│   └── iwsc/                   # iWISC 外部任務系統（FastAPI 參考實作）
 ├── sidecar/
 │   └── python-engine/          # Python FastAPI 後端
 │       ├── engine.py            # 主程式（FastAPI + 程序管理）
 │       ├── plugin_registry.py   # Plugin 版本管理
 │       ├── plugin_loader.py     # DEV/PROD 模組載入器
 │       ├── auth_provider.py     # 權限檢查（佔位實作）
+│       ├── annotation/          # Annotation 領域服務
+│       │   ├── core/models.py   # DatasetManifest、AnnotationSet 等領域模型
+│       │   ├── services.py      # AnnotationService（業務邏輯）
+│       │   ├── storage/         # SQLite Store + ports ABC
+│       │   ├── integrations/    # ExternalSystemConnector + RestConnector
+│       │   └── adapters/        # 格式轉換（X-AnyLabeling/LabelMe/COCO/YOLO）
+│       ├── cim_platform/        # 通用外部連接介面（ExternalSystemConnector ABC）
+│       ├── sheets/              # Sheet YAML 設定
+│       │   └── annotation.yaml  # 🐜 影像標註 sheet（4 tabs：026→012→018→014）
 │       ├── tools/               # 通用 Runner 腳本
 │       │   ├── cv_framework_runner.py   # 三層架構通用 Runner
 │       │   ├── management_runner.py     # 管理中心 Streamlit
@@ -737,10 +833,15 @@ nativeApp/
 │           │   ├── 001_input.py
 │           │   ├── 001_process.py
 │           │   └── 001_output.py
-│           ├── module_002/ ... module_006/
+│           ├── module_012/      # 標注工作台（🐜 Tab 2）
+│           ├── module_014/      # 匯出/回傳（🐜 Tab 4）
+│           ├── module_016/      # AI Pre-labeling
+│           ├── module_018/      # 審查 Gallery（🐜 Tab 3）
+│           ├── module_026/      # 資料來源（🐜 Tab 1）
 │           └── shared/          # 共用 UI 元件
 ├── docs/
-│   └── ARCHITECTURE.md          # 本文件
+│   ├── ARCHITECTURE.md          # 本文件
+│   └── modules/                 # 各模組詳細文件
 ├── release/                     # 打包輸出目錄
 ├── start-dev.bat                # 開發模式啟動腳本
 ├── start-prod.bat               # 生產模式啟動腳本
@@ -765,27 +866,24 @@ Input → Process → Output 的三層分離，讓 CV 演算法（Process 層）
 
 ---
 
-*文件最後更新：2026-05-02*
+*文件最後更新：2026-05-29*
 *對應代碼庫版本：CIM Hybrid Edge Platform v0.1.0*
 ---
 
-## Annotation Common Component Update (2026-05-16)
+## Annotation Platform 架構重點（2026-05-29 更新）
 
-The annotation integration is designed as a reusable platform component instead
-of a single-purpose X-AnyLabeling bridge.
+Annotation 整合設計為可重用平台元件，而非單一用途的 X-AnyLabeling 橋接。
 
-- Canonical truth: `sidecar/python-engine/annotation/` is the only owner of
-  annotation data semantics. GUI tools, MCP tools, and exports all round-trip
-  through this package.
-- Storage boundary: annotation-core uses artifact storage plus a SQLite-backed
-  store abstraction, so future task modules can reuse the same dataset,
-  annotation set, validation, and review concepts.
-- Adapter boundary: LabelMe, X-AnyLabeling, COCO, and YOLO detection are
-  adapters. They translate to and from canonical annotation-core models instead
-  of defining separate task-specific truth.
-- MCP boundary: `mcp/annotation_mcp/` exposes workflow operations such as
-  dataset creation, ingestion, validation, review, export, runtime detection,
-  and X-AnyLabeling launch.
+### 核心原則
 
-The detailed implementation/progress note lives in
-`docs/ANNOTATION_XANYLABELING.md`.
+- **唯一語意擁有者**：`sidecar/python-engine/annotation/` 是標注資料語意的唯一擁有者。GUI 工具、MCP 工具、匯出功能都透過此 package 存取。
+- **儲存邊界**：annotation-core 使用 SQLite-backed store 抽象，未來的任務模組可以重用相同的 dataset、annotation set、validation、review 概念。
+- **Adapter 邊界**：LabelMe、X-AnyLabeling、COCO、YOLO detection 是 adapter，負責與 canonical annotation-core models 之間的格式轉換。
+- **外部連接邊界**：`cim_platform/` 定義 `ExternalSystemConnector` ABC，任何 AOI/MES 系統（iWISC 或其他）只要實作此 ABC 即可與平台對接。
+- **MCP 邊界**：`mcp/annotation_mcp/` 暴露 31 個 annotation_* 工具，涵蓋資料集建立、匯入、驗證、審查、匯出、runtime 偵測、X-AnyLabeling 啟動等完整工作流程。
+
+### Sheet 驅動機制（2026-05 新增）
+
+Sheet tab 配置由 `sheets/*.yaml` 定義，engine 啟動時自動載入，**不再 hardcode** 於 engine.py。`🐜 影像標註` sheet 的 4-tab 工作流程（026→012→018→014）由 `sheets/annotation.yaml` 完整定義。
+
+詳見 `docs/modules/sheet-annotation_workflow.md`。
