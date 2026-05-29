@@ -8,7 +8,8 @@ a = Analysis(
     datas=[
         ('tools',        'tools'),
         ('scripts',      'scripts'),
-        ('annotation',   'annotation'),
+        ('annotation',   'annotation'),    # back-compat shim (redirects to plugins/labeling/domain)
+        ('plugins',      'plugins'),        # Labeling plugin home (annotation domain lives here)
         ('core',         'core'),
         ('cim_platform', 'cim_platform'),
         ('sheets',       'sheets'),
