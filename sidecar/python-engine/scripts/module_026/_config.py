@@ -1,19 +1,19 @@
 from __future__ import annotations
 
+import importlib.util as _ilu
 import json
-import os
 from pathlib import Path
 
+_HERE = Path(__file__).resolve().parent
+_spec = _ilu.spec_from_file_location("_config_base", _HERE.parent / "shared" / "_config_base.py")
+_base = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_base)
 
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+_PROJECT_ROOT = _base.project_root()
+_CIM_LOG_DIR = _base.log_dir()
+_atomic_write = _base.atomic_write
 
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
-
+_MODULE_ID = "026"
 _DEFAULTS: dict = {
     "last_mode": "local",
     "last_folder_path": "",
@@ -24,43 +24,27 @@ _DEFAULTS: dict = {
 
 
 def _config_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "module_026.json"
+    return _base.config_path(_MODULE_ID)
 
 
 def _shared_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "shared.json"
+    return _base.shared_path()
 
 
 def load_config() -> dict:
-    p = _config_path()
-    if not p.exists():
-        return _DEFAULTS.copy()
-    try:
-        return {**_DEFAULTS, **json.loads(p.read_text(encoding="utf-8"))}
-    except Exception:
-        return _DEFAULTS.copy()
+    return _base.load_config(_MODULE_ID, _DEFAULTS)
 
 
 def save_config(cfg: dict) -> None:
-    p = _config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(p, json.dumps(cfg, ensure_ascii=False, indent=2))
+    _base.save_config(_MODULE_ID, cfg)
 
 
 def get_manifest_db_path() -> Path:
-    db_dir = _CIM_LOG_DIR / "db"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    return db_dir / "manifest.sqlite"
+    return _base.manifest_db_path()
 
 
 def read_shared() -> dict:
-    p = _shared_path()
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return _base.load_shared()
 
 
 def write_shared(updates: dict) -> None:
@@ -76,4 +60,4 @@ def write_shared(updates: dict) -> None:
 
 
 def get_annotation_workspace_path() -> Path:
-    return Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log"))) / "annotation_workspace"
+    return _CIM_LOG_DIR / "annotation_workspace"

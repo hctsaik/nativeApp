@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-import json
-import os
+import importlib.util as _ilu
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_HERE = Path(__file__).resolve().parent
+_spec = _ilu.spec_from_file_location("_config_base", _HERE.parent / "shared" / "_config_base.py")
+_base = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_base)
+
+_MODULE_ID = "008"
+_PROJECT_ROOT = _base.project_root()
 _DEFAULT_CONFIG: dict = {
     "annotation_labels": ["眼睛", "鼻子", "嘴巴"],
 }
 
 
 def _config_path() -> Path:
-    log_dir = Path(os.environ.get("CIM_LOG_DIR", _PROJECT_ROOT / "tmp" / "cim_log"))
-    return log_dir / "config" / "module_008.json"
+    return _base.config_path(_MODULE_ID)
 
 
 def load_config() -> dict:
-    p = _config_path()
-    if p.exists():
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            return {**_DEFAULT_CONFIG, **data}
-        except Exception:
-            pass
-    return dict(_DEFAULT_CONFIG)
+    return _base.load_config(_MODULE_ID, _DEFAULT_CONFIG)
 
 
 def save_config(config: dict) -> None:
-    p = _config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    _base.save_config(_MODULE_ID, config)
 
 
 def get_annotation_labels() -> list[str]:

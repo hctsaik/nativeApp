@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import json
-import os
+import importlib.util as _ilu
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]  # nativeApp
+_HERE = Path(__file__).resolve().parent
+_spec = _ilu.spec_from_file_location("_config_base", _HERE.parent / "shared" / "_config_base.py")
+_base = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_base)
+
+_MODULE_ID = "011"
+_PROJECT_ROOT = _base.project_root()  # nativeApp
 
 _DEFAULTS: dict = {
     "default_export_formats": ["coco_json"],
@@ -17,29 +22,19 @@ _DEFAULTS: dict = {
 
 
 def _config_path() -> Path:
-    log_dir = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
-    return log_dir / "config" / "module_011.json"
+    return _base.config_path(_MODULE_ID)
 
 
 def load_config() -> dict:
     """載入設定，若不存在則回傳預設值。"""
-    path = _config_path()
-    if not path.exists():
-        return _DEFAULTS.copy()
-    try:
-        return {**_DEFAULTS, **json.loads(path.read_text(encoding="utf-8"))}
-    except Exception:
-        return _DEFAULTS.copy()
+    return _base.load_config(_MODULE_ID, _DEFAULTS)
 
 
 def save_config(config: dict) -> None:
     """儲存設定至 JSON 檔。"""
-    path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    _base.save_config(_MODULE_ID, config)
 
 
 def get_manifest_db_path() -> Path:
     """回傳 manifest SQLite 資料庫路徑。"""
-    _CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
-    return _CIM_LOG_DIR / "db" / "manifest.sqlite"
+    return _base.manifest_db_path()
