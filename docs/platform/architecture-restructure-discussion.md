@@ -206,3 +206,26 @@ sidecar/python-engine/
 ✅ **方向性共識達成**（end-state 形狀 + 漸進路線 + 護欄 + ID 凍結 + 依賴方向）。
 後續若要更細，可在各 Phase 開工前再開一輪 agent 針對「該 Phase 的具體 diff 與回滾腳本」做設計。但**重構方向已無歧見**。
 
+---
+
+## 執行記錄（2026-05-30, /goal 實作至 P6）
+
+每個 Phase 獨立 commit、`npm run test:python` 綠燈才進下一步（分支 `feat/platform-restructure`）。
+
+| Phase | 狀態 | 內容 | 驗證 |
+|------|------|------|------|
+| **P0** | ✅ done | docs 去重（platform 為權威，刪 root 重複三檔）、`docs/platform/shared-components.md` 權威索引、`docs/README.md` 文件地圖、CLAUDE.md「共用功能在哪」 | 文件；test:python 534 |
+| **P1** | ✅ done | 刪巢狀空目錄、刪 legacy `scripts/sheets/`、加 2 護欄 test（spec hiddenimports 可載入、spec_from_file_location 目標存在）| 536 passed |
+| **P2** | ✅ done | `scripts/shared/_config_base.py` 共用化，20 份 `_config.py` 委派（保留各自 `_DEFAULTS`/extras）、特性化測試鎖行為 | 556 passed |
+| **P3** | ✅ done | `tests/test_architecture_boundaries.py` 邊界守門（core 不得依賴 plugin）| 558 passed |
+| **P4** | ✅ done | 收斂 `cim_annotation`：`label_ops.py` → `annotation/`，改 module_017 import，補 spec hiddenimport，刪除其餘 | 558 passed |
+| **P5** | ✅ done | 建 `core/`，`cim_platform/{connector,tenant}` → `core/integrations/`，`cim_platform` 保留為相容 shim，8 處內部 import 改 `core.integrations`，spec datas+hiddenimports、`package.json` extraResources filter（補 `core/**/*`）、boundary 納入 core | 558 passed + import 身分一致驗證 |
+| **P6** | 🟡 宣告式家完成；物理搬移 gated | 建 `plugins/labeling/`（`plugin.manifest.yaml` 宣告 domain/modules/sheets/mcp/docs/tests 歸屬 + 對 core 依賴 + 語意名 metadata、`README.md`）；修補 P5 的 `package.json` filter 缺口 | test:python 綠 |
+
+### P6 物理搬移為何 gated（未盲搬）
+P6 的**程式碼實體搬移**（`annotation/`→`plugins/labeling/domain/`、`scripts/module_*`→`plugins/labeling/modules/`、sheets/mcp/tests、改 `engine.py` 掃描根、runner `sys.path`、`engine.spec`、移除 alias）牽動**三個打包白名單**（`engine.spec` datas+hiddenimports、`apps/host-electron/package.json` extraResources filter、PROD DB snapshot）與動態載入/engine 掃描/Streamlit 啟動。這些 runtime 路徑**只有 `/package-build` + Electron+Streamlit+MCP golden-path 跑得出來**——正是 owner 決議 **D4（每步 test+package-build gated、可回滾）** 與共識「物理搬移需 package-build 連過數次 + golden-path MCP」所要求的 gate。在無法跑 GUI 的環境盲搬會造出「dev 綠、打包/runtime 壞」狀態，違反 D4，故**不盲搬**。
+
+已驗證的搬移機制（供執行時用）：`annotation` 為 100% 絕對 import 套件，實測 `annotation/__init__.py` 用 `__path__` 重導到 `plugins/labeling/domain/` 可維持單一模組身分（in-process 驗證通過）；PyInstaller 6.20 在位。`plugin.manifest.yaml` 已是搬移藍圖。
+
+**下一步**：在實際 app 上，按 manifest 逐資產搬移，每搬一項即跑 `npm run test:python`（含護欄 test 偵測 spec/動態載入斷鏈）+ `/package-build` 確認可啟動 + MCP golden-path 截圖，綠燈才搬下一項；全部綠後移除 `cim_platform` shim。
+

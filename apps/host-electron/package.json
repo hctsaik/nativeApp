@@ -75,6 +75,7 @@
           "tools/**/*",
           "scripts/**/*",
           "annotation/**/*",
+          "core/**/*",
           "cim_platform/**/*",
           "sheets/**/*",
           "!tools/sample_csv_tool.py",
