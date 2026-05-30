@@ -334,3 +334,17 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 | 平均 | 74.5 | 79.6 | 84.4 | 87.9 | 82.5 | 86.1 | 89.1 | 85.0* |
 
 \* R12 為查證修正 R11 高估（GUI 缺口如實計入）；GUI rest_mapping 編輯器補上後，情境 2 預估 62→~88，均分可望重回並超越 89。
+
+## Round 13（2026-05-30）— 85.0：GUI rest_mapping 查證閉環，剩前端打磨
+
+平均 **85.0**（持平 R12）。評估官查證 GUI rest_mapping 編輯器**真實且後端閉環**（YAML→sync→register_tenant→build_connector→ConfigurableRestConnector），「公民開發者全程 GUI 接 REST 變體」情境 90 分，CLAUDE.md 所列「register_tenant GUI 表單待補」缺口關閉。明言**無架構級缺口**，剩餘為前端打磨：① 測連線不串 rest_mapping（須手抄 path，情境 1/2）② 無「抓一筆 + 套欄位映射預覽」③ 重複註冊 dedup 鍵。
+
+## Round 13 修復 — 測連線串接 mapping + 欄位映射預覽 + dedup
+
+`_render_external_system_register` 測連線區塊增強：① 新增「帶入已註冊系統」selectbox，一鍵帶入該系統 host + `rest_mapping.list_path` + token env（免手抄）；② 測試成功且回應為 JSON 陣列時，用純函式 `map_list_item` 套該系統映射解析**第一筆任務**並 `st.json` 顯示（公民開發者可確認 ant_id/狀態欄位是否對上）；③ 註冊 dedup 改以 system_name 為唯一鍵（重註冊同名即更新 host，不留殘項）。已 MCP assert_text PASS。`test:python 632 passed`。
+
+| 輪 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 |
+|----|---|---|---|---|----|----|----|----|
+| 平均 | 79.6 | 84.4 | 87.9 | 82.5 | 86.1 | 89.1 | 85.0 | 85.0 |
+
+R12/R13 的 85.0 是 R11 高估修正後的**誠實穩態**；本輪三項前端打磨（測連線串 mapping ≈ +2~3、映射預覽 ≈ +2、dedup ≈ +0.5）預估使下一輪同類情境（1/2/10）回升，均分趨向 ~88–90。距 95 的殘餘為**領域內前端微調 + 邊界 low-code（scaffold process、新協定 factory）+ 領域外三類（不計扣分）**，無架構級缺口。

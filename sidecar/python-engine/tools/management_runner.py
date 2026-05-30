@@ -1089,29 +1089,41 @@ def _render_external_system_register() -> None:
                     _mapping["fields"] = _fields
                 if _mapping:
                     entry["rest_mapping"] = _mapping
-                systems = [s for s in systems
-                           if not (s.get("system_name") == name
-                                   and s.get("server_host_name") == host)]
+                # 以系統名稱為唯一鍵：重註冊同名即更新（含改 host），不留殘項
+                systems = [s for s in systems if s.get("system_name") != name]
                 systems.append(entry)
                 cfg_path.parent.mkdir(parents=True, exist_ok=True)
                 cfg_path.write_text(_yaml.safe_dump({"systems": systems}, allow_unicode=True),
                                     encoding="utf-8")
                 st.success(f"✅ 已新增「{name}」，資料來源頁載入時自動生效。")
 
-    # 一鍵測試連線（補「設定後不確定通不通」的摩擦）— 可帶 path + token、顯示樣本回應
-    st.markdown("**測試連線**")
+    # 一鍵測試連線 + 欄位映射預覽（補「設定後不確定通不通／映射對不對」的摩擦）
+    st.markdown("**測試連線 / 欄位映射預覽**")
+    # 可從已註冊系統一鍵帶入 host + list 端點 + token + mapping（免手抄）
+    _picklabels = ["（手動輸入）"] + [s.get("system_name", "?") for s in systems]
+    _pick = st.selectbox("帶入已註冊系統", _picklabels, key="ext_test_pick")
+    _picked = next((s for s in systems if s.get("system_name") == _pick), None)
+    _pre_host, _pre_path, _pre_tokenenv = "", "/", ""
+    _pick_mapping = None
+    if _picked:
+        _pre_host = _picked.get("server_host_name", "")
+        _pick_mapping = _picked.get("rest_mapping")
+        _pre_path = (_pick_mapping or {}).get("list_path", "/getAntList")
+        _pre_tokenenv = _picked.get("api_token_env", "")
     _tc1, _tc2, _tc3 = st.columns([3, 2, 1])
-    _test_host = _tc1.text_input("host", placeholder="http://localhost:8765",
-                                 key="ext_test_host", label_visibility="collapsed")
-    _test_path = _tc2.text_input("path", value="/", placeholder="/api/tasks",
-                                 key="ext_test_path", label_visibility="collapsed")
+    _test_host = _tc1.text_input("host", value=_pre_host, placeholder="http://localhost:8765",
+                                 key=f"ext_test_host_{_pick}", label_visibility="collapsed")
+    _test_path = _tc2.text_input("path", value=_pre_path, placeholder="/api/tasks",
+                                 key=f"ext_test_path_{_pick}", label_visibility="collapsed")
     _test_tokenenv = _tc1.text_input("token 環境變數（選填，會帶 Authorization: Bearer）",
-                                     placeholder="IWSC_TOKEN", key="ext_test_tokenenv")
+                                     value=_pre_tokenenv, placeholder="IWSC_TOKEN",
+                                     key=f"ext_test_tokenenv_{_pick}")
     if _tc3.button("🔌 測試", key="ext_test_btn", use_container_width=True):
         if not _test_host.strip():
             st.warning("請先填入要測試的 host。")
         else:
             try:
+                import json as _json  # noqa: PLC0415
                 import os as _os  # noqa: PLC0415
                 import urllib.request  # noqa: PLC0415
                 _url = _test_host.strip().rstrip("/") + "/" + _test_path.strip().lstrip("/")
@@ -1121,12 +1133,26 @@ def _render_external_system_register() -> None:
                     _headers["Authorization"] = f"Bearer {_tok}"
                 req = urllib.request.Request(_url, method="GET", headers=_headers)
                 with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    body = resp.read(800).decode("utf-8", "replace")
+                    body = resp.read(4000).decode("utf-8", "replace")
                 _authnote = "（已帶 token）" if _tok else ("（token 環境變數未設定值）"
                                                           if _test_tokenenv.strip() else "")
                 st.success(f"✅ 連線成功 HTTP {resp.status} {_authnote} — {_url}")
+                # 欄位映射預覽：若回應為 JSON 陣列，套用此系統的 rest_mapping 解析第一筆
+                try:
+                    _data = _json.loads(body)
+                    if isinstance(_data, list) and _data and isinstance(_data[0], dict):
+                        from plugins.labeling.domain.integrations.connectors.configurable_rest_connector import (  # noqa: PLC0415,E501
+                            map_list_item, resolve_paths)
+                        _fields = resolve_paths(_pick_mapping)["fields"]
+                        _t = map_list_item(_data[0], _fields)
+                        st.caption("依欄位映射解析的第一筆任務（確認 ant_id/狀態是否對上）：")
+                        st.json({"ant_id": _t.ant_id, "ant_active": _t.ant_active,
+                                 "ant_period": _t.ant_period, "external_context": _t.external_context})
+                except Exception:  # noqa: BLE001
+                    pass
                 if body.strip():
-                    st.code(body + ("…" if len(body) >= 800 else ""), language="json")
+                    with st.expander("原始回應（前 800 字）", expanded=False):
+                        st.code(body[:800] + ("…" if len(body) >= 800 else ""), language="json")
             except Exception as exc:  # noqa: BLE001
                 st.error(f"❌ 連不上：{exc}。請確認 server 已啟動、host/path 正確、token 有效。")
 
