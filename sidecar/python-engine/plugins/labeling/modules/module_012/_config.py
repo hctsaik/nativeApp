@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import importlib.util as _ilu
 import json
-import os
 from pathlib import Path
 
+# Delegate shared boilerplate (project root / log dir / atomic write / config /
+# shared / manifest helpers) to the single source of truth, like every other
+# module's _config.py. Module-012-specific helpers (classifications, classes.txt,
+# enhanced dir, xany work dir) stay here. Paths are byte-for-byte identical
+# because _base.log_dir() resolves to the same CIM_LOG_DIR.
+_HERE = Path(__file__).resolve().parent
+_spec = _ilu.spec_from_file_location("_config_base", _HERE.parents[3] / "scripts" / "shared" / "_config_base.py")
+_base = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_base)
 
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+_PROJECT_ROOT = _base.project_root()         # nativeApp
+_CIM_LOG_DIR = _base.log_dir()
+_atomic_write = _base.atomic_write
+_manifest_key = _base.manifest_key
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[6]  # nativeApp
-_CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
+_MODULE_ID = "012"
 
 _DEFAULTS: dict = {
     "annotation_tool": "x-anylabeling",
@@ -24,48 +32,31 @@ _DEFAULTS: dict = {
 
 
 def _config_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "module_012.json"
+    return _base.config_path(_MODULE_ID)
 
 
 def _shared_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "shared.json"
+    return _base.shared_path()
 
 
 def load_config() -> dict:
-    path = _config_path()
-    if not path.exists():
-        return _DEFAULTS.copy()
-    try:
-        return {**_DEFAULTS, **json.loads(path.read_text(encoding="utf-8"))}
-    except Exception:
-        return _DEFAULTS.copy()
+    return _base.load_config(_MODULE_ID, _DEFAULTS)
 
 
 def save_config(config: dict) -> None:
-    path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(path, json.dumps(config, ensure_ascii=False, indent=2))
+    _base.save_config(_MODULE_ID, config)
 
 
 def get_shared_manifest_id() -> str:
     """回傳 Data Feeder 最後建立的 manifest_id（從 shared.json 讀取）。"""
-    p = _shared_path()
-    if not p.exists():
-        return ""
-    try:
-        return json.loads(p.read_text(encoding="utf-8")).get("last_manifest_id", "")
-    except Exception:
-        return ""
+    return _base.shared_manifest_id()
 
 
 def get_manifest_db_path() -> Path:
-    db_dir = _CIM_LOG_DIR / "db"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    return db_dir / "manifest.sqlite"
+    return _base.manifest_db_path()
 
 
-def _manifest_key(manifest_id: str) -> str:
-    return manifest_id[:12] or "default"
+# ── module-012-specific helpers ───────────────────────────────────────────────
 
 
 def get_classification_path(manifest_id: str) -> Path:
