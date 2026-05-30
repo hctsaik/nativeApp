@@ -70,7 +70,7 @@ start-dev.bat
 | `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
 | `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
-| iWISC 任務列表空白 | 外部 iWISC server 未啟動，或尚未註冊 Tenant（外部系統連線）| 啟動 iwsc-sample-server（port 8765）；註冊 Tenant 目前透過 `AnnotationService.register_tenant` 或 annotation MCP `register_tenant`（**管理中心 GUI 表單為待補功能**，見 `docs/platform/nocode-lowcode-evaluation.md` 缺口 #3）|
+| iWISC 任務列表空白 | 外部 iWISC server 未啟動，或尚未註冊外部系統連線 | 啟動 iwsc-sample-server（port 8765）；**註冊外部系統有 no-code GUI 表單**：管理中心 Tools → External（`management_runner._render_external_system_register`，寫入 `config/external_systems.yaml`，token 走環境變數）；亦可用 `AnnotationService.register_tenant` / annotation MCP `register_tenant`。非-REST 協定用 `python tools/scaffold.py connector <name>` 產 connector 骨架（放 `core/integrations/connectors/`，啟動時 `core.integrations.registry.autodiscover()` 自動註冊）|
 
 ## 架構地雷（容易踩的坑）
 

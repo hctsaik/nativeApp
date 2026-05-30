@@ -1,11 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os as _os
+from pathlib import Path as _Path
+
 from PyInstaller.utils.hooks import collect_submodules
 
-# Auto-collect every submodule of the platform core and the Labeling plugin
-# domain, so newly-added submodules never silently fall out of the bundle
-# ("dev-green / package-dead"). The explicit list below is kept as a safety net.
-_auto_hidden = collect_submodules('core') + collect_submodules('plugins.labeling.domain')
+# Auto-collect every submodule of the platform core AND every plugin's domain,
+# so a newly-added plugin (or new submodules in an existing one) never silently
+# falls out of the bundle ("dev-green / package-dead"). Previously only the
+# Labeling plugin was collected, which broke the "add a plugin without touching
+# core/packaging" promise (R1 gap). The explicit list below is a safety net.
+_auto_hidden = collect_submodules('core')
+try:
+    _spec_dir = _Path(SPECPATH)  # injected by PyInstaller in spec files
+except NameError:  # pragma: no cover - defensive
+    _spec_dir = _Path(_os.getcwd())
+for _pdir in sorted((_spec_dir / 'plugins').glob('*')):
+    if (_pdir / 'domain' / '__init__.py').exists():
+        _auto_hidden += collect_submodules(f'plugins.{_pdir.name}.domain')
 
 
 a = Analysis(

@@ -29,6 +29,22 @@ def module_yaml_paths() -> list[Path]:
     return out
 
 
+def iter_module_folders(scripts_dir: Path | None = None) -> list[Path]:
+    """Every `module_*` folder across all roots (scripts/ + plugins/*/modules/).
+
+    `scripts_dir` is overridable so callers that inject a custom scripts root
+    (e.g. tests, the management registry) still get dual-root scanning relative
+    to *that* root's sibling `plugins/` dir.
+    """
+    base = scripts_dir or SCRIPTS_DIR
+    roots = [base] + sorted((base.parent / "plugins").glob("*/modules"))
+    out: list[Path] = []
+    for root in roots:
+        if root.is_dir():
+            out += sorted(root.glob("module_*"))
+    return out
+
+
 def find_module_folder(plugin_id: str) -> Path:
     """Public dual-root folder resolver (scripts/ + plugins/*/modules/)."""
     return _find_folder(plugin_id, SCRIPTS_DIR)

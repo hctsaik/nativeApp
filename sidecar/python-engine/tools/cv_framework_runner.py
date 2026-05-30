@@ -159,6 +159,56 @@ def run_input() -> None:
             selected_name = st.selectbox("選擇模組", list(modules.keys()))
         module_id = modules[selected_name]
     content_json = _get_content_json(module_id) if not PluginLoader.is_dev_mode() else None
+    meta = _load_plugin_meta(module_id)
+
+    # No-code external-GUI tool: a module may declare an `external_gui:` block
+    # (launch a desktop program like the Label tool launches X-AnyLabeling) and
+    # ship NO input/process code — the framework renders a launch button and
+    # handles env sanitization / WDAC workaround / single-instance for it.
+    ext_gui = meta.get("external_gui")
+    if ext_gui is not None:
+        from core.external_gui import render_launcher  # noqa: PLC0415
+        st.subheader(selected_name)
+        # Launching the external program IS execution — enforce RBAC here too,
+        # exactly like the ▶ 執行 path below (otherwise this no-code branch would
+        # bypass permissions).
+        if not _auth.check_permission(module_id, "execute"):
+            st.error("您沒有執行此工具的權限。")
+            return
+        form_schema = meta.get("form")
+        params: dict = {}
+        if form_schema:
+            from core.forms import render as _render_form  # noqa: PLC0415
+            params = _render_form(form_schema, st)
+
+        # When the external program closes, recover its output files and persist
+        # a result so the Output page auto-reloads — the full Label-tool loop
+        # (launch → work → close → recover), no process code required.
+        def _on_result(items: list) -> None:
+            # `items` are already parsed when external_gui.collect.parse is set
+            # (json→dict, csv→list[dict], lines→list[str]); otherwise file paths.
+            # Keep structure intact (don't stringify) but ensure JSON-serializable.
+            try:
+                json.dumps(items)
+                collected = items
+            except (TypeError, ValueError):
+                collected = [str(it) for it in items]
+            payload = {
+                "mode": "ready",
+                "collected_count": len(items),
+                "collected_files": collected,
+                "__module_id__": module_id,
+                "__module_name__": selected_name,
+            }
+            try:
+                RESULT_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                _post_message("EXECUTE_COMPLETE", {"success": True})
+            except Exception:  # noqa: BLE001 - background thread, never crash app
+                pass
+
+        render_launcher(ext_gui, params, st, key=module_id, on_result=_on_result)
+        return
+
     process_mod = load_layer(module_id, "process", content_json)
 
     # No-code input: a module may ship no *_input.py and instead declare its
@@ -167,7 +217,7 @@ def run_input() -> None:
         input_mod = load_layer(module_id, "input", content_json)
         params = input_mod.render_input()
     except (FileNotFoundError, KeyError):
-        schema = _load_form_schema(module_id)
+        schema = meta.get("form")
         if schema is None:
             raise
         from core.forms import render as _render_form  # noqa: PLC0415

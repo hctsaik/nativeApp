@@ -417,11 +417,12 @@ class ManagementUseCases:
 
     def _next_module_id(self) -> str:
         used: set[int] = set()
-        for folder in self._scripts_dir.glob("module_[0-9][0-9][0-9]"):
-            try:
+        # Scan scripts/ AND plugins/*/modules/ so a freshly allocated id never
+        # collides with a plugin-located module (e.g. Labeling's module_006+).
+        from plugin_loader import iter_module_folders  # noqa: PLC0415
+        for folder in iter_module_folders(self._scripts_dir):
+            if re.match(r"^module_[0-9]{3}$", folder.name):
                 used.add(int(folder.name.removeprefix("module_")))
-            except ValueError:
-                pass
         for row in self._store.list_tool_readiness_records():
             tool_id = row.get("tool_id", "")
             if re.match(r"^module_[0-9]{3}$", tool_id):

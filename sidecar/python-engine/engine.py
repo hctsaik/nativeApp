@@ -119,6 +119,10 @@ class ToolAdapter(ABC):
     def get_tool(self, tool_id: str) -> ToolDefinition:
         raise NotImplementedError
 
+    def rescan(self) -> dict:
+        """Re-scan plugin/sheet YAML into the catalog (hot-reload). Default no-op."""
+        return {"added": [], "total": len(self.list_tools())}
+
 
 class MockToolAdapter(ToolAdapter):
     def __init__(self) -> None:
@@ -321,24 +325,29 @@ class SQLiteToolAdapter(ToolAdapter):
             )
             self._reconcile_sheets_from_yaml(connection)
 
-    def _reconcile_sheets_from_yaml(self, connection) -> None:
+    def _reconcile_sheets_from_yaml(self, connection) -> list[dict]:
         """Read sheets/*.yaml and reconcile sheet rows + tabs for each definition.
 
         Adding a new workflow sheet no longer requires touching engine.py —
         just drop a YAML file in sidecar/python-engine/sheets/.
+
+        Returns a list of {sheet_id, missing} for sheets whose tabs couldn't be
+        wired because a referenced module isn't registered — surfaced to the
+        portal so the author sees *why* their sheet didn't fully appear.
         """
+        missing_report: list[dict] = []
         try:
             import yaml
         except ImportError:
             logging.warning("PyYAML not available; skipping sheet YAML reconciliation")
-            return
+            return missing_report
 
         # Scan both the platform sheets/ dir and each plugin's sheets/ dir
         # (e.g. plugins/labeling/sheets/). Adding a sheet = drop a YAML in either.
         yaml_paths = sorted((ROOT_DIR / "sheets").glob("*.yaml"))
         yaml_paths += sorted((ROOT_DIR / "plugins").glob("*/sheets/*.yaml"))
         if not yaml_paths:
-            return
+            return missing_report
 
         for yaml_path in yaml_paths:
             try:
@@ -358,7 +367,27 @@ class SQLiteToolAdapter(ToolAdapter):
             if not desired_tabs:
                 continue
 
-            # Skip if any required module is missing from the DB
+            name         = data.get("name", sheet_id)
+            description  = data.get("description", "")
+            enabled_dev  = 1 if data.get("enabled_dev", True)  else 0
+            enabled_prod = 1 if data.get("enabled_prod", False) else 0
+
+            # Auto-register the sheet as a launchable tool (tool_id = sheet-<id>),
+            # so an engineer who authors a new sheet YAML sees it appear WITHOUT
+            # editing engine.py's seed block. Idempotent (INSERT OR IGNORE).
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO tools (
+                    tool_id, name, script_relative_path, version,
+                    source_commit, author, enabled
+                ) VALUES (?, ?, 'sheet_runner.py', '1.0.0', 'sheet.yaml', 'system', 1)
+                """,
+                (f"sheet-{sheet_id}", name),
+            )
+
+            # Skip tab wiring if any required module is missing from the DB.
+            # Record WHY in the log so the author isn't left guessing why their
+            # sheet didn't appear (R1 gap: silent skip).
             plugin_ids = [mid for _, mid, _ in desired_tabs]
             placeholders = ",".join("?" for _ in plugin_ids)
             existing = {
@@ -368,7 +397,14 @@ class SQLiteToolAdapter(ToolAdapter):
                     plugin_ids,
                 )
             }
-            if any(mid not in existing for mid in plugin_ids):
+            missing = [mid for mid in plugin_ids if mid not in existing]
+            if missing:
+                logging.warning(
+                    "Sheet '%s' tabs not wired: module(s) %s not registered "
+                    "(add their plugin.yaml or check the id).",
+                    sheet_id, ", ".join(missing),
+                )
+                missing_report.append({"sheet_id": sheet_id, "missing": missing})
                 continue
 
             current = [
@@ -381,11 +417,6 @@ class SQLiteToolAdapter(ToolAdapter):
             ]
             if current == desired_tabs:
                 continue
-
-            name         = data.get("name", sheet_id)
-            description  = data.get("description", "")
-            enabled_dev  = 1 if data.get("enabled_dev", True)  else 0
-            enabled_prod = 1 if data.get("enabled_prod", False) else 0
 
             connection.execute(
                 """
@@ -403,6 +434,7 @@ class SQLiteToolAdapter(ToolAdapter):
                 " VALUES (?, ?, ?, ?)",
                 [(sheet_id, order, mid, label) for order, mid, label in desired_tabs],
             )
+        return missing_report
 
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
@@ -471,6 +503,23 @@ class SQLiteToolAdapter(ToolAdapter):
                 (name, script, version, enabled, vendor, domain, deprecated_at, slug, tool_id),
             )
 
+    def rescan(self) -> dict:
+        """Re-scan plugin.yaml + sheet YAML into the DB without restarting.
+
+        Powers DEV hot-reload: an engineer drops/edits a plugin.yaml or sheet
+        YAML and hits reload instead of restarting the whole Electron app. Both
+        scans are idempotent (INSERT OR IGNORE + UPDATE), so this is safe to call
+        repeatedly. Returns the tool_ids newly added since the previous state."""
+        with self._connect() as connection:
+            before = {row["tool_id"] for row in connection.execute("SELECT tool_id FROM tools")}
+            self._scan_and_register_plugins(connection)
+            missing_report = self._reconcile_sheets_from_yaml(connection) or []
+            after = {row["tool_id"] for row in connection.execute("SELECT tool_id FROM tools")}
+        added = sorted(after - before)
+        missing_modules = sorted({m for r in missing_report for m in r["missing"]})
+        return {"added": added, "total": len(after),
+                "missing_sheets": missing_report, "missing_modules": missing_modules}
+
     def list_tools(self) -> list[ToolDefinition]:
         rows = self._store.list_enabled_tool_definition_rows()
         return [self._row_to_tool(row) for row in rows]
@@ -526,6 +575,9 @@ class ToolRegistry:
             )
             for tool in self._adapter.list_tools()
         ]
+
+    def rescan(self) -> dict:
+        return self._adapter.rescan()
 
     def get(self, tool_id: str) -> ToolDefinition:
         return self._adapter.get_tool(tool_id)
@@ -1385,9 +1437,40 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="CIM Python Sidecar", version="0.1.0")
 
+    # Auto-register any scaffolded non-REST connectors (core/integrations/connectors/*.py
+    # exposing register()), so `scaffold connector` → drop file → restart/reload works
+    # with no call-site edits. Best-effort: a broken connector never blocks startup.
+    try:
+        from core.integrations.registry import autodiscover  # noqa: PLC0415
+        _registered = autodiscover()
+        if _registered:
+            logging.info("Auto-registered connectors: %s", ", ".join(_registered))
+    except Exception as _exc:  # noqa: BLE001
+        logging.warning("connector autodiscover skipped: %s", _exc)
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/whoami")
+    def whoami() -> dict:
+        """Current RBAC role (so the portal can show it and prove RBAC is live)."""
+        from auth_provider import AuthProvider, VALID_ROLES  # noqa: PLC0415
+        return {"role": AuthProvider(db_path).get_current_role(), "roles": list(VALID_ROLES)}
+
+    @app.post("/set-role")
+    def set_role(body: dict = Body(...)) -> dict:
+        """DEV role switch: write the identity file so an admin can see RBAC take
+        effect (operators/viewers lose tools / execute). In PROD identity comes
+        from CIM_IDENTITY_FILE (SSO/IdP), so this is disabled there."""
+        if os.environ.get("CIM_DEV_MODE", "1") != "1":
+            raise HTTPException(status_code=403, detail="role switch disabled in PROD (use SSO/IdP)")
+        from auth_provider import set_identity  # noqa: PLC0415
+        try:
+            set_identity(str(body.get("role", "")))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"status": "ok", "role": str(body.get("role")).strip().lower()}
 
     @app.get("/version")
     def version() -> dict:
@@ -1405,6 +1488,25 @@ def create_app(
     @app.get("/diagnostics")
     def diagnostics() -> dict:
         return manager.diagnostics()
+
+    @app.post("/reload")
+    def reload_catalog() -> dict:
+        """Hot-reload: re-scan plugin.yaml + sheet YAML into the catalog AND
+        re-run connector autodiscover, without restarting the app. An engineer
+        who just scaffolded/edited a tool (or dropped a connector) calls this (or
+        the portal's reload button) and the new/changed item appears."""
+        try:
+            result = registry.rescan()
+            # Symmetry with module/sheet hot-reload: a freshly scaffolded
+            # connector (core/integrations/connectors/*.py) becomes usable too.
+            try:
+                from core.integrations.registry import autodiscover  # noqa: PLC0415
+                result["connectors"] = autodiscover()
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("reload connector autodiscover skipped: %s", exc)
+            return {"status": "ok", **result}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/tools", response_model=list[ToolInfo])
     def tools() -> list[ToolInfo]:

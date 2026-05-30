@@ -36,22 +36,32 @@ def _get_xany_exe() -> str:
 
 
 def _xany_env(exe: str) -> dict[str, str]:
-    env = os.environ.copy()
-    env.pop("PYTHONPATH", None)
-    env.pop("PYTHONHOME", None)
-    env["PYTHONNOUSERSITE"] = "1"
-    if exe != "xanylabeling":
-        env["PATH"] = str(Path(exe).resolve().parent) + os.pathsep + env.get("PATH", "")
-    return env
+    # Delegates to the reusable launcher (core.external_gui); falls back to the
+    # original inline logic if core isn't importable in this runtime.
+    try:
+        from core.external_gui import plan_env  # noqa: PLC0415
+        return plan_env(exe, clean_python_env=True, prepend_exe_dir=True)
+    except Exception:
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        env.pop("PYTHONHOME", None)
+        env["PYTHONNOUSERSITE"] = "1"
+        if exe != "xanylabeling":
+            env["PATH"] = str(Path(exe).resolve().parent) + os.pathsep + env.get("PATH", "")
+        return env
 
 
 def _xany_command_prefix(exe: str) -> list[str]:
-    exe_path = Path(exe)
-    if exe_path.name.lower().startswith("xanylabeling"):
-        python = exe_path.parent / "python.exe"
-        if python.exists():
-            return [str(python), "-m", "anylabeling.app"]
-    return [exe]
+    try:
+        from core.external_gui import command_prefix  # noqa: PLC0415
+        return command_prefix(exe, python_module="anylabeling.app")
+    except Exception:
+        exe_path = Path(exe)
+        if exe_path.name.lower().startswith("xanylabeling"):
+            python = exe_path.parent / "python.exe"
+            if python.exists():
+                return [str(python), "-m", "anylabeling.app"]
+        return [exe]
 
 
 def _worker_script() -> Path:
@@ -321,16 +331,24 @@ _monitor_threads: dict[int, threading.Thread] = {}
 
 def start_pid_monitor(db_path: Path, session_id: int, xany_pid: int, on_close_callback) -> None:
     """
-    Start a background thread that polls psutil every 2s.
-    When xany_pid dies, calls on_close_callback(session_id).
+    Start a background thread that polls until xany_pid dies, then calls
+    on_close_callback(session_id). Dogfoods the reusable core.external_gui
+    watcher (single implementation); falls back to inline polling if core
+    isn't importable in this runtime.
     """
-    def _monitor():
-        while True:
-            time.sleep(2)
-            if not psutil.pid_exists(xany_pid):
-                on_close_callback(session_id)
-                break
+    try:
+        from core.external_gui import watch_pid  # noqa: PLC0415
+        t = watch_pid(xany_pid, lambda _pid: on_close_callback(session_id))
+        _monitor_threads[session_id] = t
+        return
+    except Exception:
+        def _monitor():
+            while True:
+                time.sleep(2)
+                if not psutil.pid_exists(xany_pid):
+                    on_close_callback(session_id)
+                    break
 
-    t = threading.Thread(target=_monitor, daemon=True, name=f"xany-monitor-{session_id}")
-    t.start()
-    _monitor_threads[session_id] = t
+        t = threading.Thread(target=_monitor, daemon=True, name=f"xany-monitor-{session_id}")
+        t.start()
+        _monitor_threads[session_id] = t

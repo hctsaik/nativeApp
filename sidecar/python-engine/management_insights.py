@@ -306,20 +306,27 @@ def module_preflight(scripts_dir: Path, plugin_id: str) -> ModulePreflight:
     }
     # No-code layers: a module may declare its input fields in plugin.yaml `form:`
     # (no *_input.py) and/or its output blocks in `output:` (no *_output.py).
-    declarative_input = declarative_output = False
+    declarative_input = declarative_output = external_gui = False
     if files["plugin.yaml"].exists():
         try:
             import yaml  # noqa: PLC0415
             _meta = yaml.safe_load(files["plugin.yaml"].read_text(encoding="utf-8")) or {}
             declarative_input = bool(_meta.get("form"))
             declarative_output = bool(_meta.get("output"))
+            external_gui = bool(_meta.get("external_gui"))
         except Exception:
             pass
-    required = {"plugin.yaml", "process"}
-    if not declarative_input:
-        required.add("input")
-    if not declarative_output:
-        required.add("output")
+    # An external-GUI launcher tool (the Label-tool pattern) ships no
+    # input/process/output code — the framework renders a launch button from the
+    # `external_gui:` block — so only plugin.yaml is required.
+    if external_gui:
+        required = {"plugin.yaml"}
+    else:
+        required = {"plugin.yaml", "process"}
+        if not declarative_input:
+            required.add("input")
+        if not declarative_output:
+            required.add("output")
     checks = {name: path.exists() for name, path in files.items()}
     issues = [f"Missing {name} file." for name, path in files.items()
               if name in required and not path.exists()]

@@ -27,6 +27,7 @@ from typing import Any
 SUPPORTED_TYPES = {
     "text", "textarea", "number", "integer",
     "select", "multiselect", "checkbox", "slider", "file",
+    "date", "time",
 }
 
 
@@ -127,6 +128,16 @@ def widget_call(field: dict) -> tuple[str, dict]:
         if field.get("accept"):
             kw["type"] = field["accept"]
         return "file_uploader", kw
+    if t == "date":
+        kw = {**common}
+        if field.get("default") is not None:
+            kw["value"] = field["default"]
+        return "date_input", kw
+    if t == "time":
+        kw = {**common}
+        if field.get("default") is not None:
+            kw["value"] = field["default"]
+        return "time_input", kw
     raise FormSchemaError(f"無法對應 widget：type={t}")  # pragma: no cover
 
 
@@ -137,6 +148,10 @@ def coerce(field: dict, value: Any) -> Any:
             return int(value)
         except (TypeError, ValueError):
             return value
+    # date/time widgets return datetime.date/time → ISO strings so the value is
+    # JSON-serializable and predictable for execute_logic / output.
+    if field["type"] in ("date", "time") and value is not None and hasattr(value, "isoformat"):
+        return value.isoformat()
     return value
 
 

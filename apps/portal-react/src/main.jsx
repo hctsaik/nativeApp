@@ -196,7 +196,7 @@ function injectStreamlitErrorTranslator(iframeEl) {
 // Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用
 const PORTAL_VISIBLE_CATEGORIES = ["sheet", "management"];
 
-function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode }) {
+function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, onReload, reloading, role, roles, onSetRole }) {
   const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
 
   return (
@@ -206,6 +206,20 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
         <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
           {devMode ? "DEV" : "PROD"}
         </span>
+        {role && (
+          devMode && onSetRole ? (
+            <select
+              className="role-select"
+              value={role}
+              onChange={(e) => onSetRole(e.target.value)}
+              title="切換目前角色（DEV）：可即時看到 RBAC 對工具可見性/執行權限的效果"
+            >
+              {(roles ?? [role]).map(r => <option key={r} value={r}>角色：{r}</option>)}
+            </select>
+          ) : (
+            <span className="mode-badge" title="目前 RBAC 角色">角色：{role}</span>
+          )
+        )}
         <div className="toolbar-title">
           <p>{status}</p>
         </div>
@@ -233,6 +247,16 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
             })()}
           </select>
         </div>
+        {devMode && onReload && (
+          <button
+            onClick={onReload}
+            disabled={sidecarDown || reloading}
+            title="重新掃描 plugin.yaml / sheet YAML（免重啟整個 app）；若有工具執行中會一併重啟以套用改動"
+          >
+            <RefreshCw size={17} className={reloading ? "spin" : undefined} />
+            重新載入工具
+          </button>
+        )}
         {activeTool ? (
           <button onClick={onStop} className="btn-danger">
             <Square size={17} />
@@ -491,6 +515,9 @@ function App() {
   const [status, setStatus] = useState("Ready");
   const [sidecarDown, setSidecarDown] = useState(false);
   const [sidecarRestarting, setSidecarRestarting] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [role, setRole] = useState("admin");
+  const [roles, setRoles] = useState(["admin", "operator", "viewer"]);
   const [toolError, setToolError] = useState(null);
   const [runtimeStatus, setRuntimeStatus] = useState(null);
   const [previewModal, setPreviewModal] = useState(null); // { url, toolName }
@@ -510,6 +537,15 @@ function App() {
   const selectedToolIdRef = useRef("");
   useEffect(() => { selectedToolIdRef.current = selectedToolId; }, [selectedToolId]);
 
+
+  // Fetch the current RBAC role once the sidecar URL is known (proves RBAC live).
+  useEffect(() => {
+    if (!config?.sidecarControlUrl) return;
+    fetch(`${config.sidecarControlUrl}/whoami`)
+      .then(r => r.json())
+      .then(d => { if (d?.role) setRole(d.role); if (Array.isArray(d?.roles)) setRoles(d.roles); })
+      .catch(() => {});
+  }, [config?.sidecarControlUrl]);
 
   useEffect(() => {
     nativeApi.getAppConfig().then(setConfig).catch((err) => {
@@ -804,20 +840,21 @@ function App() {
     }
   }
 
-  async function handleStart() {
-    const tool = tools.find((t) => t.tool_id === selectedToolId);
-    cimLog("info", `startTool: ${selectedToolId}`);
-    setStatus(`Starting ${tool?.name ?? selectedToolId}…`);
+  async function handleStart(toolIdArg) {
+    const startId = (typeof toolIdArg === "string" && toolIdArg) ? toolIdArg : selectedToolId;
+    const tool = tools.find((t) => t.tool_id === startId);
+    cimLog("info", `startTool: ${startId}`);
+    setStatus(`Starting ${tool?.name ?? startId}…`);
     setIsStarting(true);
     try {
-      const res = await nativeApi.startTool(selectedToolId);
+      const res = await nativeApi.startTool(startId);
       cimLog("info", `startTool response: category=${res.category} sheet_tabs=${res.sheet_tabs?.length ?? 0}`);
       setInputUrl(res.input_url ?? res.url ?? "");
       setOutputBaseUrl(res.output_url ?? "");
       setOutputNonce(0);
       setActiveTool({
-        tool_id: selectedToolId,
-        name: tool?.name ?? selectedToolId,
+        tool_id: startId,
+        name: tool?.name ?? startId,
         category: res.category ?? tool?.category,
         pid: res.pid,
         ready: res.ready,
@@ -829,7 +866,7 @@ function App() {
       setActiveTab("input");
       setDisplayImageUrl(null);
       setToolError(null);
-      setStatus(res.ready ? `${tool?.name ?? selectedToolId} ready` : `${tool?.name ?? selectedToolId} running`);
+      setStatus(res.ready ? `${tool?.name ?? startId} ready` : `${tool?.name ?? startId} running`);
       nativeApi.getRuntimeStatus?.().then(setRuntimeStatus).catch(() => {});
 
       if (res.sheet_tabs?.length > 0) {
@@ -867,6 +904,65 @@ function App() {
       setSidecarRestarting(false);
       setStatus(`Engine restart failed: ${err.message}`);
     }
+  }
+
+  async function handleReload() {
+    // DEV hot-reload: re-scan plugin.yaml / sheet YAML into the catalog, then
+    // refresh the tool list — no full app restart. Pairs with engine POST /reload.
+    if (!config?.sidecarControlUrl) {
+      setStatus("無法熱載：缺 sidecar 控制位址");
+      return;
+    }
+    setReloading(true);
+    setStatus("重新載入工具中…");
+    try {
+      const res = await fetch(`${config.sidecarControlUrl}/reload`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      const items = await nativeApi.listTools().catch(() => []);
+      if (items.length) {
+        setTools(items);
+        if (!items.find(t => t.tool_id === selectedToolId)) {
+          const first = items.find(t => t.category === "sheet") ?? items[0];
+          if (first?.tool_id) setSelectedToolId(first.tool_id);
+        }
+      }
+      const added = (data.added ?? []).length;
+      const missing = data.missing_modules ?? [];
+      // If a tool is currently running, restart it so code/YAML changes take
+      // effect in the live subprocess (catalog reload alone keeps the old code).
+      const activeId = activeTool?.tool_id;
+      if (activeId && (!items.length || items.find(t => t.tool_id === activeId))) {
+        try {
+          await nativeApi.stopTool();
+          await handleStart(activeId);
+        } catch (e) { cimLog("warn", `reload restart active tool failed: ${e.message}`); }
+      }
+      let msg = added ? `已載入 ${added} 個新工具` : "工具已是最新";
+      if (missing.length) msg += `；有 sheet 缺模組：${missing.join(", ")}`;
+      setStatus(msg);
+      cimLog("info", `reload: added=${JSON.stringify(data.added ?? [])} missing=${JSON.stringify(missing)} total=${data.total ?? "?"}`);
+    } catch (err) {
+      cimLog("error", `reload failed: ${err.message}`);
+      setStatus(`熱載失敗：${err.message}`);
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  async function handleSetRole(r) {
+    // DEV role switch so an admin can see RBAC take effect (operator/viewer see
+    // fewer tools / cannot execute). PROD identity comes from SSO/IdP.
+    if (!config?.sidecarControlUrl || r === role) return;
+    try {
+      await fetch(`${config.sidecarControlUrl}/set-role`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: r }),
+      });
+      setRole(r);
+      const items = await nativeApi.listTools().catch(() => []);
+      if (items.length) setTools(items);
+      setStatus(`角色已切換為 ${r}`);
+    } catch (e) { cimLog("error", `set-role failed: ${e.message}`); }
   }
 
   async function handleStop() {
@@ -914,9 +1010,14 @@ function App() {
         activeTool={activeTool}
         onStart={handleStart}
         onStop={handleStop}
+        onReload={handleReload}
+        reloading={reloading}
         status={status}
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
+        role={role}
+        roles={roles}
+        onSetRole={handleSetRole}
       />
       <div className="workspace-body">
         {activeTool?.category === "external" ? (
