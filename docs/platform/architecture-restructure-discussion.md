@@ -232,9 +232,20 @@ sidecar/python-engine/
 ### 結論：annotation/scripts 實體搬移的正確作法（未做，較大工程）
 `__path__` shim 此路不通。要 bundle-safe 地把 Labeling 程式實體放到 `plugins/labeling/`，唯一正解是 **把 import 名稱全面改寫**（`annotation` → `plugins.labeling.domain`，121 處 + scripts/module_* + mcp + tests + `engine.spec` hiddenimports + `package.json` filter），讓 PyInstaller 看到正規 package。這是較大的機械式重構，且 `scripts/module_*` 還有 **`scripts/shared` 跨 labeling/非-labeling(module_021) 共用** 的結構難點（模組以 `spec_from_file_location` 相對載入 shared，正是為 PROD/bundle 而用，不能盲改成正規 import）。此工程建議獨立進行、每步 `npm run test:python` + 護欄 test + **`pyinstaller` build 驗證** + GUI golden-path。
 
+### P6c annotation 領域實體搬移（import-rename 路線）→ pyinstaller gate 通過 ✅
+依否決 P6b 後得到的正解，實際執行 bundle-safe 版本（commit 接在 revert 之後）：
+- `git mv annotation/ → plugins/labeling/domain/`，新增 `plugins/__init__.py`、`plugins/labeling/__init__.py`，使 `plugins.labeling.domain` 成為**正規可 import 套件**（PyInstaller 靜態可解析，與 __path__ shim 不同）。
+- **55 檔** `from annotation...` → `from plugins.labeling.domain...`（domain 內部、scripts/module_*、mcp/annotation_mcp、tests；無 bare `import annotation`）。
+- `engine.spec` hiddenimports annotation.*→plugins.labeling.domain.*、datas annotation→plugins；`package.json` filter annotation→plugins；test_mcp_config / boundary guard（core 禁 import `plugins`）/ manifest / index 同步。
+- **驗證**：`test:python 558 passed`、in-process import + module_017 載入 OK、**`pyinstaller engine.spec` build 成功且 `plugins.labeling.domain.*` 0 個 "not found"**（正是擊沉 P6b 的失敗模式）→ **bundle-safe**。
+
 ### 最終交付狀態（分支 `feat/platform-restructure`）
-- **P0–P5 完成、全綠、且 P5 經 pyinstaller bundle 驗證**。
-- **P6 宣告式家完成**（`plugins/labeling/` manifest+README、修補 package.json filter 缺口）。
-- **P6 物理程式搬移：未完成**（__path__ 路線經 gate 否決並回滾；正解＝import 全面改名，列為後續獨立工程）。
-- 全程 `test:python 558 passed`、`npm test 16 passed`、8 commit 可回滾。
+- **P0–P5 完成、全綠、P5(core/) 經 pyinstaller 驗證**。
+- **P6 宣告式家完成** + **P6c：annotation 領域已 bundle-safe 地實體搬進 `plugins/labeling/domain/`**（D1/D2 核心達成）。
+- **P6 剩餘（gated，未做）**：
+  1. `scripts/module_*` 實體搬進 `plugins/labeling/modules/` — 阻塞：`scripts/shared/` 被 labeling 與非-labeling(module_021) 以 `spec_from_file_location` **相對載入**共用（為 PROD/bundle 而設計），需先做「shared 動態載入→正規 import」轉換 phase；且 engine 掃描根 + plugin_loader glob 改寫的 runtime 正確性（Streamlit 模組載入/render）需 GUI golden-path 驗證。
+  2. `sheets/annotation.yaml` → `plugins/labeling/sheets/`（需改 engine `_reconcile_sheets_from_yaml` 掃描根；reconcile 全貌需跑 engine 驗證）。
+  3. `mcp/annotation_mcp` → `plugins/labeling/mcp`（需改 .mcp.json 啟動設定；MCP server 啟動需實機驗）。
+  4. 移除 `cim_platform` shim（拆 alias，需再跑 pyinstaller 驗證）。
+- 全程每步 `test:python 558 passed`、`npm test 16 passed`、commit 可回滾；物理搬移皆以 pyinstaller build 為 gate。
 
