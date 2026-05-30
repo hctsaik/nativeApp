@@ -320,3 +320,17 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 | 平均 | 62 | 66.1 | 63.8 | 63.6 | 74.5 | 79.6 | 84.4 | 87.9 | 82.5 | 86.1 | **89.1** |
 
 **最終結論（R11 評估官）**：在**不做領域外大型功能**的前提下，平台對四類目標使用者已達「未來容易使用」：操作員有引導式錯誤自助修復、管理員 YAML 編輯即生效 + 視覺化 RBAC、公民開發者純參數工具零 code、整合工程師連接器 GUI 動態化 + 錯誤規則集中 + REST 變體純宣告。剩餘 ~5 分為領域內低成本收尾（並行認領競態走引導文案、token 熱載、guidance 規則外移 YAML）+ 領域外三類（企業 IdP／跨機市集／OS 級沙箱，不計扣分）。
+
+## Round 12（2026-05-30）— 誠實回落至 85.0：揭露 REST adapter 只到 YAML，GUI 缺映射編輯器
+
+平均 **85.0（−4.1 vs R11）**。評估官實地查證後**修正 R11 的樂觀**：宣告式 REST adapter 的**後端鏈完整優雅**（部分覆蓋回退、自動切換、JSON 持久化、6 測試皆驗實，情境 1/4/10 高分），但「純宣告」入口仍停在**手改 YAML**——管理中心 External 表單**沒有 rest_mapping 編輯欄位**，對「公民開發者」persona 接 REST 變體仍非 no-code（情境 2 僅 62）。如實計入後回落，非退步而是修正高估。
+
+## Round 12 修復 — GUI rest_mapping 編輯器（補上最後一哩）
+
+`_render_external_system_register` 表單新增可收合「進階：REST 端點 / 欄位映射」：list/detail/claim 路徑 + detail HTTP method 下拉 + 4 欄欄位映射（ant_id/ant_active/ant_period/download_url，placeholder 顯示 iWISC 預設）；填了即寫入 YAML `rest_mapping:`，留白沿用內建契約。**公民開發者現可全程 GUI 註冊 REST 變體系統，免手改 YAML。** 列表標示「自訂映射」。已 MCP screenshot + assert_text PASS。`test:python 632 passed`。
+
+| 輪 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|----|---|---|---|---|---|----|----|----|
+| 平均 | 74.5 | 79.6 | 84.4 | 87.9 | 82.5 | 86.1 | 89.1 | 85.0* |
+
+\* R12 為查證修正 R11 高估（GUI 缺口如實計入）；GUI rest_mapping 編輯器補上後，情境 2 預估 62→~88，均分可望重回並超越 89。

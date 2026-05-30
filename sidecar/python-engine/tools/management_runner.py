@@ -1028,8 +1028,9 @@ def _render_external_system_register() -> None:
         for s in systems:
             _ct = s.get("connector_type")
             _ctlbl = f" · {_ct}" if _ct else " · 自動"
+            _maplbl = " · 自訂映射" if s.get("rest_mapping") else ""
             st.markdown(f"- **{s.get('system_name','?')}** — `{s.get('server_host_name','')}` "
-                        f"({s.get('target_format','')}{_ctlbl})")
+                        f"({s.get('target_format','')}{_ctlbl}{_maplbl})")
     else:
         st.caption("（目前無宣告的外部系統）")
 
@@ -1048,6 +1049,21 @@ def _render_external_system_register() -> None:
         ctype = st.selectbox("連接器類型", ["（自動：依 host scheme 推斷）", *_ctypes],
                              help="自動＝http(s)→rest、file://→file、fake://→fake；"
                                   "經 register_connector 註冊的新協定會自動出現於此")
+        # 進階：REST 變體的 endpoint/欄位映射（純宣告，免寫 connector class）
+        with st.expander("進階：REST 端點 / 欄位映射（接非 iWISC 契約的 REST 系統）", expanded=False):
+            st.caption("留白＝沿用內建 iWISC 契約。填了即寫入 rest_mapping，免寫程式碼。")
+            mc1, mc2 = st.columns(2)
+            rm_list = mc1.text_input("list 路徑", placeholder="/getAntList（預設）")
+            rm_detail = mc2.text_input("detail 路徑", placeholder="/getAntTaskDetail（預設）")
+            mc3, mc4 = st.columns(2)
+            rm_claim = mc3.text_input("claim 路徑", placeholder="/tasks/{ant_id}/claim（預設）")
+            rm_method = mc4.selectbox("detail HTTP method", ["POST", "GET"])
+            st.caption("回應欄位映射（你的欄位名 → 平台欄位）：")
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            f_id = fc1.text_input("ant_id ←", placeholder="antID")
+            f_active = fc2.text_input("ant_active ←", placeholder="antActive")
+            f_period = fc3.text_input("ant_period ←", placeholder="antPeriod")
+            f_dl = fc4.text_input("download_url ←", placeholder="download_url")
         if st.form_submit_button("➕ 新增外部系統", type="primary"):
             if not (name and host):
                 st.error("系統名稱與 host 為必填。")
@@ -1057,6 +1073,22 @@ def _render_external_system_register() -> None:
                     entry["api_token_env"] = token_env
                 if not ctype.startswith("（自動"):
                     entry["connector_type"] = ctype
+                _mapping: dict = {}
+                if rm_list.strip():
+                    _mapping["list_path"] = rm_list.strip()
+                if rm_detail.strip():
+                    _mapping["detail_path"] = rm_detail.strip()
+                if rm_claim.strip():
+                    _mapping["claim_path"] = rm_claim.strip()
+                if rm_method != "POST":
+                    _mapping["detail_method"] = rm_method
+                _fields = {k: v.strip() for k, v in
+                           {"ant_id": f_id, "ant_active": f_active,
+                            "ant_period": f_period, "download_url": f_dl}.items() if v.strip()}
+                if _fields:
+                    _mapping["fields"] = _fields
+                if _mapping:
+                    entry["rest_mapping"] = _mapping
                 systems = [s for s in systems
                            if not (s.get("system_name") == name
                                    and s.get("server_host_name") == host)]
