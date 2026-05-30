@@ -82,4 +82,45 @@
 4. 外部貢獻安全（上傳碼直接 exec，無沙箱/簽章）+ no-code 投稿封包。
 5. 打包 hiddenimports 自動收集（取代手寫白名單）。
 
----
+## Round 2 後實作的改進（2026-05-30）
+- **宣告式 no-code OUTPUT 層**：`core/output.py`（metric/text/list/table/json/image/markdown/caption）+ `cv_framework_runner.run_output` fallback + `module_preflight` output 宣告時非必需 + `core.forms`/`core.output` 進 engine.spec hiddenimports + `tests/test_output.py`。
+- **範例 `module_007` 變成完全宣告式**：只有 `007_process.py` + plugin.yaml（form: + output:），**零 Streamlit code**，preflight 通過。→ 直接攻克 Round 2 缺口 #1 的 output 半邊。
+
+## Round 3（2026-05-30）— 宣告式 output 後重評（精簡）
+
+| # | 情境 | 分 | # | 情境 | 分 |
+|---|------|----|----|------|----|
+| 1 | 純參數工具（form+output 全宣告，只寫 process）| **86** | 6 | 接新 REST connector | 52 |
+| 2 | 日常用標註工具 | 82 | 7 | 外部貢獻者提交模組 | 46 |
+| 3 | 管理員檢視模組健康（preflight 不誤報宣告式）| 78 | 8 | 設定模組 RBAC 權限 | 40 |
+| 4 | 改 form default/select 選項 | 84 | 9 | 多租戶上線設定 | 42 |
+| 5 | 影像上傳+CV 推論工具 | 58 | 10 | 打包可攜部署 | 70 |
+
+**Round 3 平均：63.8**（本輪刻意納入更多硬骨頭情境 6–9＝外部貢獻/RBAC/租戶/connector，拉低平均；但「**加工具**」類因宣告式 output 躍升到 84–88，情境 1 比 Round 2 同類 +11~14）。
+
+## 三輪軌跡與誠實結論
+
+| 輪 | 平均 | 「加工具」類最高 | 改進 |
+|----|------|------------------|------|
+| 1 | 62 | 70 | 基線 |
+| 2 | 66.1 | ~75 | 宣告式 input + dual-root 回歸修復 |
+| 3 | 63.8 | **86** | 宣告式 output（零 Streamlit code 工具）|
+
+**已驗證攻克**：簡單參數型工具現可**完全零 Streamlit code**（只寫純 `process.py` + YAML）——這是 no-code 開發的核心突破，「加工具/改參數」類情境已達 84–88。
+
+**為何整體仍 ~64、距 95 還遠（誠實）**：剩餘高槓桿缺口**幾乎都是 GUI 重 + 安全 + 大型功能**，無法在 headless 環境驗證/實作：
+1. **RBAC 權限設定 GUI**（auth_provider 是 placeholder；要管理中心 Streamlit 頁）
+2. **多租戶/外部系統註冊 GUI**（後端 register_tenant 已備，缺前端 Streamlit 頁 + 連線測試 + token 加密）
+3. **外部貢獻市集/審核/沙箱**（上傳碼直接 exec，需安全沙箱 + 版本流程 + no-code 投稿封包）
+4. **宣告式 connector 層**（接外部系統仍須手寫 Python contract）
+5. **宣告式生態普及 + 進階呈現**（7 模組僅 1 個真用零程式碼；output 無條件/格式化/分頁宣告）+ **宣告式 process/transform 庫**（讓「簡單變換工具」連運算都宣告）
+
+→ **達到 95 是多輪、多週的產品工程**（大量管理中心 GUI + 安全 + 宣告式運算庫），其中 GUI 部分需在能跑 `start-dev` 的環境逐頁驗證（owner 的 D4 golden-path）。本 session 已把**可在 headless 驗證的 no-code 基礎（宣告式 input+output、零程式碼工具、回歸護欄）**做到位並驗證，並把剩餘路線圖明確化、排序。
+
+### 下一輪建議實作順序（最高槓桿先）
+A. 宣告式 process/transform 庫（內建常用運算）→ 讓「簡單變換工具」連 process 都免寫 → 攻 +info/CV 以外的純資料工具。
+B. RBAC 真實權限模型（後端可 headless 測）→ scenario 8 從 40→~70。
+C. 外部系統/Tenant 註冊 GUI（管理中心新分頁，需實機驗 render）→ scenario 8/9。
+D. scaffold form-first 模式 + /new-plugin → 對齊宣告式、補 vendor/domain。
+E. 打包 hiddenimports 自動收集（PyInstaller `collect_submodules`）。
+F. 外部貢獻沙箱 + 市集流程（安全）。
