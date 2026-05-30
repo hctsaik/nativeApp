@@ -32,7 +32,17 @@ def register_connector(name: str, factory: Callable[..., ExternalSystemConnector
 
 def available_types() -> list[str]:
     _ensure_builtins()
-    return sorted(_FACTORIES)
+    # Merge in platform-level connectors (scaffolded non-REST connectors that
+    # auto-registered via core.integrations.registry.autodiscover) so the
+    # Management Center connector_type dropdown also lists them.
+    types = set(_FACTORIES)
+    try:
+        from core.integrations import registry as _core_registry  # noqa: PLC0415
+        _core_registry.autodiscover()
+        types.update(_core_registry.available_types())
+    except Exception:
+        pass
+    return sorted(types)
 
 
 def infer_type(server_host_name: str) -> str:
@@ -51,11 +61,25 @@ def build_connector(tenant: SystemTenant, **opts) -> ExternalSystemConnector:
     ctype = (getattr(tenant, "connector_type", None) or "").strip().lower() \
         or infer_type(tenant.server_host_name)
     factory = _FACTORIES.get(ctype)
-    if factory is None:
-        raise ValueError(
-            f"未知的 connector_type：{ctype!r}（可用：{', '.join(available_types())}）。"
-            "請在 external_systems.yaml 設定正確的 connector_type，或註冊新的連接器工廠。")
-    return factory(tenant, **opts)
+    if factory is not None:
+        return factory(tenant, **opts)
+    # Not a labeling built-in → delegate to the platform-level registry, which
+    # holds non-REST connectors scaffolded via `scaffold connector` and
+    # auto-registered by core.integrations.registry.autodiscover(). This is the
+    # single bridge that makes a scaffolded connector reachable by the live
+    # task-claim path (labeling → core is the allowed dependency direction).
+    try:
+        from core.integrations import registry as _core_registry  # noqa: PLC0415
+        _core_registry.autodiscover()
+        if _core_registry.is_registered(ctype):
+            return _core_registry.build_connector(ctype, tenant, **opts)
+    except Exception as exc:  # noqa: BLE001
+        import logging  # noqa: PLC0415
+        logging.warning("core connector registry delegation failed for %r: %s", ctype, exc)
+    raise ValueError(
+        f"未知的 connector_type：{ctype!r}（可用：{', '.join(available_types())}）。"
+        "請在 external_systems.yaml 設定正確的 connector_type，或用 "
+        "`python tools/scaffold.py connector <name>` 產生連接器（放 core/integrations/connectors/）。")
 
 
 # ── built-in factories (lazy) ────────────────────────────────────────────────

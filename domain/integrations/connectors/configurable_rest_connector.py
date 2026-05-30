@@ -45,6 +45,8 @@ _DEFAULTS = {
     "detail_path": "/getAntTaskDetail",
     "claim_path": "/tasks/{ant_id}/claim",
     "detail_method": "POST",
+    "list_root": "",   # dot-path to the array inside an envelope (e.g. "data.items"); "" = response is the array
+    "detail_root": "", # dot-path to the object inside a detail envelope (e.g. "data"); "" = response is the object
     "fields": {
         "ant_id": "antID",
         "ant_active": "antActive",
@@ -58,12 +60,64 @@ def resolve_paths(mapping: dict | None) -> dict:
     """Merge a (partial) declarative mapping over the built-in defaults (pure)."""
     m = dict(_DEFAULTS)
     if mapping:
-        for k in ("list_path", "detail_path", "claim_path", "detail_method"):
+        for k in ("list_path", "detail_path", "claim_path", "detail_method", "list_root", "detail_root"):
             if mapping.get(k):
                 m[k] = mapping[k]
         if isinstance(mapping.get("fields"), dict):
             m["fields"] = {**_DEFAULTS["fields"], **mapping["fields"]}
     return m
+
+
+def dig(data, dot_path: str):
+    """Walk a dot-path (e.g. 'data.items') into nested dicts (pure). '' → data."""
+    if not dot_path:
+        return data
+    cur = data
+    for part in dot_path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def extract_list(data, list_root: str) -> list:
+    """Extract the task array from a response, honouring an envelope path (pure).
+
+    Falls back gracefully: if list_root misses, but the response itself is a list
+    use it; otherwise return []."""
+    if list_root:
+        found = dig(data, list_root)
+        if isinstance(found, list):
+            return found
+    if isinstance(data, list):
+        return data
+    return []
+
+
+# Common non-numeric status strings → our 0=pending / 1=processing / 2=completed.
+_STATUS_WORDS = {
+    "pending": 0, "open": 0, "new": 0, "queued": 0, "todo": 0, "待認領": 0, "待處理": 0,
+    "processing": 1, "in_progress": 1, "claimed": 1, "running": 1, "標記中": 1, "處理中": 1,
+    "completed": 2, "done": 2, "finished": 2, "closed": 2, "已標記": 2, "已完成": 2,
+}
+
+
+def coerce_active(value) -> int:
+    """Coerce an external status into our 0/1/2 code, tolerating arbitrary REST
+    variants: ints pass through, numeric strings parse, known status words map,
+    anything else → 0 (never raises — a weird status must not break the list)."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if value is None:
+        return 0
+    s = str(value).strip()
+    try:
+        return int(float(s))
+    except (TypeError, ValueError):
+        return _STATUS_WORDS.get(s.lower(), 0)
 
 
 def map_list_item(item: dict, fields: dict) -> AntTask:
@@ -82,7 +136,7 @@ def map_list_item(item: dict, fields: dict) -> AntTask:
         consumed.add(canonical)
     return AntTask(
         ant_id=str(_pick("ant_id", "")),
-        ant_active=int(_pick("ant_active", 0) or 0),
+        ant_active=coerce_active(_pick("ant_active", 0)),
         ant_period=_pick("ant_period"),
         external_context={k: v for k, v in item.items() if k not in consumed},
     )
@@ -112,7 +166,8 @@ class ConfigurableRestConnector(ExternalSystemConnector):
             raise PermissionError(f"外部系統拒絕授權（401）：{url}。請確認 api_token 是否正確。")
         if resp.status_code != 200:
             raise RuntimeError(f"GET {url} 回傳非預期狀態碼 {resp.status_code}：{resp.text[:200]}")
-        return [map_list_item(it, self._m["fields"]) for it in resp.json()]
+        items = extract_list(resp.json(), self._m.get("list_root", ""))
+        return [map_list_item(it, self._m["fields"]) for it in items if isinstance(it, dict)]
 
     def get_ant_task_detail(self, ant_id: str, format: str) -> TaskDetailResponse:
         url = self._url(self._m["detail_path"])
@@ -125,7 +180,10 @@ class ConfigurableRestConnector(ExternalSystemConnector):
             raise PermissionError(f"外部系統拒絕授權（401）：{url}。請確認 api_token 是否正確。")
         if resp.status_code != 200:
             raise RuntimeError(f"{url} 回傳非預期狀態碼 {resp.status_code}：{resp.text[:200]}")
-        data: dict = resp.json()
+        # Honour a detail envelope (e.g. {"data": {"download_url": ...}}) the same
+        # way list_root does for the list endpoint.
+        root = dig(resp.json(), self._m.get("detail_root", ""))
+        data: dict = root if isinstance(root, dict) else resp.json()
         dl_key = self._m["fields"].get("download_url", "download_url")
         return TaskDetailResponse(download_url=data.get(dl_key, data.get("download_url", "")))
 
