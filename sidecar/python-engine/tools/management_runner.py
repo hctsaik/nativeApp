@@ -1183,6 +1183,11 @@ def _render_external_system_register() -> None:
                                     st.warning(f"detail 端點：{_card['title']} — {_card['hint']}")
                                 else:
                                     st.caption(f"（detail 端點預覽略過：{_de}）")
+                    elif isinstance(_data, dict):
+                        # 巢狀 envelope（如 {"data":{"items":[...]}}）目前需平面陣列
+                        st.info("回應是物件而非任務陣列。若任務清單包在巢狀欄位（如 "
+                                "`data.items`），目前 rest_mapping 需要 list 端點直接回傳陣列；"
+                                "可調整 list_path 指向回傳陣列的端點。")
                 except Exception:  # noqa: BLE001
                     pass
                 if body.strip():
@@ -1953,7 +1958,9 @@ def _render_sandbox_policy() -> None:
         help="enforce＝有違規拒絕載入；warn＝記錄但放行；off＝跳過掃描",
         disabled=bool(_env_override))
     if _env_override:
-        st.warning(f"目前由環境變數 CIM_PLUGIN_SANDBOX={_env_override} 覆蓋，此下拉暫不生效。")
+        st.warning(f"目前由環境變數 CIM_PLUGIN_SANDBOX={_env_override} 覆蓋，此下拉暫不生效。"
+                   "若要改用此 GUI 設定：移除該環境變數（PowerShell：`Remove-Item Env:CIM_PLUGIN_SANDBOX`，"
+                   "或在啟動腳本/系統環境變數中刪除）後重啟 app。")
 
     _c1, _c2 = st.columns(2)
     _bi = _c1.text_input("額外禁用 import（逗號分隔）",
