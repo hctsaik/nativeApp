@@ -104,10 +104,8 @@ def test_core_candidates_do_not_depend_on_plugins():
 
 
 def test_annotation_domain_does_not_depend_on_gui_or_dead_pkg():
-    # The annotation domain now physically lives at plugins/labeling/domain
-    # (P6); annotation/ is just a back-compat shim.
-    annotation_files = _files("plugins/labeling/domain", "annotation")
-    assert annotation_files, "annotation domain package not found"
+    annotation_files = _files("annotation")
+    assert annotation_files, "annotation package not found"
     violations: list[str] = []
     for py in annotation_files:
         if "cim_annotation" in _imported_roots(py):

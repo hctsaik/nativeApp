@@ -75,7 +75,6 @@
           "tools/**/*",
           "scripts/**/*",
           "annotation/**/*",
-          "plugins/**/*",
           "core/**/*",
           "cim_platform/**/*",
           "sheets/**/*",

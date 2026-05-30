@@ -23,8 +23,7 @@ depends_on:
 
 provides:
   domain:
-    current_path: plugins/labeling/domain/   # ✅ moved here (P6b); `annotation/` is now a __path__ back-compat shim
-    import_name: annotation                  # still imported as `annotation` until shim removed
+    current_path: annotation/            # absolute-import package `annotation` (label_ops, services, core, storage, formats, adapters, integrations)
     target_path: plugins/labeling/domain/
   sheets:
     - id: annotation
