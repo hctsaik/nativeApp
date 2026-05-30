@@ -199,17 +199,18 @@ def _render_iwsc() -> dict:
 
     if "m026_task_err" in st.session_state:
         _err = str(st.session_state.pop("m026_task_err"))
-        st.error(f"❌ {_err}")
-        # 引導式錯誤修復：偵測常見原因並給可行動的下一步（免使用者翻 log）
-        _low = _err.lower()
-        if any(k in _low for k in ("refus", "connect", "10061", "timed out", "timeout")):
-            st.info(
-                "🔧 偵測到「連不上外部系統」。請依序確認：\n"
-                "1. 外部 server 是否已啟動（iWISC 範例：啟動 iwsc-sample-server，port 8765）。\n"
-                "2. 此系統的 host 是否正確 —— 可在 **管理中心 → Tools → External** 檢視/新增/修改。"
-            )
-        elif "請先填入" not in _err:
-            st.caption("詳細原因可查 log：`tmp/cim_log/module_026_process.log` 或 `apps/host-electron/logs/`。")
+        # 引導式錯誤：統一走 core/guidance（與 output 頁同一事實來源）；
+        # 驗證類訊息（如「請先填入」）與未知錯誤則回退為原始提示。
+        _handled = False
+        try:
+            from core import guidance  # noqa: PLC0415
+            _handled = guidance.render(_err, st)
+        except Exception:
+            _handled = False
+        if not _handled:
+            st.error(f"❌ {_err}")
+            if "請先填入" not in _err:
+                st.caption("詳細原因可查 log：`tmp/cim_log/module_026_process.log` 或 `apps/host-electron/logs/`。")
 
     if "m026_claim_result" in st.session_state:
         r = st.session_state.pop("m026_claim_result")
