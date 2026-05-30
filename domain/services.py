@@ -234,7 +234,18 @@ class AnnotationService:
             created_at=now,
             updated_at=now,
         )
-        self.workspace.metadata.save_task(task)
+        # 原子認領：DB 對 (tenant_id, ant_id) 有 UNIQUE 約束；本地併發競態下
+        # 第二位認領者會撞 UNIQUE → 翻成 ConflictError（與外部回寫衝突同一語意，
+        # guidance 會顯示「任務已被認領」引導卡）。
+        try:
+            self.workspace.metadata.save_task(task)
+        except Exception as exc:  # noqa: BLE001
+            if "unique" in str(exc).lower() and "ant_id" in str(exc).lower():
+                existing = self.workspace.metadata.get_task_by_ant_id(tenant_id, ant_id)
+                if existing is not None:
+                    return _task_to_dict(existing)
+                raise ConflictError(f"此任務已被他人認領（ant_id={ant_id}）") from exc
+            raise
         return _task_to_dict(task)
 
     def save_annotation(
