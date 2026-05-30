@@ -61,6 +61,13 @@ def build_connector(tenant: SystemTenant, **opts) -> ExternalSystemConnector:
 # ── built-in factories (lazy) ────────────────────────────────────────────────
 
 def _rest_factory(tenant: SystemTenant, **_opts) -> ExternalSystemConnector:
+    # Declarative REST variant: if the tenant carries an endpoint/field mapping,
+    # use the configurable connector so a new REST system needs no new class.
+    if getattr(tenant, "connector_config", None):
+        from plugins.labeling.domain.integrations.connectors.configurable_rest_connector import (
+            ConfigurableRestConnector,
+        )
+        return ConfigurableRestConnector(tenant)
     from plugins.labeling.domain.integrations.connectors.rest_connector import RestConnector
     return RestConnector(tenant)
 

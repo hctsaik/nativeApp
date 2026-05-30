@@ -111,6 +111,7 @@ class SQLiteMetadataStore:
                 "ALTER TABLE annotation_tasks ADD COLUMN delivery_status TEXT",
                 "ALTER TABLE annotation_tasks ADD COLUMN original_annotation_json TEXT NOT NULL DEFAULT '{}'",
                 "ALTER TABLE system_tenants ADD COLUMN connector_type TEXT",
+                "ALTER TABLE system_tenants ADD COLUMN connector_config TEXT",
             ]:
                 try:
                     conn.execute(_col_ddl)
@@ -143,14 +144,15 @@ class SQLiteMetadataStore:
                 """
                 INSERT INTO system_tenants
                     (tenant_id, system_name, server_host_name, target_format, api_token,
-                     created_at, connector_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     created_at, connector_type, connector_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tenant_id) DO UPDATE SET
                     system_name=excluded.system_name,
                     server_host_name=excluded.server_host_name,
                     target_format=excluded.target_format,
                     api_token=excluded.api_token,
-                    connector_type=excluded.connector_type
+                    connector_type=excluded.connector_type,
+                    connector_config=excluded.connector_config
                 """,
                 (
                     tenant.tenant_id,
@@ -160,6 +162,8 @@ class SQLiteMetadataStore:
                     tenant.api_token,
                     tenant.created_at,
                     tenant.connector_type,
+                    json.dumps(tenant.connector_config, ensure_ascii=False)
+                    if tenant.connector_config else None,
                 ),
             )
         return tenant
@@ -487,6 +491,10 @@ def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
         api_token=row["api_token"],
         created_at=row["created_at"],
         connector_type=row["connector_type"] if "connector_type" in keys else None,
+        connector_config=(
+            json.loads(row["connector_config"])
+            if "connector_config" in keys and row["connector_config"] else None
+        ),
     )
 
 

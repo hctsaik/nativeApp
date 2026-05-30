@@ -54,6 +54,7 @@ class AnnotationService:
         target_format: str,
         api_token: str | None = None,
         connector_type: str | None = None,
+        connector_config: dict | None = None,
     ) -> dict[str, Any]:
         tenant = SystemTenant(
             tenant_id=_new_uuid(),
@@ -63,6 +64,7 @@ class AnnotationService:
             api_token=api_token,
             created_at=utc_now_iso(),
             connector_type=connector_type,
+            connector_config=connector_config,
         )
         self.workspace.metadata.save_tenant(tenant)
         return _tenant_to_dict(tenant)
@@ -92,7 +94,9 @@ class AnnotationService:
             token = sysd.get("api_token") or (
                 os.environ.get(sysd["api_token_env"]) if sysd.get("api_token_env") else None)
             self.register_tenant(name, host, fmt, api_token=token,
-                                 connector_type=sysd.get("connector_type"))
+                                 connector_type=sysd.get("connector_type"),
+                                 connector_config=sysd.get("rest_mapping")
+                                 or sysd.get("connector_config"))
             registered.append(name)
             existing.add((name, host))
         return registered
@@ -735,6 +739,7 @@ def _tenant_to_dict(tenant: SystemTenant) -> dict[str, Any]:
         "api_token": tenant.api_token,
         "created_at": tenant.created_at,
         "connector_type": tenant.connector_type,
+        "connector_config": tenant.connector_config,
     }
 
 
