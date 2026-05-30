@@ -1,10 +1,11 @@
 # pack-electron-cache.ps1
 # Usage:
-#   .\scripts\pack-electron-cache.ps1
-#   .\scripts\pack-electron-cache.ps1 -OutputPath D:\share\electron-cache.zip
+#   .\scripts\win\pack-electron-cache.ps1
+#   .\scripts\win\pack-electron-cache.ps1 -OutputPath D:\share\electron-cache.zip
 
 param(
-    [string]$OutputPath = "$PSScriptRoot\..\electron-cache.zip"
+    # Default lands at repo root (script now lives in scripts/win/, so two levels up).
+    [string]$OutputPath = "$PSScriptRoot\..\..\electron-cache.zip"
 )
 
 $ErrorActionPreference = "Stop"

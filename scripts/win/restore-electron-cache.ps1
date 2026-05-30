@@ -2,7 +2,7 @@
 # 在新電腦上還原 Electron 快取，讓 npm install 不需要重新下載
 #
 # 使用方式：
-#   .\scripts\restore-electron-cache.ps1 -ZipPath .\electron-cache.zip
+#   .\scripts\win\restore-electron-cache.ps1 -ZipPath .\electron-cache.zip
 
 param(
     [Parameter(Mandatory)]
