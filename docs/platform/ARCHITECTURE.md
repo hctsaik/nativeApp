@@ -2,6 +2,11 @@
 
 > **目的**：本文件以 NotebookLM 為目標受眾撰寫，內容自給自足，讀者無需閱讀原始碼即可完整理解系統設計、元件職責與關鍵決策。文件包含大量 Mermaid 圖表，供 NotebookLM 生成問答與解說。
 
+> **⚠️ 結構現況（2026-05 架構重構後）**：共用碼已集中到 **`core/`**、Labeling 已收成 **`plugins/labeling/`**。
+> 本文件部分章節（目錄結構附錄、標注資料流、元件圖）仍沿用**重構前路徑**，這些**已不存在**，請以下列現況對照為準（權威現況：[`../README.md`](../README.md)「專案結構」+ [`shared-components.md`](shared-components.md)）：
+> `annotation/` → `plugins/labeling/domain/`；`cim_platform/` → `core/integrations/`；`mcp/annotation_mcp/` → `plugins/labeling/mcp/`（啟動 `python -m plugins.labeling.mcp.server`）；頂層 `scripts/sheets/` → 已移除（sheet 改放 `sheets/` 或 `plugins/*/sheets/`）。
+> 新增工具的現況路徑：`python tools/scaffold.py`（見 CLAUDE.md / README「開發新工具」）。
+
 ---
 
 ## 目錄
