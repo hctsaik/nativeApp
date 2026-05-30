@@ -7,7 +7,7 @@ from PIL import Image
 
 from plugins.labeling.domain.services import AnnotationService
 from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
-from annotation_mcp.handlers import AnnotationMCPHandlers
+from plugins.labeling.mcp.handlers import AnnotationMCPHandlers
 
 
 def _write_image(path: Path) -> None:

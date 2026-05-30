@@ -31,7 +31,7 @@ provides:
       current_path: plugins/labeling/sheets/annotation.yaml   # ✅ moved here (P6); engine _reconcile scans sheets/*.yaml + plugins/*/sheets/*.yaml
       target_path: plugins/labeling/sheets/annotation.yaml
   mcp:
-    current_path: ../../mcp/annotation_mcp/      # annotation_* MCP tools (imports annotation.services)
+    current_path: plugins/labeling/mcp/   # ✅ moved here (P6); launch: python -m plugins.labeling.mcp.server (PYTHONPATH=sidecar/python-engine)
     target_path: plugins/labeling/mcp/
   docs:
     current_path:                                # platform-level docs map: docs/README.md

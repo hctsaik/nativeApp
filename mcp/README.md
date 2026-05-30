@@ -4,7 +4,8 @@ This folder contains MCP servers for the CIM platform.
 
 - `cim_gui_mcp`: GUI and E2E automation for the desktop app.
 - `platform_mcp`: 平台層管理（tools、sheets、health）。
-- `annotation_mcp`: data/workflow API for the annotation common component.
+- Labeling 的 MCP（annotation_* 工具）已隨架構重構移至 Labeling plugin：
+  `sidecar/python-engine/plugins/labeling/mcp/`（啟動：`python -m plugins.labeling.mcp.server`，PYTHONPATH=`sidecar/python-engine`）。
 
 ## platform_mcp — 平台層管理
 
@@ -45,10 +46,10 @@ next steps, see `../docs/ANNOTATION_XANYLABELING.md`.
 Run manually:
 
 ```bash
-cd mcp
-set PYTHONPATH=C:/code/claude/nativeApp_Management/mcp;C:/code/claude/nativeApp_Management/sidecar/python-engine
-set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp_Management/tmp/annotation-workspace
-python -m annotation_mcp.server
+cd sidecar/python-engine
+set PYTHONPATH=C:/code/claude/nativeApp/sidecar/python-engine
+set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp/apps/host-electron/logs/annotation_workspace
+python -m plugins.labeling.mcp.server
 ```
 
 Common tools:
