@@ -244,11 +244,14 @@ sidecar/python-engine/
 - 完全移除 `cim_platform` shim（P5 已把所有 import 改 `core.integrations`，確認零殘留 importer）；自 engine.spec / package.json filter / test / boundary 一併移除。CLAUDE.md sheet 位置更新。
 - pyinstaller build：0 not-found、`cim_platform` 完全消失。
 
+### P6e/P6f 完成 — 整個 Labeling plugin 已物理收斂
+- **P6e `scripts/module_*` → `plugins/labeling/modules/`**（19 個 labeling 模組）：採用比「轉正規 import」更簡單且 PROD-safe 的解法——`scripts/shared` **留原位**（平台共用，module_021 仍用），搬移後模組的 `_HERE.parent/"shared"` 路徑改為 `_HERE.parents[3]/"scripts"/"shared"`（65 檔、機制不變仍是 spec_from_file_location）；跨模組 `_HERE.parent/"module_NNN"` 因模組一起搬而續存；深度相關 `parents[4]`(PROJECT_ROOT)/`parents[2]`(tools/ENGINE_ROOT) 統一 +2（25 處，保留原語意），相對 `parents[1]` 跨模組不動；engine `_scan_and_register_plugins` + plugin_loader `_find_folder` 改搜 scripts/ + plugins/*/modules/。**驗證**：test:python 558、test_sqlite_adapter 確認 engine 從新位置掃到模組 + sheet tabs、6 個跨模組/用 shared 的 process 模組 in-process 載入、護欄 test 解析全部 spec 路徑、**pyinstaller build 0 not-found**。
+- **P6f `mcp/annotation_mcp` → `plugins/labeling/mcp`**：相對內部 import 續存；`.mcp.json` + `.claude/mcp.json` 改 `python -m plugins.labeling.mcp.server`（PYTHONPATH=python-engine）。**驗證**：launch-smoke（`-m` 啟動處理 stdin-EOF 乾淨退出）、handlers create_dataset/ingest 正常。註：`test_annotation_mcp` 有 1 個**既有**失敗（create_schema NOT_FOUND，AnnotationService API drift，早於本重構、與搬移無關，搬移前後皆 1-fail/2-pass）。
+
 ### 最終交付狀態（分支 `feat/platform-restructure`）
-- **P0–P5 完成、全綠、P5(core/) 經 pyinstaller 驗證**。
-- **P6 宣告式家** + **P6c（annotation 領域→`plugins/labeling/domain`）** + **P6d（sheet→`plugins/labeling/sheets` + 移除 cim_platform shim）** 全部 **pyinstaller bundle-validated**。Labeling 的領域程式、sheet 皆已物理收進 `plugins/labeling/`，平台連接契約收斂於 `core.integrations`，無殘留 alias（cim_platform 已刪）。
-- **P6 剩餘（未做，需實機 GUI 驗證）**：
-  1. **P6e `scripts/module_*` → `plugins/labeling/modules/`**：需 (a) 19 個 labeling 模組的 `_HERE.parent/"shared"/X` 動態載入轉成 `from scripts.shared import X`（shared 留原位當平台共用；module_021 非-labeling 不動），(b) engine `_scan_and_register_plugins` + plugin_loader `_find_folder`/SCRIPTS_DIR 改搜 scripts/ + plugins/*/modules/，(c) spec hiddenimports 加 scripts.shared.*。**為何需實機**：shared 轉正規 import 有 PROD bundle 執行期 import 風險；且每個 Streamlit 模組搬移後能否正確載入/render，pyinstaller/pytest 都驗不到，只有開該 tab 才知 → 需 `start-dev` + 逐 tab golden-path。
-  2. **P6f `mcp/annotation_mcp` → `plugins/labeling/mcp`**：需改 `.mcp.json` 啟動路徑，MCP server 啟動需實機驗。
-- 全程每步 `test:python 558 passed`、`npm test 16 passed`、commit 可回滾；物理搬移皆以 pyinstaller build 為 gate。
+- **P0–P5 完成、全綠**；P5(core/) 經 pyinstaller 驗證。
+- **P6 物理搬移全數完成**：`plugins/labeling/` 現含 **domain/（領域）+ modules/（19 GUI 模組）+ sheets/（annotation.yaml）+ mcp/（MCP server）+ plugin.manifest.yaml + README**。平台共用層 `core/`（+`core.integrations`）抽出、**cim_platform alias 已刪**、依賴單向 `plugins→core`（boundary test 強制）、數字 module ID 凍結（D3）。
+- **每步 pyinstaller build 為 gate**；`test:python 558 passed`、`npm test 16 passed`；全程 commit 可回滾。
+- **刻意未搬（低價值/高 churn，manifest 已宣告歸屬）**：`tests/annotation/`（仍由 test:python 的 `tests/` 收集，搬移需改測試發現且無實益）；Labeling docs（仍在 `docs/`，搬移會斷大量 README/openspec 連結）。模組自帶的 `*_test.py` 已隨模組搬入 `plugins/labeling/modules/`。
+- **唯一需實機補驗**：Labeling sheet 4 個 tab 的 Streamlit 實際 render、annotation MCP 在 Claude Code 重啟後的 tool handshake（結構/啟動已驗，render/handshake 屬 owner D4 的 GUI golden-path，headless 跑不了）。
 
