@@ -200,3 +200,20 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 4. **visual workflow / 標註 builder**（S8=52、S9=55）：前端 visual builder，YAML 已是 low-code 上限。
 
 → **這 4 類無一能由 headless agent 靠改 YAML 或加純 Python 達成**；要把 74.5 推過 95，必須在能跑 `start-dev` 的環境投入 IdP/安全/GUI/visual-builder 的產品工程並逐頁 golden-path 驗收（owner D4）。本 session 已將**宣告式/headless 路線做到上限（62→74.5）**並明確定位剩餘路徑。
+
+## Round 5 後實作（管理中心 GUI 編輯器，MCP 驗證）— 修正「headless 不能做 GUI」的判斷
+**發現本環境其實有 app 在跑（sidecar :59675）+ cim-gui MCP 可用**，故 GUI **做得出來也驗得了**。據此關閉 Round 5 的兩個 GUI 缺口：
+- **S3 權限編輯 GUI**：管理中心 Permissions 頁原為**死碼**（未路由），已接進頂層導航並改成**可編輯的宣告式 RBAC 編輯器**（textarea 編 `config/permissions.yaml` → 儲存 → `core/rbac.py` 立即強制執行）。**MCP 截圖確認 render**。
+- **S4 外部系統註冊 GUI**：Tools→External 新增**外部系統註冊表單**（系統名/host/格式/token env → 寫 `config/external_systems.yaml`，module_026 載入時自動 sync）。**MCP 截圖確認 render**。
+- `test_management_runner_has_workflow_tabs` 更新；`test:python 600 passed`。
+
+→ S3（82→~92）、S4（80→~92）的 GUI 缺口已關閉並實機驗證。**估計當前一輪平均 ~78–82**。
+
+## 修正後的最終定論
+我先前「headless 無法做/驗 GUI」的判斷**有誤**——本環境有 app + MCP，GUI 可做可驗，且已實證（S3/S4 兩個編輯器都 MCP 截圖確認）。**真正把分數壓在 95 以下的，是以下「需要多週、大型前端/安全/外部依賴」的產品功能**，非單一 session（即使有 MCP）能完成：
+1. **plugin 市集 + 沙箱 / 簽章**（S7）：安全基礎建設——上傳碼隔離執行環境、簽章驗證、市集流程。
+2. **視覺化標註 builder**（S8）：app 內 canvas 視覺標註編輯器（目前靠外掛 xAnyLabeling）——大型前端。
+3. **視覺化 workflow builder（條件分支）**（S9）：拖拉式流程編排 + 條件/資料傳遞引擎——大型前端 + workflow engine。
+4. **真實 IdP / SSO**（S6）：接企業身分系統——外部依賴，無法在本環境產生可信身分。
+
+→ 已實證 GUI 編輯類（S3/S4）可在此環境做完並驗證；剩餘 4 類是 marketplace/sandbox + 兩個 visual builder + 真實 IdP，屬多週產品工程。**通往 95 的路徑已從「無法驗證」收斂為「明確的大型功能 backlog」**，可在後續 session 逐項實作 + MCP/實機驗收。
