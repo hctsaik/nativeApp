@@ -53,6 +53,7 @@ class AnnotationService:
         server_host_name: str,
         target_format: str,
         api_token: str | None = None,
+        connector_type: str | None = None,
     ) -> dict[str, Any]:
         tenant = SystemTenant(
             tenant_id=_new_uuid(),
@@ -61,6 +62,7 @@ class AnnotationService:
             target_format=target_format,
             api_token=api_token,
             created_at=utc_now_iso(),
+            connector_type=connector_type,
         )
         self.workspace.metadata.save_tenant(tenant)
         return _tenant_to_dict(tenant)
@@ -89,7 +91,8 @@ class AnnotationService:
                 continue
             token = sysd.get("api_token") or (
                 os.environ.get(sysd["api_token_env"]) if sysd.get("api_token_env") else None)
-            self.register_tenant(name, host, fmt, api_token=token)
+            self.register_tenant(name, host, fmt, api_token=token,
+                                 connector_type=sysd.get("connector_type"))
             registered.append(name)
             existing.add((name, host))
         return registered
@@ -344,17 +347,10 @@ class AnnotationService:
     # ── Connector 取得 ────────────────────────────────────────────────────────
 
     def _get_connector(self, tenant: SystemTenant) -> ExternalSystemConnector:
-        if tenant.server_host_name.startswith("fake://"):
-            from plugins.labeling.domain.integrations.connectors.fake_connector import FakeConnector
-            _fake_tasks = [
-                {"antID": f"FAKE_TASK_{i:03d}", "antActive": 0,
-                 "antPeriod": "2026-05-26T08:00:00Z",
-                 "external_context": {"lot_id": f"L{i:02d}", "eqp_id": "AOI-01"}}
-                for i in range(1, 4)
-            ]
-            return FakeConnector(tasks=_fake_tasks, download_url="")
-        from plugins.labeling.domain.integrations.connectors.rest_connector import RestConnector
-        return RestConnector(tenant)
+        # 宣告式選型：tenant.connector_type 優先，否則依 server_host_name scheme 推斷。
+        # 新協定只需 register_connector("...", factory)，不必改這裡。
+        from plugins.labeling.domain.integrations.registry import build_connector
+        return build_connector(tenant)
 
     # ── 舊版 API（FormatRegistry / dry-run 相容） ─────────────────────────────
 
@@ -738,6 +734,7 @@ def _tenant_to_dict(tenant: SystemTenant) -> dict[str, Any]:
         "target_format": tenant.target_format,
         "api_token": tenant.api_token,
         "created_at": tenant.created_at,
+        "connector_type": tenant.connector_type,
     }
 
 
