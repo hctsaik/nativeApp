@@ -222,10 +222,19 @@ sidecar/python-engine/
 | **P5** | ✅ done | 建 `core/`，`cim_platform/{connector,tenant}` → `core/integrations/`，`cim_platform` 保留為相容 shim，8 處內部 import 改 `core.integrations`，spec datas+hiddenimports、`package.json` extraResources filter（補 `core/**/*`）、boundary 納入 core | 558 passed + import 身分一致驗證 |
 | **P6** | 🟡 宣告式家完成；物理搬移 gated | 建 `plugins/labeling/`（`plugin.manifest.yaml` 宣告 domain/modules/sheets/mcp/docs/tests 歸屬 + 對 core 依賴 + 語意名 metadata、`README.md`）；修補 P5 的 `package.json` filter 缺口 | test:python 綠 |
 
-### P6 物理搬移為何 gated（未盲搬）
-P6 的**程式碼實體搬移**（`annotation/`→`plugins/labeling/domain/`、`scripts/module_*`→`plugins/labeling/modules/`、sheets/mcp/tests、改 `engine.py` 掃描根、runner `sys.path`、`engine.spec`、移除 alias）牽動**三個打包白名單**（`engine.spec` datas+hiddenimports、`apps/host-electron/package.json` extraResources filter、PROD DB snapshot）與動態載入/engine 掃描/Streamlit 啟動。這些 runtime 路徑**只有 `/package-build` + Electron+Streamlit+MCP golden-path 跑得出來**——正是 owner 決議 **D4（每步 test+package-build gated、可回滾）** 與共識「物理搬移需 package-build 連過數次 + golden-path MCP」所要求的 gate。在無法跑 GUI 的環境盲搬會造出「dev 綠、打包/runtime 壞」狀態，違反 D4，故**不盲搬**。
+### P6b 嘗試 annotation 實體搬移 → pyinstaller gate 擋下 → 已回滾
+經 owner 授權「pyinstaller-only 盡力做」，實際嘗試把 `annotation/` 搬到 `plugins/labeling/domain/`，用 `annotation/__init__.py` 的 `__path__` 重導當相容 shim（commit `0731826`）。**in-process 全綠**（558 passed + 所有 `annotation.*` import 身分一致），但跑 `pyinstaller engine.spec`（exit 0）後發現 **46 個 `annotation.*` hidden import 全部 `ERROR: not found`**：
 
-已驗證的搬移機制（供執行時用）：`annotation` 為 100% 絕對 import 套件，實測 `annotation/__init__.py` 用 `__path__` 重導到 `plugins/labeling/domain/` 可維持單一模組身分（in-process 驗證通過）；PyInstaller 6.20 在位。`plugin.manifest.yaml` 已是搬移藍圖。
+> `__path__` 是 **runtime** 機制，PyInstaller 的 **build-time 靜態 modulegraph 不執行它**，因此無法把 `plugins/labeling/domain/*` 收進 bundle 的 `annotation.*` 名稱下 → **打包後會缺整個 annotation 套件**（典型「dev 綠、打包壞」）。
 
-**下一步**：在實際 app 上，按 manifest 逐資產搬移，每搬一項即跑 `npm run test:python`（含護欄 test 偵測 spec/動態載入斷鏈）+ `/package-build` 確認可啟動 + MCP golden-path 截圖，綠燈才搬下一項；全部綠後移除 `cim_platform` shim。
+依 D4「失敗步驟回滾」**已 `git revert`（commit `ab58f5d`）**，annotation 回到正常頂層套件。同一次 build 確認 **P5 的 `core.integrations` / `cim_platform.*` 正常解析 → core/ 是 bundle-safe**（其餘 46 個 not-found 警告為既有 optional dep：pycparser/scipy/MySQLdb 等，與本次無關）。
+
+### 結論：annotation/scripts 實體搬移的正確作法（未做，較大工程）
+`__path__` shim 此路不通。要 bundle-safe 地把 Labeling 程式實體放到 `plugins/labeling/`，唯一正解是 **把 import 名稱全面改寫**（`annotation` → `plugins.labeling.domain`，121 處 + scripts/module_* + mcp + tests + `engine.spec` hiddenimports + `package.json` filter），讓 PyInstaller 看到正規 package。這是較大的機械式重構，且 `scripts/module_*` 還有 **`scripts/shared` 跨 labeling/非-labeling(module_021) 共用** 的結構難點（模組以 `spec_from_file_location` 相對載入 shared，正是為 PROD/bundle 而用，不能盲改成正規 import）。此工程建議獨立進行、每步 `npm run test:python` + 護欄 test + **`pyinstaller` build 驗證** + GUI golden-path。
+
+### 最終交付狀態（分支 `feat/platform-restructure`）
+- **P0–P5 完成、全綠、且 P5 經 pyinstaller bundle 驗證**。
+- **P6 宣告式家完成**（`plugins/labeling/` manifest+README、修補 package.json filter 缺口）。
+- **P6 物理程式搬移：未完成**（__path__ 路線經 gate 否決並回滾；正解＝import 全面改名，列為後續獨立工程）。
+- 全程 `test:python 558 passed`、`npm test 16 passed`、8 commit 可回滾。
 
