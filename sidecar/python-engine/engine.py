@@ -162,168 +162,183 @@ class SQLiteToolAdapter(ToolAdapter):
         return connection
 
     def _initialize(self) -> None:
+        """Build/upgrade the catalog DB. Behaviour-preserving phases (run every
+        startup, all idempotent): create tables → one-time legacy migrations →
+        scan plugin.yaml → seed static (sheet/management/external) tools →
+        reconcile sheet YAML."""
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tools (
-                    tool_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    script_relative_path TEXT NOT NULL,
-                    version TEXT NOT NULL,
-                    signature TEXT,
-                    source_commit TEXT,
-                    author TEXT,
-                    approved_at TEXT,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    enabled_prod INTEGER NOT NULL DEFAULT 0,
-                    order_index INTEGER NOT NULL DEFAULT 0
-                )
-                """
-            )
-            # Create tool_versions table (shared with plugin_registry)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tool_versions (
-                    version_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tool_id      TEXT NOT NULL,
-                    version      TEXT NOT NULL,
-                    content_json TEXT NOT NULL,
-                    changelog    TEXT,
-                    author       TEXT,
-                    created_at   TEXT DEFAULT (datetime('now')),
-                    is_active    INTEGER NOT NULL DEFAULT 0,
-                    source       TEXT NOT NULL DEFAULT 'filesystem'
-                )
-                """
-            )
-            # migration：舊 DB 補欄位
-            for col_sql in [
-                "ALTER TABLE tools ADD COLUMN enabled_prod INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE tools ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
-                "ALTER TABLE tools ADD COLUMN description TEXT",
-                "ALTER TABLE tools ADD COLUMN vendor TEXT DEFAULT 'cimcore'",
-                "ALTER TABLE tools ADD COLUMN domain TEXT",
-                "ALTER TABLE tools ADD COLUMN legacy_id TEXT",
-                "ALTER TABLE tools ADD COLUMN deprecated_at TEXT",
-            ]:
-                try:
-                    connection.execute(col_sql)
-                except Exception:
-                    pass
-            # migration：cvmod-* → module_* (one-time rename)
-            for old_id, new_id in [
-                ("cvmod-001", "module_001"),
-                ("cvmod-002", "module_002"),
-                ("cvmod-003", "module_003"),
-                ("cvmod-004", "module_004"),
-                ("cvmod-005", "module_005"),
-            ]:
-                try:
-                    connection.execute(
-                        "UPDATE tools SET tool_id=? WHERE tool_id=?", (new_id, old_id)
-                    )
-                except Exception:
-                    pass
-            # migration：animal-tagger → module_006
-            try:
-                connection.execute(
-                    "UPDATE tools SET tool_id='module_006', script_relative_path='cv_framework_runner.py',"
-                    " name='006 - 動物影像標記' WHERE tool_id='animal-tagger'"
-                )
-            except Exception:
-                pass
-            # migration：retire legacy non-module tools
-            try:
-                connection.execute(
-                    "UPDATE tools SET enabled=0 WHERE tool_id IN (?, ?)",
-                    ("opencv-tool", "cv-framework"),
-                )
-            except Exception:
-                pass
-            # migration：fix sheet_id "edge_analysis" → "edge-analysis" to match tool_id "sheet-edge-analysis"
-            # (CIM_SHEET_ID is now derived by stripping "sheet-" without replacing hyphens)
-            try:
-                connection.execute(
-                    "UPDATE sheet_tabs SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
-                )
-                connection.execute(
-                    "UPDATE sheets SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
-                )
-            except Exception:
-                pass
-            # migration：re-enable module_001 (was archived but has proper scripts)
-            try:
-                connection.execute(
-                    "UPDATE tools SET enabled=1, name='001 - OpenCV 影像處理' WHERE tool_id='module_001'"
-                )
-            except Exception:
-                pass
-            # migration：rename module_008 from old "Annotation Common Component Demo" to new video tracking
-            try:
-                connection.execute(
-                    "UPDATE tools SET name='008 - 影片追蹤標注', version='0.1.0',"
-                    " script_relative_path='cv_framework_runner.py'"
-                    " WHERE tool_id='module_008'"
-                )
-            except Exception:
-                pass
-            # ── Auto-register modules from plugin.yaml (source of truth) ────────
-            self._scan_and_register_plugins(connection)
-
-            # ── Static seeds: sheet tools + management + external (no plugin.yaml) ─
-            connection.executemany(
-                """
-                INSERT OR IGNORE INTO tools (
-                    tool_id, name, script_relative_path, version,
-                    signature, source_commit, author, approved_at, enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-annotation", "🐜 影像標註", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("management-center", "管理中心", "management_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("labelme-dino", "LabelMe Dino", "external_labelme_dino",
-                     "0.1.0", None, "seed", "system", None, 1),
-                ],
-            )
-            # Disable legacy tools no longer in the product
-            connection.execute(
-                "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
-                ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
-                 "sheet-annotation_workflow", "sheet-iwsc-annotation"),
-            )
-            # Ensure all static-seed active tools are prod-enabled
-            connection.execute(
-                "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
-                ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation",
-                 "management-center", "labelme-dino", "sheet-annotation"),
-            )
-            # Rename display name for existing installs
-            connection.execute(
-                "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
-                ("本地標注作業", "sheet-annotation_workflow", "標注工作流"),
-            )
-            connection.execute(
-                "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
-                ("🐜 影像標註", "sheet-annotation", "Annotation"),
-            )
-            # one-time migration: remove iWISC modules from the local annotation sheet
-            connection.execute(
-                "DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'"
-                " AND plugin_id IN (?,?,?,?)",
-                ("module_022", "module_023", "module_024", "module_025"),
-            )
+            self._create_core_tables(connection)
+            self._run_legacy_migrations(connection)
+            self._scan_and_register_plugins(connection)   # plugin.yaml = source of truth
+            self._seed_static_tools(connection)            # sheet/management/external (no plugin.yaml)
             self._reconcile_sheets_from_yaml(connection)
+
+    def _create_core_tables(self, connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tools (
+                tool_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                script_relative_path TEXT NOT NULL,
+                version TEXT NOT NULL,
+                signature TEXT,
+                source_commit TEXT,
+                author TEXT,
+                approved_at TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                enabled_prod INTEGER NOT NULL DEFAULT 0,
+                order_index INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        # Create tool_versions table (shared with plugin_registry)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_versions (
+                version_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_id      TEXT NOT NULL,
+                version      TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                changelog    TEXT,
+                author       TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                is_active    INTEGER NOT NULL DEFAULT 0,
+                source       TEXT NOT NULL DEFAULT 'filesystem'
+            )
+            """
+        )
+
+    def _run_legacy_migrations(self, connection) -> None:
+        """One-time, idempotent migrations for old installs (no-op on fresh DBs).
+        Each is guarded; new fresh installs simply match nothing."""
+        # migration：舊 DB 補欄位
+        for col_sql in [
+            "ALTER TABLE tools ADD COLUMN enabled_prod INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE tools ADD COLUMN description TEXT",
+            "ALTER TABLE tools ADD COLUMN vendor TEXT DEFAULT 'cimcore'",
+            "ALTER TABLE tools ADD COLUMN domain TEXT",
+            "ALTER TABLE tools ADD COLUMN legacy_id TEXT",
+            "ALTER TABLE tools ADD COLUMN deprecated_at TEXT",
+        ]:
+            try:
+                connection.execute(col_sql)
+            except Exception:
+                pass
+        # migration：cvmod-* → module_* (one-time rename)
+        for old_id, new_id in [
+            ("cvmod-001", "module_001"),
+            ("cvmod-002", "module_002"),
+            ("cvmod-003", "module_003"),
+            ("cvmod-004", "module_004"),
+            ("cvmod-005", "module_005"),
+        ]:
+            try:
+                connection.execute(
+                    "UPDATE tools SET tool_id=? WHERE tool_id=?", (new_id, old_id)
+                )
+            except Exception:
+                pass
+        # migration：animal-tagger → module_006
+        try:
+            connection.execute(
+                "UPDATE tools SET tool_id='module_006', script_relative_path='cv_framework_runner.py',"
+                " name='006 - 動物影像標記' WHERE tool_id='animal-tagger'"
+            )
+        except Exception:
+            pass
+        # migration：retire legacy non-module tools
+        try:
+            connection.execute(
+                "UPDATE tools SET enabled=0 WHERE tool_id IN (?, ?)",
+                ("opencv-tool", "cv-framework"),
+            )
+        except Exception:
+            pass
+        # migration：fix sheet_id "edge_analysis" → "edge-analysis" to match tool_id "sheet-edge-analysis"
+        # (CIM_SHEET_ID is now derived by stripping "sheet-" without replacing hyphens)
+        try:
+            connection.execute(
+                "UPDATE sheet_tabs SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
+            )
+            connection.execute(
+                "UPDATE sheets SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
+            )
+        except Exception:
+            pass
+        # migration：re-enable module_001 (was archived but has proper scripts)
+        try:
+            connection.execute(
+                "UPDATE tools SET enabled=1, name='001 - OpenCV 影像處理' WHERE tool_id='module_001'"
+            )
+        except Exception:
+            pass
+        # migration：rename module_008 from old "Annotation Common Component Demo" to new video tracking
+        try:
+            connection.execute(
+                "UPDATE tools SET name='008 - 影片追蹤標注', version='0.1.0',"
+                " script_relative_path='cv_framework_runner.py'"
+                " WHERE tool_id='module_008'"
+            )
+        except Exception:
+            pass
+
+    def _seed_static_tools(self, connection) -> None:
+        """Seed tools that have no plugin.yaml (sheet runners / management /
+        external), then apply product-state fixups. Idempotent."""
+        # ── Static seeds: sheet tools + management + external (no plugin.yaml) ─
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO tools (
+                tool_id, name, script_relative_path, version,
+                signature, source_commit, author, approved_at, enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-annotation", "🐜 影像標註", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("management-center", "管理中心", "management_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("labelme-dino", "LabelMe Dino", "external_labelme_dino",
+                 "0.1.0", None, "seed", "system", None, 1),
+            ],
+        )
+        # Disable legacy tools no longer in the product
+        connection.execute(
+            "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+            ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
+             "sheet-annotation_workflow", "sheet-iwsc-annotation"),
+        )
+        # Ensure all static-seed active tools are prod-enabled
+        connection.execute(
+            "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+            ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation",
+             "management-center", "labelme-dino", "sheet-annotation"),
+        )
+        # Rename display name for existing installs
+        connection.execute(
+            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+            ("本地標注作業", "sheet-annotation_workflow", "標注工作流"),
+        )
+        connection.execute(
+            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+            ("🐜 影像標註", "sheet-annotation", "Annotation"),
+        )
+        # one-time migration: remove iWISC modules from the local annotation sheet
+        connection.execute(
+            "DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'"
+            " AND plugin_id IN (?,?,?,?)",
+            ("module_022", "module_023", "module_024", "module_025"),
+        )
 
     def _reconcile_sheets_from_yaml(self, connection) -> list[dict]:
         """Read sheets/*.yaml and reconcile sheet rows + tabs for each definition.
