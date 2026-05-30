@@ -76,7 +76,6 @@
           "scripts/**/*",
           "plugins/**/*",
           "core/**/*",
-          "cim_platform/**/*",
           "sheets/**/*",
           "!tools/sample_csv_tool.py",
           "!tools/opencv_tool.py",

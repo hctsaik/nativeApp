@@ -34,10 +34,10 @@ start-dev.bat
 ```
 
 ### Sheet 驅動機制
-新 workflow sheet 由 `sidecar/python-engine/sheets/*.yaml` 定義，engine 啟動時自動載入。
+新 workflow sheet 由 YAML 定義，engine 啟動時自動載入（掃 `sidecar/python-engine/sheets/*.yaml` **與** `plugins/*/sheets/*.yaml`）。
 加一個新 sheet 只需新增 YAML 檔，不需修改 engine.py。
 
-目前只有一個 annotation sheet：`sheets/annotation.yaml`（🐜 影像標註，4 tabs）。
+目前只有一個 annotation sheet：`plugins/labeling/sheets/annotation.yaml`（🐜 影像標註，4 tabs）— 已隨架構重構移入 Labeling plugin。
 
 ### 環境變數由 engine 注入，不可手動設定
 `CIM_SHEET_ID`、`CIM_PLUGIN_ID`、`CIM_TOOL_ID`、`CIM_LOG_DIR` 等變數由
@@ -84,7 +84,7 @@ start-dev.bat
 - 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py` + `*_output.py`
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
 - 新工具需在 `engine.py` 的 seed 區塊（`source="seed"`）新增 inline entry，並確認 `seed_tools()` 函式有呼叫到
-- 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 建立或修改 YAML，而非修改 engine.py
+- 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py
 - 廢棄模組（010、019、022-025）：已標記 `enabled: false`，程式碼保留不刪除
 
 詳見 `README.md` 的「開發新工具」章節。

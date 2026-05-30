@@ -10,7 +10,6 @@ a = Analysis(
         ('scripts',      'scripts'),
         ('plugins',      'plugins'),        # Labeling plugin home (annotation domain at plugins/labeling/domain)
         ('core',         'core'),
-        ('cim_platform', 'cim_platform'),
         ('sheets',       'sheets'),
     ],
     hiddenimports=[
@@ -63,15 +62,11 @@ a = Analysis(
         'plugins.labeling.domain.tools.builtins',
         'plugins.labeling.domain.tools.contracts',
         'plugins.labeling.domain.tools.registry',
-        # platform core (canonical home)
+        # platform core (canonical home for external-system integration contracts)
         'core',
         'core.integrations',
         'core.integrations.connector',
         'core.integrations.tenant',
-        # platform connector abstraction (back-compat shims → core.integrations)
-        'cim_platform',
-        'cim_platform.connector',
-        'cim_platform.tenant',
     ],
     hookspath=[],
     hooksconfig={},

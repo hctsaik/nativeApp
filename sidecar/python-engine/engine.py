@@ -333,11 +333,14 @@ class SQLiteToolAdapter(ToolAdapter):
             logging.warning("PyYAML not available; skipping sheet YAML reconciliation")
             return
 
-        sheets_dir = ROOT_DIR / "sheets"
-        if not sheets_dir.exists():
+        # Scan both the platform sheets/ dir and each plugin's sheets/ dir
+        # (e.g. plugins/labeling/sheets/). Adding a sheet = drop a YAML in either.
+        yaml_paths = sorted((ROOT_DIR / "sheets").glob("*.yaml"))
+        yaml_paths += sorted((ROOT_DIR / "plugins").glob("*/sheets/*.yaml"))
+        if not yaml_paths:
             return
 
-        for yaml_path in sorted(sheets_dir.glob("*.yaml")):
+        for yaml_path in yaml_paths:
             try:
                 data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
             except Exception as exc:
