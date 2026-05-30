@@ -27,6 +27,8 @@ class SystemTenant:
     target_format: str
     api_token: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
+    # 宣告式連接器選型（rest/file/fake/…）；None 時由 server_host_name 的 scheme 推斷
+    connector_type: str | None = None
 
 
 @dataclass

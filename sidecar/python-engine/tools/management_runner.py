@@ -1026,8 +1026,10 @@ def _render_external_system_register() -> None:
     st.caption("新增的系統寫入 config/external_systems.yaml；資料來源頁載入時自動同步（token 從環境變數讀）。")
     if systems:
         for s in systems:
+            _ct = s.get("connector_type")
+            _ctlbl = f" · {_ct}" if _ct else " · 自動"
             st.markdown(f"- **{s.get('system_name','?')}** — `{s.get('server_host_name','')}` "
-                        f"({s.get('target_format','')})")
+                        f"({s.get('target_format','')}{_ctlbl})")
     else:
         st.caption("（目前無宣告的外部系統）")
 
@@ -1038,6 +1040,8 @@ def _render_external_system_register() -> None:
         col3, col4 = st.columns(2)
         fmt = col3.selectbox("目標格式", ["xanylabeling", "coco", "yolo", "labelme"])
         token_env = col4.text_input("API token 環境變數名", placeholder="IWSC_TOKEN")
+        ctype = st.selectbox("連接器類型", ["（自動：依 host scheme 推斷）", "rest", "file", "fake"],
+                             help="自動＝http(s)→rest、file://→file、fake://→fake；新協定可註冊後在此選擇")
         if st.form_submit_button("➕ 新增外部系統", type="primary"):
             if not (name and host):
                 st.error("系統名稱與 host 為必填。")
@@ -1045,6 +1049,8 @@ def _render_external_system_register() -> None:
                 entry = {"system_name": name, "server_host_name": host, "target_format": fmt}
                 if token_env:
                     entry["api_token_env"] = token_env
+                if not ctype.startswith("（自動"):
+                    entry["connector_type"] = ctype
                 systems = [s for s in systems
                            if not (s.get("system_name") == name
                                    and s.get("server_host_name") == host)]

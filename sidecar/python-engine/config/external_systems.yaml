@@ -10,3 +10,6 @@ systems: []
   #   server_host_name: http://localhost:8765
   #   target_format: xanylabeling
   #   api_token_env: IWSC_TOKEN
+  #   connector_type: rest   # optional: rest|file|fake (omit = infer from host scheme).
+  #                          # New protocols register a factory via
+  #                          # integrations.registry.register_connector(...).

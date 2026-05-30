@@ -110,6 +110,7 @@ class SQLiteMetadataStore:
             for _col_ddl in [
                 "ALTER TABLE annotation_tasks ADD COLUMN delivery_status TEXT",
                 "ALTER TABLE annotation_tasks ADD COLUMN original_annotation_json TEXT NOT NULL DEFAULT '{}'",
+                "ALTER TABLE system_tenants ADD COLUMN connector_type TEXT",
             ]:
                 try:
                     conn.execute(_col_ddl)
@@ -141,13 +142,15 @@ class SQLiteMetadataStore:
             conn.execute(
                 """
                 INSERT INTO system_tenants
-                    (tenant_id, system_name, server_host_name, target_format, api_token, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (tenant_id, system_name, server_host_name, target_format, api_token,
+                     created_at, connector_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tenant_id) DO UPDATE SET
                     system_name=excluded.system_name,
                     server_host_name=excluded.server_host_name,
                     target_format=excluded.target_format,
-                    api_token=excluded.api_token
+                    api_token=excluded.api_token,
+                    connector_type=excluded.connector_type
                 """,
                 (
                     tenant.tenant_id,
@@ -156,6 +159,7 @@ class SQLiteMetadataStore:
                     tenant.target_format,
                     tenant.api_token,
                     tenant.created_at,
+                    tenant.connector_type,
                 ),
             )
         return tenant
@@ -474,6 +478,7 @@ class SQLiteMetadataStore:
 # ── Row helpers ───────────────────────────────────────────────────────────────
 
 def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
+    keys = row.keys()
     return SystemTenant(
         tenant_id=row["tenant_id"],
         system_name=row["system_name"],
@@ -481,6 +486,7 @@ def _row_to_tenant(row: sqlite3.Row) -> SystemTenant:
         target_format=row["target_format"],
         api_token=row["api_token"],
         created_at=row["created_at"],
+        connector_type=row["connector_type"] if "connector_type" in keys else None,
     )
 
 

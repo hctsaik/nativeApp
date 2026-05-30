@@ -59,6 +59,7 @@ a = Analysis(
         'plugins.labeling.domain.integrations.connectors.rest_connector',
         'plugins.labeling.domain.integrations.contracts',
         'plugins.labeling.domain.integrations.profiles',
+        'plugins.labeling.domain.integrations.registry',
         'plugins.labeling.domain.label_ops',
         'plugins.labeling.domain.services',
         'plugins.labeling.domain.storage',
