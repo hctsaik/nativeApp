@@ -1,16 +1,20 @@
-"""Declarative connector factory/registry.
+"""Declarative connector factory/registry (labeling view of the platform registry).
 
-Adding a new external-system protocol used to require editing the hard-coded
-if/else in `services._get_connector`. Now a connector is selected declaratively:
+A connector is selected declaratively:
 
   1. explicit `tenant.connector_type` (set from external_systems.yaml
      `connector_type:`) wins;
   2. otherwise it is inferred from the `server_host_name` URL scheme
      (`fake://`→fake, `file://`→file, `http(s)://`→rest).
 
-A brand-new protocol only needs `register_connector("sql", factory)` (one line),
-no change to call sites. Built-ins (rest/file/fake) are registered lazily so the
-heavier connector modules are imported only when actually used.
+**Single source of truth**: connector factories live in the platform-level
+`core.integrations.registry`. This module owns only the labeling-specific URL
+inference (`infer_type`) and the built-in rest/file/fake factories, which it
+registers INTO core (labeling → core is the allowed dependency direction; core
+never imports labeling). `_FACTORIES` is an alias of core's dict, so there is
+exactly one store — `register_connector`/`build_connector`/`available_types`
+all operate on it, and scaffolded non-REST connectors (autodiscovered by core)
+are reachable here automatically.
 """
 
 from __future__ import annotations
@@ -18,31 +22,32 @@ from __future__ import annotations
 from typing import Callable
 from urllib.parse import urlparse
 
+from core.integrations import registry as _core
 from plugins.labeling.domain.core.models import SystemTenant
 from plugins.labeling.domain.integrations.contracts import ExternalSystemConnector
 
-# name → factory(tenant, **opts) -> ExternalSystemConnector
-_FACTORIES: dict[str, Callable[..., ExternalSystemConnector]] = {}
+# Alias the platform registry's factory dict — single shared store (no second
+# dict). Tests that touch `registry._FACTORIES` therefore see the real store.
+_FACTORIES: dict[str, Callable[..., ExternalSystemConnector]] = _core._FACTORIES
 
 
 def register_connector(name: str, factory: Callable[..., ExternalSystemConnector]) -> None:
-    """Register (or override) a connector factory under a declarative type name."""
-    _FACTORIES[name.strip().lower()] = factory
+    """Register (or override) a connector factory (delegates to the core store)."""
+    _core.register_connector(name, factory)
+
+
+def _ensure_builtins() -> None:
+    """Register labeling's rest/file/fake factories into the core store (idempotent)
+    and pick up any scaffolded non-REST connectors (cached autodiscover)."""
+    for name, factory in (("rest", _rest_factory), ("file", _file_factory), ("fake", _fake_factory)):
+        if not _core.is_registered(name):
+            _core.register_connector(name, factory)
+    _core.autodiscover()
 
 
 def available_types() -> list[str]:
     _ensure_builtins()
-    # Merge in platform-level connectors (scaffolded non-REST connectors that
-    # auto-registered via core.integrations.registry.autodiscover) so the
-    # Management Center connector_type dropdown also lists them.
-    types = set(_FACTORIES)
-    try:
-        from core.integrations import registry as _core_registry  # noqa: PLC0415
-        _core_registry.autodiscover()
-        types.update(_core_registry.available_types())
-    except Exception:
-        pass
-    return sorted(types)
+    return _core.available_types()
 
 
 def infer_type(server_host_name: str) -> str:
@@ -60,26 +65,12 @@ def build_connector(tenant: SystemTenant, **opts) -> ExternalSystemConnector:
     _ensure_builtins()
     ctype = (getattr(tenant, "connector_type", None) or "").strip().lower() \
         or infer_type(tenant.server_host_name)
-    factory = _FACTORIES.get(ctype)
-    if factory is not None:
-        return factory(tenant, **opts)
-    # Not a labeling built-in → delegate to the platform-level registry, which
-    # holds non-REST connectors scaffolded via `scaffold connector` and
-    # auto-registered by core.integrations.registry.autodiscover(). This is the
-    # single bridge that makes a scaffolded connector reachable by the live
-    # task-claim path (labeling → core is the allowed dependency direction).
-    try:
-        from core.integrations import registry as _core_registry  # noqa: PLC0415
-        _core_registry.autodiscover()
-        if _core_registry.is_registered(ctype):
-            return _core_registry.build_connector(ctype, tenant, **opts)
-    except Exception as exc:  # noqa: BLE001
-        import logging  # noqa: PLC0415
-        logging.warning("core connector registry delegation failed for %r: %s", ctype, exc)
-    raise ValueError(
-        f"未知的 connector_type：{ctype!r}（可用：{', '.join(available_types())}）。"
-        "請在 external_systems.yaml 設定正確的 connector_type，或用 "
-        "`python tools/scaffold.py connector <name>` 產生連接器（放 core/integrations/connectors/）。")
+    if not _core.is_registered(ctype):
+        raise ValueError(
+            f"未知的 connector_type：{ctype!r}（可用：{', '.join(available_types())}）。"
+            "請在 external_systems.yaml 設定正確的 connector_type，或用 "
+            "`python tools/scaffold.py connector <name>` 產生連接器（放 core/integrations/connectors/）。")
+    return _core.build_connector(ctype, tenant, **opts)
 
 
 # ── built-in factories (lazy) ────────────────────────────────────────────────
@@ -110,10 +101,3 @@ def _fake_factory(tenant: SystemTenant, **_opts) -> ExternalSystemConnector:
         for i in range(1, 4)
     ]
     return FakeConnector(tasks=tasks, download_url="")
-
-
-def _ensure_builtins() -> None:
-    if not _FACTORIES:
-        register_connector("rest", _rest_factory)
-        register_connector("file", _file_factory)
-        register_connector("fake", _fake_factory)
