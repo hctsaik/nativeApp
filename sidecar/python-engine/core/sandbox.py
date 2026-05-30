@@ -1,0 +1,78 @@
+"""Lightweight load-time plugin sandbox (AST deny-list).
+
+Scans module source for obviously-dangerous constructs (process/network/shell,
+dynamic code execution) so a third-party module can't silently run them. Used by
+plugin_loader BEFORE exec. Enforcement is configurable via CIM_PLUGIN_SANDBOX:
+
+    CIM_PLUGIN_SANDBOX=enforce   → refuse to load a module with violations
+    CIM_PLUGIN_SANDBOX=warn      → log violations but load (default)
+    CIM_PLUGIN_SANDBOX=off       → skip the scan
+
+This is a guard rail, not a full security sandbox (real isolation needs process/
+container boundaries) — but it turns the previously upload-only check into a
+load-time check so a hand-placed/imported module is screened too.
+"""
+
+from __future__ import annotations
+
+import ast
+import os
+
+BLOCKED_IMPORTS = {"subprocess", "socket", "ctypes", "multiprocessing"}
+BLOCKED_CALLS = {"eval", "exec", "compile", "__import__", "os.system", "os.popen"}
+
+
+def scan_source(source: str, filename: str = "<module>") -> list[str]:
+    """Return a list of human-readable violations (empty = clean). Pure."""
+    violations: list[str] = []
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as exc:
+        return [f"{filename}: 語法錯誤無法解析：{exc}"]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in BLOCKED_IMPORTS:
+                    violations.append(f"{filename}:{node.lineno}: 禁用模組 import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root in BLOCKED_IMPORTS:
+                violations.append(f"{filename}:{node.lineno}: 禁用模組 from {node.module} import …")
+        elif isinstance(node, ast.Call):
+            name = _call_name(node.func)
+            if name in BLOCKED_CALLS:
+                violations.append(f"{filename}:{node.lineno}: 禁用呼叫 {name}(…)")
+    return violations
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return ""
+
+
+def mode() -> str:
+    return (os.environ.get("CIM_PLUGIN_SANDBOX") or "warn").strip().lower()
+
+
+class SandboxViolation(RuntimeError):
+    """Raised when CIM_PLUGIN_SANDBOX=enforce and a module has violations."""
+
+
+def check_source(source: str, filename: str = "<module>", *, logger=None) -> list[str]:
+    """Scan + apply the configured policy. Returns violations (after logging);
+    raises SandboxViolation when mode == enforce and violations exist."""
+    m = mode()
+    if m == "off":
+        return []
+    violations = scan_source(source, filename)
+    if violations:
+        msg = f"plugin sandbox: {filename} 有 {len(violations)} 個違規：\n  " + "\n  ".join(violations)
+        if logger is not None:
+            logger.warning(msg)
+        if m == "enforce":
+            raise SandboxViolation(msg)
+    return violations

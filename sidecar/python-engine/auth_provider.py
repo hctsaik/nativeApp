@@ -18,11 +18,24 @@ class AuthProvider:
         self._store = store or (SQLiteManagementStore(db_path) if db_path is not None else None)
 
     def get_current_role(self) -> str:
-        """Return the role of the current user.
+        """Return the role of the current user via a pluggable identity source.
 
-        `CIM_USER_ROLE` is a local development/testing override. Production
-        identity can replace this method without changing callers.
+        Resolution order (first hit wins):
+          1. CIM_IDENTITY_FILE — path to a JSON `{"role": "..."}` written by a
+             production SSO/IdP integration (the supported extension point).
+          2. CIM_USER_ROLE — local dev/test override.
+          3. 'admin' default.
         """
+        id_file = os.environ.get("CIM_IDENTITY_FILE")
+        if id_file:
+            try:
+                import json  # noqa: PLC0415
+                data = json.loads(Path(id_file).read_text(encoding="utf-8"))
+                role = str(data.get("role") or "").strip()
+                if role:
+                    return role
+            except Exception:
+                pass
         return (os.environ.get("CIM_USER_ROLE") or "admin").strip() or "admin"
 
     def check_permission(self, plugin_id: str, action: str) -> bool:

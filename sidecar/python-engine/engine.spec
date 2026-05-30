@@ -74,6 +74,7 @@ a = Analysis(
         'core.forms',
         'core.output',
         'core.rbac',
+        'core.sandbox',
         'core.external_systems',
         'core.integrations',
         'core.integrations.connector',
