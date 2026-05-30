@@ -1,5 +1,0 @@
-"""Animal annotation domain presets."""
-
-from annotation.domains.animal.schema_presets import animal_detection_schema
-
-__all__ = ["animal_detection_schema"]

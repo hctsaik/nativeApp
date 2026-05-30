@@ -1,1 +1,0 @@
-"""Annotation import/export adapters."""
