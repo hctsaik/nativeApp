@@ -275,3 +275,29 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 **結論趨勢 62→87.9 持續收斂**。A 類補完預估 ~91–93；跨 95 的主要阻力為 B 類大型/外部系統，屬此類單機 Electron + Streamlit 邊緣平台的合理領域上限。對目標使用者（邊緣 CV/標註的操作員、公民開發者、管理員、整合工程師）而言已是相當完整的 low-code 平台。
 
 > 註：`module_016` classifier 自身 2 個 `skipped`-count 業務測試為**既有失敗**（不在 `test:python` 範圍，與本評估之 no-code 變更無關），另案處理。
+
+## Round 9（2026-05-30）— 公平含硬骨頭取樣，揭露兩個領域內真缺口
+
+評估官依平台定位（單機邊緣 CV/標註）公平評分，刻意納入兩個目標使用者**真實會遇到**的硬情境，平均 **82.5**（低於 R8 87.9，非退步，是平衡取樣）：
+
+| # | 領域內情境 | 分 | # | 領域內情境 | 分 |
+|---|------|----|----|------|----|
+| 1 | 操作員跑標註工作流 | 90 | 6 | GUI 設沙箱 enforce + deny requests | 85 |
+| 2 | 公民開發者宣告式建工具 | 89 | 7 | 發布/回溯（rollback diff 不可見） | 84 |
+| 3 | GUI 視覺矩陣設權限 | 88 | **8** | **接非標準契約外部系統** | **60** |
+| 4 | GUI 註冊外部系統 + 測連線 | 86 | **9** | **操作端連線失敗自助排錯** | **76** |
+| 5 | GUI sheet builder 組工作流 | 84 | 10 | 打包 DEV→PROD 可攜包 | 83 |
+
+**揭露的兩個領域內真缺口（已於本輪修復）**：
+- **#8（60）連接器選型寫死**：`services._get_connector` 寫死 Rest/Fake，新協定要改 call site。
+  → **修復**：新增 `integrations/registry.py` 宣告式連接器工廠（`register_connector` + `build_connector`，依 `tenant.connector_type` 或 host scheme 推斷）；`SystemTenant.connector_type` 持久化（DB migration）；`external_systems.yaml` 與管理中心 External 表單可宣告式選 connector_type（MCP assert_text PASS）。新協定只需註冊工廠一行，不改 call site。`test_connector_registry.py`。
+- **#9（76）操作端排錯偏 log**：連線失敗只丟原始錯誤字串。
+  → **修復**：新增 `core/guidance.py`（把 connection-refused / 401 / no-tenant / timeout 等訊號對應到 actionable 卡片：一句原因 + 具體步驟 + 原始錯誤摺疊），接進 module_026 output 錯誤分支。`test_guidance.py`。
+
+| 輪 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|----|---|---|---|---|---|---|---|---|---|
+| 平均 | 62 | 66.1 | 63.8 | 63.6 | 74.5 | 79.6 | 84.4 | 87.9 | 82.5* |
+
+\* R9 為公平含硬情境取樣；#8/#9 修復後同類情境預估回升至 ~85–88。`test:python 625 passed`。
+
+**距 95 的最終定論（跨 R6–R9 一致）**：在平台**定位內**，補完中型 GUI（連接器工廠 ✅、操作端引導 ✅、rollback diff、workflow 條件分支）可達 ~90–93；跨 95 的主要殘餘阻力為**領域外**三類——企業 OIDC/SAML IdP、跨機模組市集 + 簽章、OS/容器級沙箱隔離——屬單機 Electron + Streamlit 邊緣平台的合理上限，需多週/外部系統，**不應以其缺席作為平台在其定位內不易用的依據**。對目標使用者（操作員/公民開發者/管理員/整合工程師）而言，本平台已是相當完整、可自助的 low-code 平台。

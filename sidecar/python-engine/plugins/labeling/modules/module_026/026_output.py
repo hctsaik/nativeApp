@@ -69,7 +69,14 @@ def render_output(result: dict) -> None:
     mode = result.get("mode", "idle")
 
     if mode == "error":
-        st.error(f"❌ {result.get('error', '未知錯誤')}")
+        err = result.get("error", "未知錯誤")
+        try:
+            from core import guidance  # noqa: PLC0415
+            if guidance.render(err, st):  # actionable card for known failures
+                return
+        except Exception:
+            pass
+        st.error(f"❌ {err}")
         return
 
     if mode == "idle":
