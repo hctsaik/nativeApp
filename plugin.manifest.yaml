@@ -23,7 +23,8 @@ depends_on:
 
 provides:
   domain:
-    current_path: annotation/            # absolute-import package `annotation` (label_ops, services, core, storage, formats, adapters, integrations)
+    current_path: plugins/labeling/domain/   # ✅ moved here (P6); imported as `plugins.labeling.domain` (label_ops, services, core, storage, formats, adapters, integrations)
+    import_name: plugins.labeling.domain
     target_path: plugins/labeling/domain/
   sheets:
     - id: annotation
