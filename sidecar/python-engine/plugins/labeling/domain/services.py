@@ -68,6 +68,32 @@ class AnnotationService:
     def list_tenants(self) -> list[dict[str, Any]]:
         return [_tenant_to_dict(t) for t in self.workspace.metadata.list_tenants()]
 
+    def sync_external_systems(self, declared: list[dict]) -> list[str]:
+        """Idempotently register declared external systems (no-code via YAML).
+
+        `declared` is a list of {system_name, server_host_name, target_format,
+        api_token? | api_token_env?}. Matches existing tenants by
+        (system_name, server_host_name) so re-syncing never duplicates. Tokens
+        are read from the named env var (`api_token_env`) — never stored in the
+        YAML. Returns the names of newly-registered systems.
+        """
+        import os  # noqa: PLC0415
+        existing = {(t["system_name"], (t["server_host_name"] or "").rstrip("/"))
+                    for t in self.list_tenants()}
+        registered: list[str] = []
+        for sysd in declared or []:
+            name = sysd.get("system_name")
+            host = (sysd.get("server_host_name") or "").rstrip("/")
+            fmt = sysd.get("target_format")
+            if not (name and host and fmt) or (name, host) in existing:
+                continue
+            token = sysd.get("api_token") or (
+                os.environ.get(sysd["api_token_env"]) if sysd.get("api_token_env") else None)
+            self.register_tenant(name, host, fmt, api_token=token)
+            registered.append(name)
+            existing.add((name, host))
+        return registered
+
     def get_tenant(self, tenant_id: str) -> dict[str, Any]:
         tenant = self._require_tenant(tenant_id)
         return _tenant_to_dict(tenant)

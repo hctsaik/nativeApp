@@ -145,13 +145,23 @@ def _render_remote(cfg: dict) -> dict:
 def _render_iwsc() -> dict:
     try:
         service = _get_service()
+        # No-code: register any external systems declared in
+        # config/external_systems.yaml (idempotent — edit YAML to add systems).
+        try:
+            from core.external_systems import load_declared_systems  # noqa: PLC0415
+            service.sync_external_systems(load_declared_systems())
+        except Exception:
+            pass
         tenants = service.list_tenants()
     except Exception as exc:
         st.error(f"❌ 無法載入 Tenant 清單：{exc}")
         return {"mode": "iwsc"}
 
     if not tenants:
-        st.warning("尚無已註冊的外部系統。請至「管理中心 → 標註權限管理」新增外部系統後再試。")
+        st.warning(
+            "尚無外部系統。可在 `config/external_systems.yaml` 宣告（編輯即生效），"
+            "或透過 annotation MCP `register_tenant` 註冊。"
+        )
         return {"mode": "iwsc"}
 
     tenant_map = {f"{t['system_name']} ({t['tenant_id'][:8]}…)": t for t in tenants}
