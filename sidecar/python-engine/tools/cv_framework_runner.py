@@ -47,8 +47,10 @@ def discover_modules() -> dict[str, str]:
     except ImportError:
         return {}
 
+    from plugin_loader import module_yaml_paths  # noqa: PLC0415
+
     modules: dict[str, str] = {}
-    for yaml_path in sorted(SCRIPTS_DIR.glob("*/plugin.yaml")):
+    for yaml_path in module_yaml_paths():  # scripts/ + plugins/*/modules/
         folder = yaml_path.parent
         if not folder.is_dir():
             continue
@@ -119,6 +121,19 @@ def _post_message(msg_type: str, payload: dict) -> None:
     )
 
 
+def _load_form_schema(plugin_id: str):
+    """Return the `form:` declarative input schema from a module's plugin.yaml
+    (or None). Used to auto-render input for modules that ship no *_input.py."""
+    try:
+        import yaml  # noqa: PLC0415
+        from plugin_loader import find_module_folder  # noqa: PLC0415
+        yaml_path = find_module_folder(plugin_id) / "plugin.yaml"
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        return data.get("form")
+    except Exception:
+        return None
+
+
 def run_input() -> None:
     st.set_page_config(page_title="CIM CV 框架 — Input", layout="wide")
     _hide_streamlit_chrome()
@@ -141,10 +156,20 @@ def run_input() -> None:
             selected_name = st.selectbox("選擇模組", list(modules.keys()))
         module_id = modules[selected_name]
     content_json = _get_content_json(module_id) if not PluginLoader.is_dev_mode() else None
-    input_mod = load_layer(module_id, "input", content_json)
     process_mod = load_layer(module_id, "process", content_json)
 
-    params = input_mod.render_input()
+    # No-code input: a module may ship no *_input.py and instead declare its
+    # input fields in plugin.yaml `form:` — the framework auto-renders them.
+    try:
+        input_mod = load_layer(module_id, "input", content_json)
+        params = input_mod.render_input()
+    except (FileNotFoundError, KeyError):
+        schema = _load_form_schema(module_id)
+        if schema is None:
+            raise
+        from core.forms import render as _render_form  # noqa: PLC0415
+        st.subheader(selected_name)
+        params = _render_form(schema, st)
 
     if st.button("▶ 執行", type="primary"):
         _post_message("EXECUTE_START", {})

@@ -70,7 +70,7 @@ start-dev.bat
 | `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
 | `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
-| iWISC 任務列表空白 | 外部 iWISC server 未啟動，或 Tenant 尚未在管理中心設定 | 啟動 iwsc-sample-server（port 8765）；或至管理中心新增 Tenant |
+| iWISC 任務列表空白 | 外部 iWISC server 未啟動，或尚未註冊 Tenant（外部系統連線）| 啟動 iwsc-sample-server（port 8765）；註冊 Tenant 目前透過 `AnnotationService.register_tenant` 或 annotation MCP `register_tenant`（**管理中心 GUI 表單為待補功能**，見 `docs/platform/nocode-lowcode-evaluation.md` 缺口 #3）|
 
 ## 架構地雷（容易踩的坑）
 
@@ -81,7 +81,9 @@ start-dev.bat
 
 ## 工具開發規則
 
-- 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py` + `*_output.py`
+- **No-code input（宣告式表單）**：簡單工具可**不寫 `*_input.py`**，改在 `plugin.yaml` 用 `form:` 宣告輸入欄位（type: text/number/integer/select/multiselect/checkbox/slider/textarea/file），框架（`cv_framework_runner`）會自動渲染表單並把值傳給 `execute_logic(params)`。範例見 `scripts/module_007/`（零 input 程式碼）；表單引擎 `core/forms.py`。只需寫 `*_process.py`（運算）與 `*_output.py`（呈現）。
+- 進階/自訂 UI 才需手寫 `*_input.py`（`render_input()` 回傳 params dict）。
+- 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py`（或宣告式 `form:`）+ `*_output.py`
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
 - 新工具需在 `engine.py` 的 seed 區塊（`source="seed"`）新增 inline entry，並確認 `seed_tools()` 函式有呼叫到
 - 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py

@@ -8,6 +8,8 @@
 
 | 我想做… | 用哪個 | import / 用法 | 目前位置 | 未來去向 |
 |---------|--------|---------------|----------|----------|
+| 宣告式 input 表單（no-code，免寫 `*_input.py`）| `core.forms` | plugin.yaml 加 `form:` 欄位清單；框架自動渲染。範例 `scripts/module_007/`。程式碼 `from core.forms import render` | `core/forms.py` | ✅ 已在 core |
+| 找模組資料夾（scripts/ 或 plugins/*/modules/）| `find_module_folder` | `from plugin_loader import find_module_folder, module_yaml_paths` | `plugin_loader.py` | core/plugins |
 | 寫 log | `get_logger` | `from log_utils import get_logger; log = get_logger("module_012")` | `tools/log_utils.py` | `core/logging` |
 | 開/查 manifest DB | `_manifest_db` DAL | `init_db(db_path)` / `create_manifest(...)` / `add_manifest_items(db_path, mid, items)`（所有函式第一參數收 `db_path`）| `scripts/shared/_manifest_db.py` | `core/db/manifest` |
 | 通用 SQLite 存取 | `SimpleDAO` | `from db_utils import SimpleDAO` | `tools/db_utils.py` | `core/db` |

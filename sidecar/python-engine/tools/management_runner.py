@@ -628,8 +628,12 @@ def _open_preview_modal(input_url: str, tool_name: str) -> None:
 
 def _render_module_preview(plugin_id: str, tool_id: str, manage_disabled: bool, tool_name: str = "") -> None:
     import yaml as _yaml  # noqa: PLC0415
+    from plugin_loader import find_module_folder  # noqa: PLC0415
 
-    yaml_path = _SCRIPTS_DIR / plugin_id / "plugin.yaml"
+    try:
+        yaml_path = find_module_folder(plugin_id) / "plugin.yaml"
+    except Exception:
+        yaml_path = _SCRIPTS_DIR / plugin_id / "plugin.yaml"
     meta: dict[str, Any] = {}
     if yaml_path.exists():
         try:

@@ -15,6 +15,25 @@ def _root() -> Path:
 SCRIPTS_DIR = _root() / "scripts"
 
 
+def module_roots() -> list[Path]:
+    """All roots that contain module folders: scripts/ (platform/other modules)
+    + each plugin's modules dir (plugins/<plugin>/modules/)."""
+    return [SCRIPTS_DIR] + sorted((_root() / "plugins").glob("*/modules"))
+
+
+def module_yaml_paths() -> list[Path]:
+    """Every module's plugin.yaml across all roots (scripts/ + plugins/*/modules/)."""
+    out: list[Path] = []
+    for root in module_roots():
+        out += sorted(root.glob("*/plugin.yaml"))
+    return out
+
+
+def find_module_folder(plugin_id: str) -> Path:
+    """Public dual-root folder resolver (scripts/ + plugins/*/modules/)."""
+    return _find_folder(plugin_id, SCRIPTS_DIR)
+
+
 class PluginLoader:
     """Load a module layer (input / process / output) in dev or prod mode."""
 
