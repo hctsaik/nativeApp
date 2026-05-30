@@ -62,22 +62,29 @@ class PluginLoader:
 
 
 def _find_folder(plugin_id: str, scripts_dir: Path) -> Path:
-    """Locate the scripts folder for a given plugin_id."""
+    """Locate the module folder for a given plugin_id.
+
+    Searches scripts/ (platform/other modules) and each plugin's modules dir
+    (plugins/<plugin>/modules/, e.g. the relocated Labeling GUI modules).
+    """
+    roots = [scripts_dir] + sorted((_root() / "plugins").glob("*/modules"))
     # Direct match: plugin_id is 'module_003'
-    direct = scripts_dir / plugin_id
-    if direct.is_dir():
-        return direct
+    for root in roots:
+        direct = root / plugin_id
+        if direct.is_dir():
+            return direct
     # Scan all module_* folders for a matching plugin.yaml id
     import yaml  # noqa: PLC0415
-    for folder in scripts_dir.glob("module_*"):
-        manifest = folder / "plugin.yaml"
-        if manifest.exists():
-            try:
-                data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-                if data.get("id") == plugin_id:
-                    return folder
-            except Exception:
-                pass
+    for root in roots:
+        for folder in root.glob("module_*"):
+            manifest = folder / "plugin.yaml"
+            if manifest.exists():
+                try:
+                    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+                    if data.get("id") == plugin_id:
+                        return folder
+                except Exception:
+                    pass
     raise FileNotFoundError(f"No folder found for plugin_id '{plugin_id}'")
 
 

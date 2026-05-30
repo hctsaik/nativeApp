@@ -423,8 +423,11 @@ class SQLiteToolAdapter(ToolAdapter):
             "sheet":            "sheet_runner.py",
             "management":       "management_runner.py",
         }
-        scripts_dir = ROOT_DIR / "scripts"
-        for yaml_path in sorted(scripts_dir.glob("*/plugin.yaml")):
+        # Scan scripts/*/plugin.yaml AND each plugin's modules
+        # (plugins/<plugin>/modules/<module>/plugin.yaml).
+        yaml_paths = sorted((ROOT_DIR / "scripts").glob("*/plugin.yaml"))
+        yaml_paths += sorted((ROOT_DIR / "plugins").glob("*/modules/*/plugin.yaml"))
+        for yaml_path in yaml_paths:
             try:
                 data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
             except Exception as exc:

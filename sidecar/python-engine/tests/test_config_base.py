@@ -22,7 +22,12 @@ import pytest
 ENGINE_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ENGINE_DIR / "scripts"
 
-_CONFIG_FILES = sorted(SCRIPTS_DIR.glob("module_*/_config.py"))
+# Modules live under scripts/ (platform/other) and plugins/*/modules/ (e.g. the
+# relocated Labeling GUI modules) — scan both so every module _config.py is covered.
+_CONFIG_FILES = (
+    sorted(SCRIPTS_DIR.glob("module_*/_config.py"))
+    + sorted(ENGINE_DIR.glob("plugins/*/modules/module_*/_config.py"))
+)
 _MODULE_IDS = [p.parent.name.split("_", 1)[1] for p in _CONFIG_FILES]
 
 

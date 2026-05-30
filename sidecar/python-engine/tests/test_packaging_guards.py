@@ -79,6 +79,20 @@ def _eval_path_node(node: ast.AST, file_dir: Path, assigns: dict[str, ast.AST]):
         if isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
             return left / node.right.value
         return None
+    if isinstance(node, ast.Subscript):
+        # handle X.parents[N]  → go up N levels from X
+        val = node.value
+        if isinstance(val, ast.Attribute) and val.attr == "parents":
+            base = _eval_path_node(val.value, file_dir, assigns)
+            if base is None:
+                return None
+            idx_node = node.slice
+            if isinstance(idx_node, ast.Constant) and isinstance(idx_node.value, int):
+                try:
+                    return base.parents[idx_node.value]
+                except IndexError:
+                    return None
+        return None
     if isinstance(node, ast.Attribute):
         base = _eval_path_node(node.value, file_dir, assigns)
         if base is None:

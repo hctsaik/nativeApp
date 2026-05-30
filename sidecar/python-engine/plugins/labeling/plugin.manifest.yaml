@@ -45,8 +45,12 @@ provides:
     current_path: tests/annotation/              # + scripts/module_*/*_test.py
     target_path: plugins/labeling/tests/
   modules:
+    current_path: plugins/labeling/modules/   # ✅ moved here (P6); engine + plugin_loader scan scripts/ AND plugins/*/modules/
+    target_path: plugins/labeling/modules/
     # Active Labeling GUI modules. Folder names + tool IDs stay module_NNN (D3);
     # semantic names are metadata for discoverability / sidebar grouping.
+    # shared/ stays at scripts/shared (platform-shared, also used by module_021);
+    # moved modules reach it via _HERE.parents[3]/"scripts"/"shared".
     active:
       - { id: module_006, slug: animal-image-tagger,     name: 動物影像標記 }
       - { id: module_008, slug: video-tracking-annotator, name: 影片追蹤標注 }
