@@ -8,25 +8,30 @@
 
 | 我想做… | 用哪個 | import / 用法 | 目前位置 | 未來去向 |
 |---------|--------|---------------|----------|----------|
-| 宣告式 input 表單（no-code，免寫 `*_input.py`）| `core.forms` | plugin.yaml 加 `form:` 欄位清單；框架自動渲染。範例 `scripts/module_007/`。程式碼 `from core.forms import render` | `core/forms.py` | ✅ 已在 core |
+| 宣告式 input 表單（no-code，免寫 `*_input.py`）| `core.forms` | plugin.yaml 加 `form:` 欄位清單（含 date/time）；框架自動渲染。範例 `scripts/module_007/`。`from core.forms import render` | `core/forms.py` | ✅ 已在 core |
+| 宣告式 output（no-code，免寫 `*_output.py`）| `core.output` | plugin.yaml 加 `output:` 區塊（metric/text/table/list/json…）；`from core.output import render` | `core/output.py` | ✅ 已在 core |
+| 啟動外部 GUI 工具（Label tool 模式，零 code）| `core.external_gui` | plugin.yaml 宣告 `external_gui:`（exe 來源/args/collect.parse）；框架渲染啟動鈕、回收輸出、啟動前查 RBAC。`from core.external_gui import render_launcher` | `core/external_gui.py` | ✅ 已在 core |
+| 建工具/sheet/plugin/connector 骨架（CLI）| `tools/scaffold.py` | `python tools/scaffold.py module\|sheet\|plugin\|connector [--external-gui] [--create-stubs]`；id 可省略自動配號 | `tools/scaffold.py` | — |
+| 熱載新增/改動的工具（免重啟）| engine `/reload` | `POST /reload` → `rescan()` 重掃 plugin.yaml+sheet YAML+connector autodiscover；portal 有「重新載入工具」鈕 | `engine.py`（`rescan`）| — |
 | 找模組資料夾（scripts/ 或 plugins/*/modules/）| `find_module_folder` | `from plugin_loader import find_module_folder, module_yaml_paths` | `plugin_loader.py` | core/plugins |
 | 寫 log | `get_logger` | `from log_utils import get_logger; log = get_logger("module_012")` | `tools/log_utils.py` | `core/logging` |
 | 開/查 manifest DB | `_manifest_db` DAL | `init_db(db_path)` / `create_manifest(...)` / `add_manifest_items(db_path, mid, items)`（所有函式第一參數收 `db_path`）| `scripts/shared/_manifest_db.py` | `core/db/manifest` |
 | 通用 SQLite 存取 | `SimpleDAO` | `from db_utils import SimpleDAO` | `tools/db_utils.py` | `core/db` |
 | 寫/讀工具執行結果 | `write_result`/`read_result` | `from tool_result import write_result, read_result` | `tools/tool_result.py` | `core`（執行框架）|
 | 通知 portal 開始/完成 | `notify_start`/`notify_complete` | `from tool_comms import notify_start, notify_complete` | `tools/tool_comms.py` | `core`（執行框架）|
-| 模組設定讀寫 / log 路徑 / 專案根 | 各模組 `_config.py` | `load_config()` / `save_config()` / `get_manifest_db_path()` | `scripts/module_NNN/_config.py`（**目前 20+ 份重複骨架**）| `core/config`+`core/paths`（P2 抽共用 helper，模組只留 `_DEFAULTS`）|
+| 模組設定讀寫 / log 路徑 / 專案根 | `_config_base` + 各模組 `_config.py` | `load_config()` / `save_config()` / `manifest_db_path()` 等委派 `scripts/shared/_config_base.py`（模組只留 `_DEFAULTS`/特例）| `scripts/shared/_config_base.py`（**已抽共用，19/20 模組委派；module_012 仍含特例**）| `core/config`+`core/paths` |
 | Streamlit 共用 UI（日期/Parts/toast/下載/中文覆蓋）| `ui_components` | `date_input_range(...)` / `save_success_toast()` / `inject_streamlit_zh_overrides()` | `scripts/shared/ui_components.py` | `plugins/labeling/shared_ui` 或 `core/ui` |
 | 影像預覽元件 | `image_widget` | `render_image_preview(...)` | `scripts/shared/image_widget.py` | 同上 |
 | 說明按鈕（? 徽章）| `_help` | `render_help_button(module_id, side, title)` | `scripts/shared/_help.py` | 同上 |
 | 資料來源連接器（ZIP/遠端）| `_data_connector` | `DataConnector` ABC / `ZipPackageConnector` | `scripts/shared/_data_connector.py` | `plugins/labeling/integrations` |
 | 接外部任務系統（iWISC 等）| `ExternalSystemConnector` | `from core.integrations import ExternalSystemConnector` | `core/integrations/connector.py`（`cim_platform.connector` 為相容 shim）| ✅ 已在 core |
+| 註冊/解析 connector（含非-REST，零 call-site）| `core.integrations.registry` | `register_connector(name, factory)` / `build_connector` / `autodiscover()`（掃 `core/integrations/connectors/*.py`）；labeling registry 對未知型別委派此處 | `core/integrations/registry.py` | ✅ 已在 core |
 | 外部系統租戶設定 | `SystemTenant` | `from core.integrations import SystemTenant, load_tenant_from_file` | `core/integrations/tenant.py`（`cim_platform.tenant` 為相容 shim）| ✅ 已在 core |
 | 標注領域服務（資料集/標注集/匯出）| `AnnotationService` | `from plugins.labeling.domain.services import AnnotationService` | `plugins/labeling/domain/services.py` | ✅ 已搬 |
 | 標注資料模型 | `plugins.labeling.domain.core.models` | `DatasetManifest` / `AnnotationSet` / `AnnotationItem` | `plugins/labeling/domain/core/models.py` | ✅ 已搬 |
 | 格式轉換（COCO/YOLO/x-anylabeling…）| domain adapters | `from plugins.labeling.domain.adapters.coco import …` | `plugins/labeling/domain/adapters/`、`…/formats/` | ✅ 已搬 |
 | 發布/回溯/載入 plugin | `PluginRegistry`/`PluginLoader` | 由 engine 使用 | `plugin_registry.py`、`plugin_loader.py` | `core/plugins` |
-| 權限/角色 | `AuthProvider` | `from auth_provider import AuthProvider` | `auth_provider.py` | `core/auth` |
+| 權限/角色（RBAC enforce + 可切換身分）| `AuthProvider` + `core.rbac` | `from auth_provider import AuthProvider`（`get_current_role`/`set_identity`）；宣告式 `config/permissions.yaml`；engine `/whoami` `/set-role`、CLI `tools/set_role.py`、portal 角色下拉 | `auth_provider.py` + `core/rbac.py` | `core/auth` |
 | 管理中心資料/schema | `management_*` | — | `management_*.py`（頂層 6 檔）| `core/db/management` |
 
 ## engine 注入的環境變數（**不可手動設定**）

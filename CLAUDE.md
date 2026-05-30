@@ -54,10 +54,13 @@ start-dev.bat
 - **Manifest DB DAL**：`scripts/shared/_manifest_db.py`（函式收 `db_path`）
 - **通用 SQLite**：`tools/db_utils.py` 的 `SimpleDAO`
 - **工具結果/通訊**：`tools/tool_result.py`、`tools/tool_comms.py`
-- **模組設定/路徑**：各模組 `scripts/module_NNN/_config.py`（目前重複，重構 P2 會抽共用 helper）
+- **模組設定/路徑**：各模組 `_config.py` 委派共用 `scripts/shared/_config_base.py`（`load_config`/`atomic_write`/`manifest_db_path`/`manifest_key` 等；目前僅 `module_012` 仍含特例邏輯未完全委派）
 - **共用 Streamlit UI**：`scripts/shared/ui_components.py`、`image_widget.py`、`_help.py`（見 `/common-component`）
-- **外部系統連接**：`cim_platform/connector.py`（`ExternalSystemConnector`）
-- **標注領域服務**：`annotation/services.py`（`AnnotationService`）
+- **宣告式表單/輸出**：`core/forms.py`（`form:`，欄位 text/number/integer/select/multiselect/checkbox/slider/textarea/file/**date**/**time**）、`core/output.py`（`output:`）
+- **外部 GUI 啟動器**：`core/external_gui.py`（宣告式 `external_gui:`：exe 解析 / env 淨化 / WDAC workaround / 單例鎖 / PID 監看 / 輸出回收+parse）
+- **外部系統連接**：`core/integrations/connector.py`（`ExternalSystemConnector`）+ `core/integrations/registry.py`（connector 工廠 + `autodiscover()`，掃 `core/integrations/connectors/*.py` 自動註冊）
+- **RBAC / 身分**：`core/rbac.py` + `config/permissions.yaml`；`auth_provider.py`（`get_current_role` / `set_identity`，engine `/whoami` `/set-role`，CLI `tools/set_role.py`）
+- **標注領域服務**：`plugins/labeling/domain/services.py`（`AnnotationService`）
 
 > 平台正進行架構重構（共用碼→`core/`、Labeling→`plugins/labeling/`、凍結數字 ID）。
 > 路線圖與決策見 [`docs/platform/architecture-restructure-discussion.md`](docs/platform/architecture-restructure-discussion.md)。
@@ -81,12 +84,16 @@ start-dev.bat
 
 ## 工具開發規則
 
-- **No-code input（宣告式表單）**：簡單工具可**不寫 `*_input.py`**，改在 `plugin.yaml` 用 `form:` 宣告輸入欄位（type: text/number/integer/select/multiselect/checkbox/slider/textarea/file），框架（`cv_framework_runner`）會自動渲染表單並把值傳給 `execute_logic(params)`。範例見 `scripts/module_007/`（零 input 程式碼）；表單引擎 `core/forms.py`。只需寫 `*_process.py`（運算）與 `*_output.py`（呈現）。
+- **建工具骨架用 scaffold CLI（首選，免 AI agent）**：`python tools/scaffold.py module <NNN|省略=自動配下一個空號> [--name ..] [--external-gui]` / `sheet <id> --tabs a,b --create-stubs` / `plugin <name>` / `connector <name>`。form-first 預設零 Streamlit code。
+- **No-code input（宣告式表單）**：簡單工具可**不寫 `*_input.py`**，改在 `plugin.yaml` 用 `form:` 宣告輸入欄位（type: text/number/integer/select/multiselect/checkbox/slider/textarea/file/date/time），框架（`cv_framework_runner`）自動渲染並把值傳給 `execute_logic(params)`。範例 `scripts/module_007/`（零 input 程式碼）；引擎 `core/forms.py`。
+- **No-code output**：`plugin.yaml` 用 `output:` 宣告呈現區塊（`core/output.py`），免寫 `*_output.py`。
+- **No-code 外部 GUI 工具（Label tool 模式）**：`plugin.yaml` 宣告 `external_gui:`（exe 來源 / args / collect.parse），框架渲染啟動鈕、自動回收輸出、且**啟動前檢查 RBAC**；零 input/process/output code。引擎 `core/external_gui.py`。
 - 進階/自訂 UI 才需手寫 `*_input.py`（`render_input()` 回傳 params dict）。
-- 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py`（或宣告式 `form:`）+ `*_output.py`
+- 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py`（或宣告式 `form:`）+ `*_output.py`（或宣告式 `output:`）
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
-- 新工具需在 `engine.py` 的 seed 區塊（`source="seed"`）新增 inline entry，並確認 `seed_tools()` 函式有呼叫到
-- 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py
+- **新工具免改 engine.py**：`engine._scan_and_register_plugins` 啟動時掃 `scripts/*/plugin.yaml` + `plugins/*/modules/*/plugin.yaml` 自動註冊；`engine.py` 的 seed 區塊**只剩** sheet/management/external 等無 plugin.yaml 的工具。
+- **熱載（免重啟整個 app）**：新增/改 plugin.yaml 或 sheet YAML 後，按 portal「重新載入工具」鈕（或 `POST /reload`）即重掃並出現（執行中的工具會自動重啟套用改動）。connector 同樣經 `/reload` 的 `autodiscover()` 生效。
+- 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py（drop YAML 即自動註冊 `sheet-<id>` 可啟動工具）。
 - 廢棄模組（010、019、022-025）：已標記 `enabled: false`，程式碼保留不刪除
 
 詳見 `README.md` 的「開發新工具」章節。
