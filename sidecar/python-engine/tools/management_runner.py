@@ -1040,8 +1040,14 @@ def _render_external_system_register() -> None:
         col3, col4 = st.columns(2)
         fmt = col3.selectbox("目標格式", ["xanylabeling", "coco", "yolo", "labelme"])
         token_env = col4.text_input("API token 環境變數名", placeholder="IWSC_TOKEN")
-        ctype = st.selectbox("連接器類型", ["（自動：依 host scheme 推斷）", "rest", "file", "fake"],
-                             help="自動＝http(s)→rest、file://→file、fake://→fake；新協定可註冊後在此選擇")
+        try:
+            from plugins.labeling.domain.integrations.registry import available_types  # noqa: PLC0415
+            _ctypes = available_types()  # 動態：register_connector 註冊的新協定也會出現
+        except Exception:
+            _ctypes = ["rest", "file", "fake"]
+        ctype = st.selectbox("連接器類型", ["（自動：依 host scheme 推斷）", *_ctypes],
+                             help="自動＝http(s)→rest、file://→file、fake://→fake；"
+                                  "經 register_connector 註冊的新協定會自動出現於此")
         if st.form_submit_button("➕ 新增外部系統", type="primary"):
             if not (name and host):
                 st.error("系統名稱與 host 為必填。")
