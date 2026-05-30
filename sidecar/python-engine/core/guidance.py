@@ -36,6 +36,12 @@ _RULES: list[tuple[re.Pattern, dict]] = [
       "steps": ["到管理中心 → External 新增外部系統（填名稱 / host / 格式）",
                 "或編輯 config/external_systems.yaml 宣告後重新載入",
                 "確認該系統已指派給目前使用者"]}),
+    (re.compile(r"已被.*認領|already claimed|task.*conflict|conflicterror|"
+                r"unique constraint.*tenant|integrityerror.*ant", re.I),
+     {"title": "任務已被認領",
+      "hint": "這張任務已被其他人或另一個程序先認領了。",
+      "steps": ["重新整理任務清單，挑選其他「待認領」的任務",
+                "若確認是自己稍早認領的，請直接到「標注工作台」繼續"]}),
     (re.compile(r"timeout|timed out|逾時|超時", re.I),
      {"title": "連線逾時",
       "hint": "server 有設定但回應太慢或網路不通。",

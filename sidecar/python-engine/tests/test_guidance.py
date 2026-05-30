@@ -27,6 +27,11 @@ def test_timeout_maps_to_timeout_card():
     assert guidance.diagnose("read operation timed out")["title"] == "連線逾時"
 
 
+def test_already_claimed_maps_to_claimed_card():
+    assert guidance.diagnose("此任務已被他人認領（ant_id=A1）")["title"] == "任務已被認領"
+    assert guidance.diagnose("ConflictError: task already claimed")["title"] == "任務已被認領"
+
+
 def test_unknown_error_returns_none():
     assert guidance.diagnose("some totally unrelated ValueError") is None
     assert guidance.diagnose("") is None
