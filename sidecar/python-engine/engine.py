@@ -1501,7 +1501,7 @@ def create_app(
             # connector (core/integrations/connectors/*.py) becomes usable too.
             try:
                 from core.integrations.registry import autodiscover  # noqa: PLC0415
-                result["connectors"] = autodiscover()
+                result["connectors"] = autodiscover(force=True)  # re-scan for newly dropped connectors
             except Exception as exc:  # noqa: BLE001
                 logging.warning("reload connector autodiscover skipped: %s", exc)
             return {"status": "ok", **result}

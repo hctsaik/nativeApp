@@ -32,6 +32,10 @@ from typing import Any, Callable
 # type name → factory(tenant) -> ExternalSystemConnector
 _FACTORIES: dict[str, Callable[..., Any]] = {}
 
+# Cache for autodiscover() of the default connectors dir (None = not scanned yet).
+# Avoids re-importing every connector file on each build_connector/available_types.
+_discovered_cache: list[str] | None = None
+
 
 def register_connector(name: str, factory: Callable[..., Any]) -> None:
     """Register (or override) a connector factory under a declarative type name."""
@@ -59,14 +63,25 @@ def build_connector(name: str, tenant: Any = None, **opts) -> Any:
     return factory(tenant, **opts)
 
 
-def autodiscover(connectors_dir: Path | None = None) -> list[str]:
+def autodiscover(connectors_dir: Path | None = None, force: bool = False) -> list[str]:
     """Import every `*.py` in `connectors_dir` and call its `register()` if present.
 
     Returns the module names discovered. Best-effort: a broken connector module
-    is skipped (logged by the caller), never aborts startup. Default dir is
-    core/integrations/connectors/ (the `scaffold connector` default destination)."""
+    is skipped (logged), never aborts startup. Default dir is
+    core/integrations/connectors/ (the `scaffold connector` default destination).
+
+    Cached: the default dir is scanned once (subsequent calls return the cached
+    result without re-importing) so the labeling registry can call this on every
+    connector resolution cheaply. Pass `force=True` (e.g. from POST /reload) to
+    re-scan after a connector file was dropped at runtime."""
+    global _discovered_cache
+    use_default = connectors_dir is None
+    if use_default and _discovered_cache is not None and not force:
+        return list(_discovered_cache)
     base = connectors_dir or (Path(__file__).resolve().parent / "connectors")
     if not base.is_dir():
+        if use_default:
+            _discovered_cache = []
         return []
     import logging  # noqa: PLC0415
     discovered: list[str] = []
@@ -86,4 +101,6 @@ def autodiscover(connectors_dir: Path | None = None) -> list[str]:
             logging.warning("connector autodiscover skipped %s: %s: %s",
                             py.name, type(exc).__name__, exc)
             continue
+    if use_default:
+        _discovered_cache = list(discovered)
     return discovered
