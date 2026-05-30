@@ -1,0 +1,18 @@
+sheet_id: annotation
+name: 🐜 影像標註
+description: 統一標注工作流 — 支援本地資料夾及外部任務系統（可擴充）
+enabled_dev: true
+enabled_prod: false
+tabs:
+  - order: 0
+    module_id: module_026
+    label: "📥 資料來源"
+  - order: 1
+    module_id: module_012
+    label: "✏️ 標注工作台"
+  - order: 2
+    module_id: module_018
+    label: "🖼️ 審查"
+  - order: 3
+    module_id: module_014
+    label: "📤 匯出 / 回傳"

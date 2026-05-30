@@ -28,7 +28,7 @@ provides:
     target_path: plugins/labeling/domain/
   sheets:
     - id: annotation
-      current_path: sheets/annotation.yaml      # authoritative; engine _reconcile_sheets_from_yaml scans sheets/*.yaml
+      current_path: plugins/labeling/sheets/annotation.yaml   # ✅ moved here (P6); engine _reconcile scans sheets/*.yaml + plugins/*/sheets/*.yaml
       target_path: plugins/labeling/sheets/annotation.yaml
   mcp:
     current_path: ../../mcp/annotation_mcp/      # annotation_* MCP tools (imports annotation.services)
