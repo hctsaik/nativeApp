@@ -29,8 +29,8 @@ _p010 = _load("_010_process", _HERE.parent / "module_010" / "010_process.py")
 
 
 def _get_service():
-    from annotation.services import AnnotationService
-    from annotation.storage.workspace import AnnotationWorkspace
+    from plugins.labeling.domain.services import AnnotationService
+    from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
     ws_path = _cfg.get_annotation_workspace_path()
     return AnnotationService(AnnotationWorkspace(ws_path))
 

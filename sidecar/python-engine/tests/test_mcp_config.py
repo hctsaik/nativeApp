@@ -53,7 +53,7 @@ def test_packaged_sidecar_source_includes_management_dependencies() -> None:
     assert "management_store.py" in filters
     assert "management_use_cases.py" in filters
     # platform-level packages added during Platform-First refactor
-    assert "annotation/**/*" in filters
+    assert "plugins/**/*" in filters  # Labeling plugin home (P6: annotation domain → plugins/labeling/domain)
     assert "core/**/*" in filters  # platform core (P5: cim_platform → core.integrations)
     assert "cim_platform/**/*" in filters
     assert "sheets/**/*" in filters

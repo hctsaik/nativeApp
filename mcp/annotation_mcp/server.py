@@ -4,8 +4,8 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import WORKSPACE_ROOT
 
-from annotation.services import AnnotationService
-from annotation.storage.workspace import AnnotationWorkspace
+from plugins.labeling.domain.services import AnnotationService
+from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
 
 from .handlers import AnnotationMCPHandlers
 

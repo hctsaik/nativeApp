@@ -25,8 +25,8 @@ _ANT_ACTIVE_ICON  = {0: "⚪", 1: "🟠", 2: "🟢"}
 
 def _get_service():
     import os
-    from annotation.services import AnnotationService
-    from annotation.storage.workspace import AnnotationWorkspace
+    from plugins.labeling.domain.services import AnnotationService
+    from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
     ws_path = _cfg.get_annotation_workspace_path()
     return AnnotationService(AnnotationWorkspace(ws_path))
 

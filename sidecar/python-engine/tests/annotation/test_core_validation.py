@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from annotation.core.models import (
+from plugins.labeling.domain.core.models import (
     Annotation,
     AnnotationSet,
     AttributeDef,
@@ -13,8 +13,8 @@ from annotation.core.models import (
     LabelSchema,
     PolygonGeometry,
 )
-from annotation.core.states import InvalidStateTransition, apply_review_decision, transition_annotation_set
-from annotation.core.validation import validate_annotation_set
+from plugins.labeling.domain.core.states import InvalidStateTransition, apply_review_decision, transition_annotation_set
+from plugins.labeling.domain.core.validation import validate_annotation_set
 
 
 def _schema() -> LabelSchema:

@@ -20,9 +20,9 @@
 | 資料來源連接器（ZIP/遠端）| `_data_connector` | `DataConnector` ABC / `ZipPackageConnector` | `scripts/shared/_data_connector.py` | `plugins/labeling/integrations` |
 | 接外部任務系統（iWISC 等）| `ExternalSystemConnector` | `from core.integrations import ExternalSystemConnector` | `core/integrations/connector.py`（`cim_platform.connector` 為相容 shim）| ✅ 已在 core |
 | 外部系統租戶設定 | `SystemTenant` | `from core.integrations import SystemTenant, load_tenant_from_file` | `core/integrations/tenant.py`（`cim_platform.tenant` 為相容 shim）| ✅ 已在 core |
-| 標注領域服務（資料集/標注集/匯出）| `AnnotationService` | `from annotation.services import AnnotationService` | `annotation/services.py` | `plugins/labeling/domain` |
-| 標注資料模型 | `annotation.core.models` | `DatasetManifest` / `AnnotationSet` / `AnnotationItem` | `annotation/core/models.py` | `plugins/labeling/domain` |
-| 格式轉換（COCO/YOLO/x-anylabeling…）| `annotation/adapters` | 見 `annotation/formats` + `adapters/` | `annotation/adapters/`、`annotation/formats/` | `plugins/labeling/domain` |
+| 標注領域服務（資料集/標注集/匯出）| `AnnotationService` | `from plugins.labeling.domain.services import AnnotationService` | `plugins/labeling/domain/services.py` | ✅ 已搬 |
+| 標注資料模型 | `plugins.labeling.domain.core.models` | `DatasetManifest` / `AnnotationSet` / `AnnotationItem` | `plugins/labeling/domain/core/models.py` | ✅ 已搬 |
+| 格式轉換（COCO/YOLO/x-anylabeling…）| domain adapters | `from plugins.labeling.domain.adapters.coco import …` | `plugins/labeling/domain/adapters/`、`…/formats/` | ✅ 已搬 |
 | 發布/回溯/載入 plugin | `PluginRegistry`/`PluginLoader` | 由 engine 使用 | `plugin_registry.py`、`plugin_loader.py` | `core/plugins` |
 | 權限/角色 | `AuthProvider` | `from auth_provider import AuthProvider` | `auth_provider.py` | `core/auth` |
 | 管理中心資料/schema | `management_*` | — | `management_*.py`（頂層 6 檔）| `core/db/management` |

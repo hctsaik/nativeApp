@@ -5,8 +5,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-from annotation.services import AnnotationService
-from annotation.storage.workspace import AnnotationWorkspace
+from plugins.labeling.domain.services import AnnotationService
+from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

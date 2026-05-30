@@ -85,7 +85,7 @@ CORE_CANDIDATE_FILES = _files(
     "tools/tool_result.py", "tools/tool_comms.py",
 )
 
-FORBIDDEN_FOR_CORE = {"annotation", "cim_annotation"}
+FORBIDDEN_FOR_CORE = {"plugins", "annotation", "cim_annotation"}
 
 
 def test_core_candidates_do_not_depend_on_plugins():
@@ -104,8 +104,8 @@ def test_core_candidates_do_not_depend_on_plugins():
 
 
 def test_annotation_domain_does_not_depend_on_gui_or_dead_pkg():
-    annotation_files = _files("annotation")
-    assert annotation_files, "annotation package not found"
+    annotation_files = _files("plugins/labeling/domain")
+    assert annotation_files, "annotation domain package not found"
     violations: list[str] = []
     for py in annotation_files:
         if "cim_annotation" in _imported_roots(py):

@@ -13,8 +13,8 @@ from pathlib import Path
 
 def get_service():
     """取得 AnnotationService 實例。"""
-    from annotation.services import AnnotationService
-    from annotation.storage.workspace import AnnotationWorkspace
+    from plugins.labeling.domain.services import AnnotationService
+    from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
     ws_path = Path(os.environ.get("CIM_LOG_DIR", "/tmp")) / "annotation_workspace"
     return AnnotationService(AnnotationWorkspace(ws_path))
 

@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from annotation.core.errors import ConflictError, NotFoundError
-from annotation.services import AnnotationService
-from annotation.storage.workspace import AnnotationWorkspace
+from plugins.labeling.domain.core.errors import ConflictError, NotFoundError
+from plugins.labeling.domain.services import AnnotationService
+from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_get_ant_list_tenant_not_found(tmp_path: Path) -> None:
 
 def _seed_task(svc: AnnotationService, tmp_path: Path) -> tuple[str, str]:
     """直接向 DB 寫入一筆 AnnotationTask（繞過 claim_task 的 ZIP 下載流程）。"""
-    from annotation.core.models import AnnotationTask, utc_now_iso
+    from plugins.labeling.domain.core.models import AnnotationTask, utc_now_iso
     from uuid import uuid4
     tid = _register_tenant(svc)
     task_id = str(uuid4())
