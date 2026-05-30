@@ -1148,6 +1148,26 @@ def _render_external_system_register() -> None:
                         st.caption("依欄位映射解析的第一筆任務（確認 ant_id/狀態是否對上）：")
                         st.json({"ant_id": _t.ant_id, "ant_active": _t.ant_active,
                                  "ant_period": _t.ant_period, "external_context": _t.external_context})
+                        # detail 端點預覽：用第一筆 ant_id 打 detail_path，確認 download_url 映射
+                        _rp = resolve_paths(_pick_mapping)
+                        if _t.ant_id and _rp.get("detail_path"):
+                            try:
+                                _durl = _test_host.strip().rstrip("/") + "/" + _rp["detail_path"].lstrip("/")
+                                _payload = _json.dumps({"antID": _t.ant_id, "format": "coco"}).encode()
+                                if (_rp.get("detail_method") or "POST").upper() == "GET":
+                                    _dreq = urllib.request.Request(
+                                        _durl + "?antID=" + _t.ant_id, method="GET", headers=_headers)
+                                else:
+                                    _dh = {**_headers, "Content-Type": "application/json"}
+                                    _dreq = urllib.request.Request(_durl, data=_payload, method="POST", headers=_dh)
+                                with urllib.request.urlopen(_dreq, timeout=5) as _dresp:  # noqa: S310
+                                    _dbody = _json.loads(_dresp.read(2000).decode("utf-8", "replace"))
+                                _dlkey = _fields.get("download_url", "download_url")
+                                _dl = _dbody.get(_dlkey, _dbody.get("download_url", ""))
+                                st.caption(f"detail 端點 OK — download_url（映射鍵 `{_dlkey}`）："
+                                           f"{'✅ ' + _dl if _dl else '⚠️ 解析為空，請確認 download_url 映射'}")
+                            except Exception as _de:  # noqa: BLE001
+                                st.caption(f"（detail 端點預覽略過：{_de}）")
                 except Exception:  # noqa: BLE001
                     pass
                 if body.strip():
