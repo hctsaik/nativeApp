@@ -142,9 +142,20 @@ class PluginRegistry:
 
     # ?? Filesystem scanning ????????????????????????????????????????????????
 
+    def _module_folders(self) -> list[Path]:
+        """All `module_*` folders across scripts/ AND plugins/*/modules/.
+
+        The benchmark Labeling modules physically live under
+        plugins/labeling/modules/, so the publish/preflight layer must scan both
+        roots — otherwise plugin-located modules are invisible to the management
+        center (they can be developed but never published). Mirrors the engine's
+        DEV runtime scan (plugin_loader.module_roots)."""
+        from plugin_loader import iter_module_folders  # noqa: PLC0415
+        return iter_module_folders(self._scripts_dir)
+
     def _scan_plugins_fs(self) -> list[PluginInfo]:
         plugins: list[PluginInfo] = []
-        for folder in sorted(self._scripts_dir.glob("module_*")):
+        for folder in self._module_folders():
             if folder.is_dir():
                 info = _load_plugin_yaml(folder)
                 if info:
@@ -187,7 +198,7 @@ class PluginRegistry:
 
     def get_plugin(self, plugin_id: str) -> PluginInfo:
         if _is_dev_mode():
-            for folder in self._scripts_dir.glob("module_*"):
+            for folder in self._module_folders():
                 if folder.is_dir():
                     info = _load_plugin_yaml(folder)
                     if info and info.plugin_id == plugin_id:
@@ -207,7 +218,7 @@ class PluginRegistry:
     def publish(self, plugin_id: str, changelog: str = "", author: str = "system") -> int:
         plugin = self.get_plugin(plugin_id)
         actual_folder = None
-        for f in self._scripts_dir.glob("module_*"):
+        for f in self._module_folders():
             info = _load_plugin_yaml(f)
             if info and info.plugin_id == plugin_id:
                 actual_folder = f

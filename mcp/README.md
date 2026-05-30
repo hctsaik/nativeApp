@@ -3,7 +3,35 @@
 This folder contains MCP servers for the CIM platform.
 
 - `cim_gui_mcp`: GUI and E2E automation for the desktop app.
-- `annotation_mcp`: data/workflow API for the annotation common component.
+- `platform_mcp`: 平台層管理（tools、sheets、health）。
+- Labeling 的 MCP（annotation_* 工具）已隨架構重構移至 Labeling plugin：
+  `sidecar/python-engine/plugins/labeling/mcp/`（啟動：`python -m plugins.labeling.mcp.server`，PYTHONPATH=`sidecar/python-engine`）。
+
+## platform_mcp — 平台層管理
+
+提供 Claude 查詢與管理 CIM 平台本身的工具：
+
+| 工具 | 說明 |
+|------|------|
+| `platform_health` | 確認 Python engine 健康狀態 |
+| `platform_list_tools` | 列出所有已註冊的平台工具（modules） |
+| `platform_get_tool` | 取得指定 tool 的詳細資訊 |
+| `platform_list_sheets` | 列出所有 workflow sheet 及其 tab 配置 |
+| `platform_get_sheet` | 取得指定 sheet 的 tab 詳細資訊 |
+| `platform_start_tool` | 啟動指定工具 |
+| `platform_stop_tool` | 停止目前執行中的工具 |
+
+設定（`.mcp.json`）：
+```json
+"platform": {
+  "command": "python",
+  "args": ["-m", "platform_mcp.server"],
+  "cwd": "C:/code/claude/nativeApp/mcp",
+  "env": { "CIM_SIDECAR_PORT": "8765" }
+}
+```
+
+---
 
 ## Annotation MCP Server
 
@@ -18,10 +46,10 @@ next steps, see `../docs/ANNOTATION_XANYLABELING.md`.
 Run manually:
 
 ```bash
-cd mcp
-set PYTHONPATH=C:/code/claude/nativeApp_Management/mcp;C:/code/claude/nativeApp_Management/sidecar/python-engine
-set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp_Management/tmp/annotation-workspace
-python -m annotation_mcp.server
+cd sidecar/python-engine
+set PYTHONPATH=C:/code/claude/nativeApp/sidecar/python-engine
+set ANNOTATION_WORKSPACE=C:/code/claude/nativeApp/apps/host-electron/logs/annotation_workspace
+python -m plugins.labeling.mcp.server
 ```
 
 Common tools:
@@ -171,7 +199,7 @@ All 41 unit tests run without a real browser or sidecar (mocked with respx + Asy
 
 ## Claude Code integration
 
-The `.claude/mcp.json` at the repo root configures this server automatically:
+The `.mcp.json` at the repo root configures this server automatically:
 
 ```json
 {
@@ -179,7 +207,7 @@ The `.claude/mcp.json` at the repo root configures this server automatically:
     "cim-gui": {
       "command": "python",
       "args": ["-m", "cim_gui_mcp.server"],
-      "cwd": "C:/code/claude/nativeApp_Management/mcp"
+      "cwd": "C:/code/claude/nativeApp/mcp"
     }
   }
 }

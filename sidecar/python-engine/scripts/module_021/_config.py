@@ -1,36 +1,29 @@
 from __future__ import annotations
 
-import json
-import os
+import importlib.util as _ilu
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_CIM_LOG_DIR = Path(os.environ.get("CIM_LOG_DIR", str(_PROJECT_ROOT / "tmp" / "cim_log")))
+_HERE = Path(__file__).resolve().parent
+_spec = _ilu.spec_from_file_location("_config_base", _HERE.parent / "shared" / "_config_base.py")
+_base = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_base)
 
+_MODULE_ID = "021"
 _DEFAULTS: dict = {"url": ""}
 
-
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+# back-compat module-level names
+_PROJECT_ROOT = _base.project_root()
+_CIM_LOG_DIR = _base.log_dir()
+_atomic_write = _base.atomic_write
 
 
 def _config_path() -> Path:
-    return _CIM_LOG_DIR / "config" / "module_021.json"
+    return _base.config_path(_MODULE_ID)
 
 
 def load_config() -> dict:
-    p = _config_path()
-    if not p.exists():
-        return _DEFAULTS.copy()
-    try:
-        return {**_DEFAULTS, **json.loads(p.read_text(encoding="utf-8"))}
-    except Exception:
-        return _DEFAULTS.copy()
+    return _base.load_config(_MODULE_ID, _DEFAULTS)
 
 
 def save_config(cfg: dict) -> None:
-    p = _config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(p, json.dumps(cfg, ensure_ascii=False, indent=2))
+    _base.save_config(_MODULE_ID, cfg)

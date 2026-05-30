@@ -1,7 +1,7 @@
 # 模組參考文件索引
 
 > 本文件已重組為模組化結構。各模組完整文件請見下方連結。
-> 最後更新：2026-05-19
+> 最後更新：2026-05-29（新增 module_026；標記 module_010/019/022/023/024/025 為廢棄）
 
 ---
 
@@ -56,15 +56,21 @@ scripts/module_XXX/
 | Module 005 - 邊緣記錄查詢 | [module_005.md](modules/module_005.md) | — | — |
 | Module 006 - 動物影像標記 | [module_006.md](modules/module_006.md) | [scripts/module_006/README.md](../sidecar/python-engine/scripts/module_006/README.md) | guide.html（嵌入 App）|
 | Module 008 - 影片追蹤標注 | [module_008.md](modules/module_008.md) | [scripts/module_008/README.md](../sidecar/python-engine/scripts/module_008/README.md) | guide.html（嵌入 App）|
-| Module 010 - Data Feeder | [module_010.md](modules/module_010.md) | — | — |
-| Module 012 - Annotation Session | [module_012.md](modules/module_012.md) | — | — |
+| Module 010 - Data Feeder ⚠️ **廢棄** | [module_010.md](modules/module_010.md) | — | — |
+| Module 012 - 標注工作台 | [module_012.md](modules/module_012.md) | — | — |
 | Module 013 - Sync Back | [module_013.md](modules/module_013.md) | — | — |
-| Module 014 - Export | [module_014.md](modules/module_014.md) | — | — |
+| Module 014 - 匯出 / 回傳 | [module_014.md](modules/module_014.md) | — | — |
 | Module 015 - Dashboard | [module_015.md](modules/module_015.md) | — | — |
 | Module 016 - AI Pre-labeling | [module_016.md](modules/module_016.md) | — | — |
 | Module 017 - Label Manager | [module_017.md](modules/module_017.md) | — | — |
-| Module 018 - Review Gallery | [module_018.md](modules/module_018.md) | — | — |
-| Sheet - 標注作業流程 | [sheet-annotation_workflow.md](modules/sheet-annotation_workflow.md) | — | — |
+| Module 018 - 審查 Gallery | [module_018.md](modules/module_018.md) | — | — |
+| Module 019 - Data Downloader ⚠️ **廢棄** | — | — | — |
+| Module 022 - 標註權限管理 ⚠️ **廢棄** | — | — | — |
+| Module 023 - 標註任務 ⚠️ **廢棄** | — | — | — |
+| Module 024 - 標注工作台（iWISC 版）⚠️ **廢棄** | — | — | — |
+| Module 025 - 完成報表 ⚠️ **廢棄** | — | — | — |
+| Module 026 - 資料來源（新）| — | — | — |
+| Sheet - 🐜 影像標註（統一架構）| [sheet-annotation_workflow.md](modules/sheet-annotation_workflow.md) | — | — |
 | Sheet - 邊緣品質分析 | [sheet_edge_analysis.md](modules/sheet_edge_analysis.md) | — | — |
 | 管理中心 | [management_center.md](modules/management_center.md) | — | — |
 

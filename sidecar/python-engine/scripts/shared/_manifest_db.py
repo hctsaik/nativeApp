@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS dataset_manifests (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     manifest_id   TEXT NOT NULL UNIQUE,
     name          TEXT NOT NULL,
-    source_type   TEXT CHECK(source_type IN ('folder','db','api')) NOT NULL,
+    source_type   TEXT CHECK(source_type IN ('folder','db','api','iwsc','remote')) NOT NULL,
     source_config TEXT NOT NULL DEFAULT '{}',
     schema_version TEXT NOT NULL DEFAULT '1.0',
     item_count    INTEGER DEFAULT 0,
@@ -148,12 +148,47 @@ def _migrate_export_format_constraint(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_source_type_constraint(conn: sqlite3.Connection) -> None:
+    """擴展 dataset_manifests.source_type 的 CHECK 約束，加入 'iwsc' 和 'remote'。"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='dataset_manifests'"
+    ).fetchone()
+    if row is None:
+        return
+    sql = row[0] or ""
+    # 如果已經包含 'iwsc'，代表已是新版 schema，不需 migrate
+    if "'iwsc'" in sql or "\"iwsc\"" in sql:
+        return
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS _dataset_manifests_new (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            manifest_id   TEXT NOT NULL UNIQUE,
+            name          TEXT NOT NULL,
+            source_type   TEXT CHECK(source_type IN ('folder','db','api','iwsc','remote')) NOT NULL,
+            source_config TEXT NOT NULL DEFAULT '{}',
+            schema_version TEXT NOT NULL DEFAULT '1.0',
+            item_count    INTEGER DEFAULT 0,
+            status        TEXT CHECK(status IN ('draft','ready','error')) DEFAULT 'draft',
+            created_at    TEXT DEFAULT (datetime('now')),
+            updated_at    TEXT DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO _dataset_manifests_new
+            SELECT id, manifest_id, name, source_type, source_config,
+                   schema_version, item_count, status, created_at, updated_at
+            FROM dataset_manifests;
+        DROP TABLE dataset_manifests;
+        ALTER TABLE _dataset_manifests_new RENAME TO dataset_manifests;
+    """)
+    conn.commit()
+
+
 def init_db(db_path: Path) -> None:
     """初始化資料庫，建立所有資料表。"""
     conn = _connect(db_path)
     try:
         conn.executescript(_DDL)
         _migrate_export_format_constraint(conn)
+        _migrate_source_type_constraint(conn)
         conn.commit()
     finally:
         conn.close()

@@ -1,7 +1,10 @@
 # CIM Hybrid Edge Platform
 
-This repository contains the first implementation scaffold for the OpenSpec
-change `hybrid-edge-microfrontend-platform`.
+A hybrid edge platform that lets engineers **build and ship their own tools**
+(declarative no-code / low-code) on an Electron + React portal + Python FastAPI
+sidecar (Streamlit split-tools). The Labeling (X-AnyLabeling) feature is the
+benchmark "real tool"; the same scaffold → hot-reload → publish flow builds new
+tools. See `docs/platform/selfbuild-tool-shipping-evaluation.md`.
 
 ## Structure
 
@@ -159,20 +162,31 @@ later package run can overwrite an earlier portable executable.
 CIM 平台的每個工具由**兩個獨立 Streamlit 程序**組成（split-tool 架構），
 透過一份 JSON 結果檔案交換資料，Portal 負責在執行完成後自動切換並 reload output 頁面。
 
-### 快速開始：使用 /new-split-tool Skill
+### 快速開始：scaffold CLI（首選，免 AI agent）
 
-如果你在 **Claude Code**（CLI 或 VSCode 擴充功能）環境下開發，
-輸入以下 slash command 即可由 AI 引導產生完整的工具骨架：
+平台內建 scaffold CLI，一行產出可跑的工具骨架，**重啟或按 portal「重新載入工具」即上線**（免改 `engine.py`）：
 
+```bash
+# 零 Streamlit code 的表單工具（input 用 form: / output 用 output: 宣告，只寫純運算）
+python sidecar/python-engine/tools/scaffold.py module --name "我的工具"   # id 省略=自動配下一個空號
+
+python sidecar/python-engine/tools/scaffold.py module --name X --full          # 手寫 input/process/output
+python sidecar/python-engine/tools/scaffold.py module --name X --external-gui   # 啟動外部 GUI（Label tool 模式，零 code）
+python sidecar/python-engine/tools/scaffold.py sheet my-flow --tabs module_042,module_043 --create-stubs  # 多分頁工作流
+python sidecar/python-engine/tools/scaffold.py plugin my-domain                 # 全新領域 plugin（含可跑起步模組+domain+sheet）
+python sidecar/python-engine/tools/scaffold.py connector my-eqp                 # 非-REST 外部系統 connector 骨架
 ```
-/new-split-tool
-```
 
-Claude 會詢問 5 個問題（Tool ID、名稱、Input/Process/Output 描述），
-然後自動產生所有必要檔案並說明如何註冊到 Portal。
+宣告式三件套（皆免寫對應 `*.py`）：`form:`（輸入欄位，含 date/time）、`output:`（呈現區塊）、
+`external_gui:`（啟動外部桌面程式 → 作業 → 關閉自動回收輸出，框架處理 env 淨化 / WDAC workaround / 單例鎖 / RBAC 檢查）。
+範例：`sidecar/python-engine/scripts/module_007/`（完全零 Streamlit code）。
 
-> Slash command 定義在 `.claude/commands/new-split-tool.md`，
-> 可直接閱讀該檔案了解完整架構規範與程式碼範本。
+開發迴圈：改 plugin.yaml / sheet YAML → portal「重新載入工具」鈕（或 `POST /reload`）即重掃出現，執行中的工具會自動重啟套用改動。
+
+### 替代：使用 /new-split-tool Skill（Claude Code 環境）
+
+在 **Claude Code** 環境下，可用 `/new-split-tool` 由 AI 引導產生手寫 split-tool 骨架
+（定義在 `.claude/commands/new-split-tool.md`）。一般情況建議優先用上面的 scaffold CLI。
 
 ---
 

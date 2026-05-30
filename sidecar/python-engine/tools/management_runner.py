@@ -628,8 +628,12 @@ def _open_preview_modal(input_url: str, tool_name: str) -> None:
 
 def _render_module_preview(plugin_id: str, tool_id: str, manage_disabled: bool, tool_name: str = "") -> None:
     import yaml as _yaml  # noqa: PLC0415
+    from plugin_loader import find_module_folder  # noqa: PLC0415
 
-    yaml_path = _SCRIPTS_DIR / plugin_id / "plugin.yaml"
+    try:
+        yaml_path = find_module_folder(plugin_id) / "plugin.yaml"
+    except Exception:
+        yaml_path = _SCRIPTS_DIR / plugin_id / "plugin.yaml"
     meta: dict[str, Any] = {}
     if yaml_path.exists():
         try:
@@ -1006,12 +1010,201 @@ def _render_sheets_tab(
                     _confirm_archive_dialog(reg, sel_id, sel_row["name"])
 
 
+def _render_external_system_register() -> None:
+    """No-code: register external task systems (writes config/external_systems.yaml)."""
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    cfg_path = _Path(__file__).resolve().parent.parent / "config" / "external_systems.yaml"
+    try:
+        data = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+    except Exception:
+        data = {}
+    systems = (data or {}).get("systems") or []
+
+    st.subheader("🔌 外部系統註冊（宣告式）")
+    st.caption("新增的系統寫入 config/external_systems.yaml；資料來源頁載入時自動同步（token 從環境變數讀）。")
+    if systems:
+        for s in systems:
+            _ct = s.get("connector_type")
+            _ctlbl = f" · {_ct}" if _ct else " · 自動"
+            _maplbl = " · 自訂映射" if s.get("rest_mapping") else ""
+            st.markdown(f"- **{s.get('system_name','?')}** — `{s.get('server_host_name','')}` "
+                        f"({s.get('target_format','')}{_ctlbl}{_maplbl})")
+    else:
+        st.caption("（目前無宣告的外部系統）")
+
+    with st.form("ext_sys_register", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        name = col1.text_input("系統名稱", placeholder="iWISC")
+        host = col2.text_input("Server host", placeholder="http://localhost:8765")
+        col3, col4 = st.columns(2)
+        fmt = col3.selectbox("目標格式", ["xanylabeling", "coco", "yolo", "labelme"])
+        token_env = col4.text_input("API token 環境變數名", placeholder="IWSC_TOKEN")
+        try:
+            from plugins.labeling.domain.integrations.registry import available_types  # noqa: PLC0415
+            _ctypes = available_types()  # 動態：register_connector 註冊的新協定也會出現
+        except Exception:
+            _ctypes = ["rest", "file", "fake"]
+        ctype = st.selectbox("連接器類型", ["（自動：依 host scheme 推斷）", *_ctypes],
+                             help="自動＝http(s)→rest、file://→file、fake://→fake；"
+                                  "經 register_connector 註冊的新協定會自動出現於此")
+        # 進階：REST 變體的 endpoint/欄位映射（純宣告，免寫 connector class）
+        with st.expander("進階：REST 端點 / 欄位映射（接非 iWISC 契約的 REST 系統）", expanded=False):
+            st.caption("留白＝沿用內建 iWISC 契約。填了即寫入 rest_mapping，免寫程式碼。")
+            mc1, mc2 = st.columns(2)
+            rm_list = mc1.text_input("list 路徑", placeholder="/getAntList（預設）")
+            rm_detail = mc2.text_input("detail 路徑", placeholder="/getAntTaskDetail（預設）")
+            mc3, mc4 = st.columns(2)
+            rm_claim = mc3.text_input("claim 路徑", placeholder="/tasks/{ant_id}/claim（預設）")
+            rm_method = mc4.selectbox("detail HTTP method", ["POST", "GET"])
+            st.caption("回應欄位映射（你的欄位名 → 平台欄位）：")
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            f_id = fc1.text_input("ant_id ←", placeholder="antID")
+            f_active = fc2.text_input("ant_active ←", placeholder="antActive")
+            f_period = fc3.text_input("ant_period ←", placeholder="antPeriod")
+            f_dl = fc4.text_input("download_url ←", placeholder="download_url")
+        if st.form_submit_button("➕ 新增外部系統", type="primary"):
+            if not (name and host):
+                st.error("系統名稱與 host 為必填。")
+            else:
+                entry = {"system_name": name, "server_host_name": host, "target_format": fmt}
+                if token_env:
+                    entry["api_token_env"] = token_env
+                if not ctype.startswith("（自動"):
+                    entry["connector_type"] = ctype
+                _mapping: dict = {}
+                if rm_list.strip():
+                    _mapping["list_path"] = rm_list.strip()
+                if rm_detail.strip():
+                    _mapping["detail_path"] = rm_detail.strip()
+                if rm_claim.strip():
+                    _mapping["claim_path"] = rm_claim.strip()
+                if rm_method != "POST":
+                    _mapping["detail_method"] = rm_method
+                _fields = {k: v.strip() for k, v in
+                           {"ant_id": f_id, "ant_active": f_active,
+                            "ant_period": f_period, "download_url": f_dl}.items() if v.strip()}
+                if _fields:
+                    _mapping["fields"] = _fields
+                if _mapping:
+                    entry["rest_mapping"] = _mapping
+                # 以系統名稱為唯一鍵：重註冊同名即更新（含改 host），不留殘項
+                systems = [s for s in systems if s.get("system_name") != name]
+                systems.append(entry)
+                cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                cfg_path.write_text(_yaml.safe_dump({"systems": systems}, allow_unicode=True),
+                                    encoding="utf-8")
+                st.success(f"✅ 已新增「{name}」，資料來源頁載入時自動生效。")
+
+    # 一鍵測試連線 + 欄位映射預覽（補「設定後不確定通不通／映射對不對」的摩擦）
+    st.markdown("**測試連線 / 欄位映射預覽**")
+    # 可從已註冊系統一鍵帶入 host + list 端點 + token + mapping（免手抄）
+    _picklabels = ["（手動輸入）"] + [s.get("system_name", "?") for s in systems]
+    _pick = st.selectbox("帶入已註冊系統", _picklabels, key="ext_test_pick")
+    _picked = next((s for s in systems if s.get("system_name") == _pick), None)
+    _pre_host, _pre_path, _pre_tokenenv = "", "/", ""
+    _pick_mapping = None
+    if _picked:
+        _pre_host = _picked.get("server_host_name", "")
+        _pick_mapping = _picked.get("rest_mapping")
+        _pre_path = (_pick_mapping or {}).get("list_path", "/getAntList")
+        _pre_tokenenv = _picked.get("api_token_env", "")
+    _tc1, _tc2, _tc3 = st.columns([3, 2, 1])
+    _test_host = _tc1.text_input("host", value=_pre_host, placeholder="http://localhost:8765",
+                                 key=f"ext_test_host_{_pick}", label_visibility="collapsed")
+    _test_path = _tc2.text_input("path", value=_pre_path, placeholder="/api/tasks",
+                                 key=f"ext_test_path_{_pick}", label_visibility="collapsed")
+    _test_tokenenv = _tc1.text_input("token 環境變數（選填，會帶 Authorization: Bearer）",
+                                     value=_pre_tokenenv, placeholder="IWSC_TOKEN",
+                                     key=f"ext_test_tokenenv_{_pick}")
+    _test_fmt = _tc2.text_input("detail format", value=(_picked or {}).get("target_format", "coco")
+                                if _picked else "coco", key=f"ext_test_fmt_{_pick}",
+                                help="detail 端點 payload 的 format（多格式系統可調）")
+    if _tc3.button("🔌 測試", key="ext_test_btn", use_container_width=True):
+        if not _test_host.strip():
+            st.warning("請先填入要測試的 host。")
+        else:
+            try:
+                import json as _json  # noqa: PLC0415
+                import os as _os  # noqa: PLC0415
+                import urllib.request  # noqa: PLC0415
+                _url = _test_host.strip().rstrip("/") + "/" + _test_path.strip().lstrip("/")
+                _headers = {}
+                _tok = _os.environ.get((_test_tokenenv or "").strip()) if _test_tokenenv.strip() else None
+                if _tok:
+                    _headers["Authorization"] = f"Bearer {_tok}"
+                req = urllib.request.Request(_url, method="GET", headers=_headers)
+                with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                    body = resp.read(4000).decode("utf-8", "replace")
+                _authnote = "（已帶 token）" if _tok else ("（token 環境變數未設定值）"
+                                                          if _test_tokenenv.strip() else "")
+                st.success(f"✅ 連線成功 HTTP {resp.status} {_authnote} — {_url}")
+                # 欄位映射預覽：若回應為 JSON 陣列，套用此系統的 rest_mapping 解析第一筆
+                try:
+                    _data = _json.loads(body)
+                    if isinstance(_data, list) and _data and isinstance(_data[0], dict):
+                        from plugins.labeling.domain.integrations.connectors.configurable_rest_connector import (  # noqa: PLC0415,E501
+                            map_list_item, resolve_paths)
+                        _fields = resolve_paths(_pick_mapping)["fields"]
+                        _n = min(3, len(_data))
+                        st.caption(f"依欄位映射解析前 {_n} 筆任務（確認 ant_id/狀態是否對上）：")
+                        _t0 = None
+                        for _i in range(_n):
+                            if isinstance(_data[_i], dict):
+                                _ti = map_list_item(_data[_i], _fields)
+                                _t0 = _t0 or _ti
+                                st.json({"ant_id": _ti.ant_id, "ant_active": _ti.ant_active,
+                                         "ant_period": _ti.ant_period,
+                                         "external_context": _ti.external_context})
+                        # detail 端點預覽：用第一筆 ant_id 打 detail_path，確認 download_url 映射
+                        _rp = resolve_paths(_pick_mapping)
+                        if _t0 and _t0.ant_id and _rp.get("detail_path"):
+                            try:
+                                _durl = _test_host.strip().rstrip("/") + "/" + _rp["detail_path"].lstrip("/")
+                                _fmt = (_test_fmt or "coco").strip()
+                                _payload = _json.dumps({"antID": _t0.ant_id, "format": _fmt}).encode()
+                                if (_rp.get("detail_method") or "POST").upper() == "GET":
+                                    _dreq = urllib.request.Request(
+                                        f"{_durl}?antID={_t0.ant_id}&format={_fmt}", method="GET", headers=_headers)
+                                else:
+                                    _dh = {**_headers, "Content-Type": "application/json"}
+                                    _dreq = urllib.request.Request(_durl, data=_payload, method="POST", headers=_dh)
+                                with urllib.request.urlopen(_dreq, timeout=5) as _dresp:  # noqa: S310
+                                    _dbody = _json.loads(_dresp.read(2000).decode("utf-8", "replace"))
+                                _dlkey = _fields.get("download_url", "download_url")
+                                _dl = _dbody.get(_dlkey, _dbody.get("download_url", ""))
+                                st.caption(f"detail 端點 OK — download_url（映射鍵 `{_dlkey}`）："
+                                           f"{'✅ ' + _dl if _dl else '⚠️ 解析為空，請確認 download_url 映射'}")
+                            except Exception as _de:  # noqa: BLE001
+                                from core import guidance as _g  # noqa: PLC0415
+                                _card = _g.diagnose(str(_de))
+                                if _card:
+                                    st.warning(f"detail 端點：{_card['title']} — {_card['hint']}")
+                                else:
+                                    st.caption(f"（detail 端點預覽略過：{_de}）")
+                    elif isinstance(_data, dict):
+                        # 巢狀 envelope（如 {"data":{"items":[...]}}）目前需平面陣列
+                        st.info("回應是物件而非任務陣列。若任務清單包在巢狀欄位（如 "
+                                "`data.items`），目前 rest_mapping 需要 list 端點直接回傳陣列；"
+                                "可調整 list_path 指向回傳陣列的端點。")
+                except Exception:  # noqa: BLE001
+                    pass
+                if body.strip():
+                    with st.expander("原始回應（前 800 字）", expanded=False):
+                        st.code(body[:800] + ("…" if len(body) >= 800 else ""), language="json")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"❌ 連不上：{exc}。請確認 server 已啟動、host/path 正確、token 有效。")
+
+
 def _render_external_tab(
     reg: PluginRegistry,
     external_rows: list[dict[str, Any]],
     readiness_by_id: dict[str, Any],
     manage_disabled: bool,
 ) -> None:
+    _render_external_system_register()
+    st.markdown("---")
     if not external_rows:
         st.info("No external tools registered.")
         return
@@ -1736,12 +1929,160 @@ def _page_runs(reg: PluginRegistry) -> None:
             )
 
 
+def _render_sandbox_policy() -> None:
+    """No-code editor for the load-time plugin sandbox (core/sandbox.py reads
+    config/sandbox_policy.yaml). Lets a security admin pick enforce/warn/off and
+    extend/relax the deny-list — without env vars or code."""
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    st.subheader("插件沙箱政策（執行安全）")
+    st.caption("第三方/手放模組載入前會靜態掃描危險構造（process/網路/shell、動態執行）。"
+               "此處設定即時生效，免改環境變數或程式碼。")
+    sp_path = _Path(__file__).resolve().parent.parent / "config" / "sandbox_policy.yaml"
+    try:
+        _sp = _yaml.safe_load(sp_path.read_text(encoding="utf-8")) if sp_path.exists() else {}
+    except Exception:
+        _sp = {}
+    if not isinstance(_sp, dict):
+        _sp = {}
+
+    import os as _os  # noqa: PLC0415
+    _env_override = _os.environ.get("CIM_PLUGIN_SANDBOX")
+    _modes = ["enforce", "warn", "off"]
+    _cur_mode = (_sp.get("mode") or "warn").strip().lower()
+    _mode = st.radio(
+        "強制模式", _modes,
+        index=_modes.index(_cur_mode) if _cur_mode in _modes else 1,
+        horizontal=True, key="sbx_mode",
+        help="enforce＝有違規拒絕載入；warn＝記錄但放行；off＝跳過掃描",
+        disabled=bool(_env_override))
+    if _env_override:
+        st.warning(f"目前由環境變數 CIM_PLUGIN_SANDBOX={_env_override} 覆蓋，此下拉暫不生效。"
+                   "若要改用此 GUI 設定：移除該環境變數（PowerShell：`Remove-Item Env:CIM_PLUGIN_SANDBOX`，"
+                   "或在啟動腳本/系統環境變數中刪除）後重啟 app。")
+
+    _c1, _c2 = st.columns(2)
+    _bi = _c1.text_input("額外禁用 import（逗號分隔）",
+                         value=", ".join(_sp.get("blocked_imports") or []), key="sbx_bi",
+                         placeholder="requests, urllib")
+    _bc = _c2.text_input("額外禁用呼叫（逗號分隔）",
+                         value=", ".join(_sp.get("blocked_calls") or []), key="sbx_bc",
+                         placeholder="open")
+    _ai = _c1.text_input("信任放行 import（從內建黑名單移除）",
+                         value=", ".join(_sp.get("allow_imports") or []), key="sbx_ai",
+                         placeholder="socket")
+    _ac = _c2.text_input("信任放行呼叫", value=", ".join(_sp.get("allow_calls") or []),
+                         key="sbx_ac")
+    if st.button("💾 儲存沙箱政策", type="primary", key="sbx_save"):
+        def _split(s: str) -> list:
+            return [x.strip() for x in (s or "").replace("，", ",").split(",") if x.strip()]
+        _sp["mode"] = _mode
+        _sp["blocked_imports"] = _split(_bi)
+        _sp["blocked_calls"] = _split(_bc)
+        _sp["allow_imports"] = _split(_ai)
+        _sp["allow_calls"] = _split(_ac)
+        try:
+            sp_path.parent.mkdir(parents=True, exist_ok=True)
+            sp_path.write_text(_yaml.safe_dump(_sp, allow_unicode=True, sort_keys=False),
+                               encoding="utf-8")
+            st.success(f"✅ 已儲存沙箱政策（模式：{_mode}），立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"寫入失敗：{exc}")
+    st.caption("⚠️ 此為靜態 AST 檢查（載入前防呆），非執行期/OS 級隔離；"
+               "高敏環境請搭配 enforce 模式並審查模組來源。")
+
+
 def _page_permissions(reg: PluginRegistry) -> None:
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
     st.header(":material/lock: Permissions")
-    st.info(
-        "This page is read-only for now. Local role checks use `admin` by default; "
-        "enterprise permission editing will be wired to a production identity service later."
+    policy_path = _Path(__file__).resolve().parent.parent / "config" / "permissions.yaml"
+
+    # ── 視覺化權限矩陣（no-code：勾選即可，免寫 YAML）────────────────────────
+    st.subheader("視覺化權限編輯")
+    st.caption("選角色 → 勾選可檢視/可執行的模組 → 儲存。直接寫入 config/permissions.yaml，立即生效。")
+    try:
+        _policy = _yaml.safe_load(policy_path.read_text(encoding="utf-8")) if policy_path.exists() else {}
+    except Exception:
+        _policy = {}
+    if not isinstance(_policy, dict):
+        _policy = {}
+    _roles_d = _policy.get("roles") if isinstance(_policy.get("roles"), dict) else {}
+    _all_ids = sorted(p.plugin_id for p in reg.list_plugins())
+    _role_names = list(_roles_d.keys()) or ["admin"]
+    _c1, _c2 = st.columns([2, 2])
+    _sel_role = _c1.selectbox("角色", _role_names, key="perm_role_sel")
+    _new_role = _c2.text_input("或新增角色", key="perm_new_role", placeholder="operator")
+    _role = (_new_role.strip() or _sel_role)
+    _rule = _roles_d.get(_role) if isinstance(_roles_d.get(_role), dict) else {}
+    _is_all = st.checkbox("完整存取（all：可看可執行全部）", value=bool(_rule.get("all")), key=f"perm_all_{_role}")
+    _view_all = ("*" in (_rule.get("view") or []))
+    _view_allchk = False
+    _view_sel: list = []
+    _exec_sel: list = []
+    if not _is_all:
+        _view_allchk = st.checkbox("可檢視全部模組（view: *）", value=_view_all, key=f"perm_vall_{_role}")
+        if not _view_allchk:
+            _view_sel = st.multiselect("可檢視的模組（view）", _all_ids,
+                                       default=[m for m in (_rule.get("view") or []) if m in _all_ids],
+                                       key=f"perm_view_{_role}")
+        _exec_sel = st.multiselect("可執行的模組（execute）", _all_ids,
+                                   default=[m for m in (_rule.get("execute") or []) if m in _all_ids],
+                                   key=f"perm_exec_{_role}")
+    if st.button("💾 儲存此角色權限", type="primary", key="perm_save_visual"):
+        _new_rule: dict = {}
+        if _is_all:
+            _new_rule["all"] = True
+        else:
+            _new_rule["view"] = ["*"] if _view_allchk else _view_sel
+            _new_rule["execute"] = _exec_sel
+        _roles_d[_role] = _new_rule
+        _policy["roles"] = _roles_d
+        _policy.setdefault("default_policy", "allow")
+        try:
+            policy_path.parent.mkdir(parents=True, exist_ok=True)
+            policy_path.write_text(_yaml.safe_dump(_policy, allow_unicode=True, sort_keys=False),
+                                   encoding="utf-8")
+            st.success(f"✅ 已更新角色「{_role}」權限，立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"寫入失敗：{exc}")
+
+    # 以角色視角預覽：此角色實際可見/可執行哪些模組（讀目前已存的政策）
+    with st.expander(f"👁 預覽：角色「{_role}」實際可存取的模組", expanded=False):
+        from core.rbac import is_allowed as _is_allowed  # noqa: PLC0415
+        _prev = [{"模組": _m,
+                  "可檢視": "✅" if _is_allowed(_policy, _role, _m, "view") else "—",
+                  "可執行": "✅" if _is_allowed(_policy, _role, _m, "execute") else "—"}
+                 for _m in _all_ids]
+        st.dataframe(pd.DataFrame(_prev), use_container_width=True, hide_index=True)
+    st.markdown("---")
+
+    # ── 進階：直接編 YAML（讀/寫 config/permissions.yaml）────────────────────
+    st.subheader("進階：直接編輯 permissions.yaml")
+    st.caption(
+        "編輯後按「儲存」即生效（由 core/rbac.py 在每次執行前強制檢查；"
+        "角色來自 CIM_USER_ROLE）。schema：default_policy: allow|deny；roles.<role>.{all|view|execute}。"
     )
+    default_policy = "default_policy: allow\nroles:\n  admin:\n    all: true\n"
+    current = policy_path.read_text(encoding="utf-8") if policy_path.exists() else default_policy
+    edited = st.text_area("permissions.yaml", value=current, height=280, key="perm_yaml")
+    if st.button("💾 儲存權限政策", type="primary", key="perm_save"):
+        try:
+            parsed = _yaml.safe_load(edited)
+            if parsed is not None and not isinstance(parsed, dict):
+                raise ValueError("最外層必須是物件（含 default_policy / roles）")
+            policy_path.parent.mkdir(parents=True, exist_ok=True)
+            policy_path.write_text(edited, encoding="utf-8")
+            st.success("✅ 已儲存，立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"YAML 格式錯誤，未儲存：{exc}")
+    st.markdown("---")
+
+    # ── 插件沙箱政策（執行安全，no-code）──────────────────────────────────────
+    _render_sandbox_policy()
+    st.markdown("---")
 
     st.markdown("**Defined roles:**")
     roles = _store().list_role_rows()
@@ -1970,8 +2311,8 @@ def main() -> None:
         st.stop()
         return
 
-    tab_health, tab_modules, tab_runs, tab_sheets, tab_repairs, tab_audit = st.tabs(
-        ["Health", "Tools", "Runs & Usage", "Sheets", "Repairs", "Audit & Database"]
+    tab_health, tab_modules, tab_runs, tab_sheets, tab_perms, tab_repairs, tab_audit = st.tabs(
+        ["Health", "Tools", "Runs & Usage", "Sheets", "Permissions", "Repairs", "Audit & Database"]
     )
 
     with tab_health:
@@ -1985,6 +2326,9 @@ def main() -> None:
 
     with tab_sheets:
         _page_sheets(reg)
+
+    with tab_perms:
+        _page_permissions(reg)
 
     with tab_repairs:
         _page_repairs(reg)

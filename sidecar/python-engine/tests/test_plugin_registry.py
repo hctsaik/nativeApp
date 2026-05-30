@@ -661,8 +661,13 @@ def test_management_runner_uses_single_prod_control_panel() -> None:
     assert 'st.warning("Needs attention") if issues else st.success("Passed")' not in src
 def test_management_runner_has_workflow_tabs() -> None:
     src = (Path(__file__).parent.parent / "tools" / "management_runner.py").read_text(encoding="utf-8")
-    assert '["Health", "Tools", "Runs & Usage", "Sheets", "Repairs", "Audit & Database"]' in src
+    assert '["Health", "Tools", "Runs & Usage", "Sheets", "Permissions", "Repairs", "Audit & Database"]' in src
     assert "Audit & Backup" not in src
+    # the (previously dead) Permissions page is now wired into the nav as a
+    # visual RBAC matrix editor + raw-YAML editor + external-system register form
+    assert "_page_permissions(reg)" in src
+    assert "視覺化權限編輯" in src
+    assert "_render_external_system_register" in src
 
 
 def test_management_runner_audit_database_is_backend_aware() -> None:

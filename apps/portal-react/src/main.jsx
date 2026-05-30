@@ -76,17 +76,17 @@ function SidecarError({ restarting, onRestart }) {
     return (
       <div className="sidecar-error sidecar-restarting">
         <RefreshCw size={16} className="spin" />
-        Local engine restarting…
+        本地引擎重新啟動中…
       </div>
     );
   }
   return (
     <div className="sidecar-error">
       <AlertTriangle size={16} />
-      Local engine stopped.
+      本地引擎已停止。
       {onRestart && (
         <button className="btn-restart" onClick={onRestart}>
-          <RefreshCw size={14} /> Restart
+          <RefreshCw size={14} /> 重新啟動
         </button>
       )}
     </div>
@@ -102,11 +102,101 @@ function ToolError({ message }) {
   );
 }
 
+// ── Streamlit 錯誤彈窗攔截 ────────────────────────────────
+// Streamlit 在程序崩潰或重連時，會在 iframe 內部彈出英文錯誤 Dialog。
+// 由於 iframe 使用 localhost 同源，可注入 MutationObserver 攔截並中文化。
+
+const STREAMLIT_ERROR_MAP = [
+  {
+    from: "Is Streamlit still running? If you accidentally stopped Streamlit, just restart it in your terminal:",
+    to: "工具程序已停止回應。請按下「Stop」後重新啟動工具。",
+  },
+  {
+    from: "streamlit run yourscript.py",
+    to: "",
+  },
+  {
+    from: "Streamlit server is not responding. Are you connected to the internet?",
+    to: "工具伺服器未回應，請確認工具程序正常運行。",
+  },
+  {
+    from: "Cannot connect to Streamlit",
+    to: "無法連接到工具程序，請重新啟動工具。",
+  },
+  {
+    from: "Connection timed out.",
+    to: "連線逾時，工具程序可能已停止。",
+  },
+  {
+    from: "Connection failed",
+    to: "連線失敗，請重新啟動工具。",
+  },
+  // Streamlit 漢堡選單 → 管理快取對話框
+  {
+    from: "Clear cache",
+    to: "清除快取",
+  },
+  {
+    from: "Are you sure you want to clear the app's cache? This will remove all cached entries.",
+    to: "確定要清除應用程式快取嗎？所有快取資料將會被移除。",
+  },
+  {
+    from: "Clear All",
+    to: "全部清除",
+  },
+  {
+    from: "Cancel",
+    to: "取消",
+  },
+];
+
+function translateStreamlitErrors(doc) {
+  if (!doc) return;
+  // Streamlit 的連線錯誤 Dialog 會用 BaseUI Modal 渲染，
+  // 內容放在 <p>、<div> 文字節點。用 TreeWalker 掃所有文字節點效率最高。
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    const orig = node.nodeValue;
+    if (!orig) continue;
+    for (const { from, to } of STREAMLIT_ERROR_MAP) {
+      if (orig.includes(from)) {
+        node.nodeValue = to ? orig.replace(from, to) : "";
+      }
+    }
+  }
+}
+
+function injectStreamlitErrorTranslator(iframeEl) {
+  if (!iframeEl) return null;
+  let observer = null;
+  function setup() {
+    try {
+      const doc = iframeEl.contentDocument;
+      if (!doc || !doc.body) return;
+      // 立即掃一次（避免 load 後才注入的情況）
+      translateStreamlitErrors(doc);
+      // 監聽後續 DOM 變化（Streamlit 動態注入 Modal）
+      observer = new MutationObserver(() => translateStreamlitErrors(doc));
+      observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
+    } catch {
+      // cross-origin guard — 若 origin 不允許則靜默略過
+    }
+  }
+  iframeEl.addEventListener("load", setup);
+  // 若已載入完成則立即執行
+  if (iframeEl.contentDocument?.readyState === "complete") setup();
+  return () => {
+    iframeEl.removeEventListener("load", setup);
+    observer?.disconnect();
+  };
+}
+
 
 // Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用
 const PORTAL_VISIBLE_CATEGORIES = ["sheet", "management"];
 
-function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode }) {
+function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, onReload, reloading, role, roles, onSetRole }) {
   const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
 
   return (
@@ -116,6 +206,20 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
         <span className={`mode-badge ${devMode ? "mode-badge-dev" : "mode-badge-prod"}`}>
           {devMode ? "DEV" : "PROD"}
         </span>
+        {role && (
+          devMode && onSetRole ? (
+            <select
+              className="role-select"
+              value={role}
+              onChange={(e) => onSetRole(e.target.value)}
+              title="切換目前角色（DEV）：可即時看到 RBAC 對工具可見性/執行權限的效果"
+            >
+              {(roles ?? [role]).map(r => <option key={r} value={r}>角色：{r}</option>)}
+            </select>
+          ) : (
+            <span className="mode-badge" title="目前 RBAC 角色">角色：{role}</span>
+          )
+        )}
         <div className="toolbar-title">
           <p>{status}</p>
         </div>
@@ -143,6 +247,16 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
             })()}
           </select>
         </div>
+        {devMode && onReload && (
+          <button
+            onClick={onReload}
+            disabled={sidecarDown || reloading}
+            title="重新掃描 plugin.yaml / sheet YAML（免重啟整個 app）；若有工具執行中會一併重啟以套用改動"
+          >
+            <RefreshCw size={17} className={reloading ? "spin" : undefined} />
+            重新載入工具
+          </button>
+        )}
         {activeTool ? (
           <button onClick={onStop} className="btn-danger">
             <Square size={17} />
@@ -163,6 +277,16 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
 // ── Regular (module) panel ────────────────────────────────
 
 function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, isStarting }) {
+  const inputIframeRef = useRef(null);
+  const outputIframeRef = useRef(null);
+
+  // 注入 Streamlit 錯誤訊息中文化攔截器
+  useEffect(() => {
+    const cleanupInput = injectStreamlitErrorTranslator(inputIframeRef.current);
+    const cleanupOutput = injectStreamlitErrorTranslator(outputIframeRef.current);
+    return () => { cleanupInput?.(); cleanupOutput?.(); };
+  }, [inputUrl, outputUrl]);
+
   return (
     <div className="left-panel">
       <div className="tab-bar">
@@ -176,11 +300,11 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 
       <div className="tab-content">
         {inputUrl
-          ? <iframe title="Input" src={inputUrl} style={{ display: activeTab === "input" ? "block" : "none" }} />
+          ? <iframe ref={inputIframeRef} title="Input" src={inputUrl} style={{ display: activeTab === "input" ? "block" : "none" }} />
           : activeTab === "input" && <div className="tab-empty">請先選擇功能並按下 Start Tool</div>
         }
         {outputUrl
-          ? <iframe title="Output" src={outputUrl} style={{ display: activeTab === "output" ? "block" : "none" }} />
+          ? <iframe ref={outputIframeRef} title="Output" src={outputUrl} style={{ display: activeTab === "output" ? "block" : "none" }} />
           : activeTab === "output" && <div className="tab-empty">尚未執行，請在 Input 頁籤完成輸入</div>
         }
       </div>
@@ -205,6 +329,16 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
 // ── Sheet panel ───────────────────────────────────────────
 // Each sheet tab has its own dedicated input + output Streamlit process.
 // All iframes are kept mounted (display:none when inactive) to preserve session state.
+
+// SheetIframe：每個 sheet tab 的 iframe，掛載 Streamlit 錯誤訊息攔截器
+function SheetIframe({ title, src, style }) {
+  const iframeRef = useRef(null);
+  useEffect(() => {
+    const cleanup = injectStreamlitErrorTranslator(iframeRef.current);
+    return () => cleanup?.();
+  }, [src]);
+  return <iframe ref={iframeRef} title={title} src={src} style={style} />;
+}
 
 function SheetLayout({
   sheetTabs,
@@ -261,12 +395,12 @@ function SheetLayout({
             if (!hasBeenVisited || !tab.ready) return null;
             return (
               <React.Fragment key={tab.plugin_id}>
-                <iframe
+                <SheetIframe
                   title={`${tab.plugin_id}-input`}
                   src={tab.input_url}
                   style={{ display: isActive && activeTab === "input" ? "block" : "none" }}
                 />
-                <iframe
+                <SheetIframe
                   title={`${tab.plugin_id}-output`}
                   src={outputSrc}
                   style={{ display: isActive && activeTab === "output" ? "block" : "none" }}
@@ -286,7 +420,7 @@ function SheetLayout({
       {!isStarting && activeTabStarting && (
         <div className="loading-overlay">
           <div className="loading-spinner" />
-          <span>Starting tab...</span>
+          <span>頁籤啟動中，請稍候…</span>
         </div>
       )}
       {!isStarting && !activeTabStarting && isExecuting && (
@@ -381,6 +515,9 @@ function App() {
   const [status, setStatus] = useState("Ready");
   const [sidecarDown, setSidecarDown] = useState(false);
   const [sidecarRestarting, setSidecarRestarting] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [role, setRole] = useState("admin");
+  const [roles, setRoles] = useState(["admin", "operator", "viewer"]);
   const [toolError, setToolError] = useState(null);
   const [runtimeStatus, setRuntimeStatus] = useState(null);
   const [previewModal, setPreviewModal] = useState(null); // { url, toolName }
@@ -400,6 +537,15 @@ function App() {
   const selectedToolIdRef = useRef("");
   useEffect(() => { selectedToolIdRef.current = selectedToolId; }, [selectedToolId]);
 
+
+  // Fetch the current RBAC role once the sidecar URL is known (proves RBAC live).
+  useEffect(() => {
+    if (!config?.sidecarControlUrl) return;
+    fetch(`${config.sidecarControlUrl}/whoami`)
+      .then(r => r.json())
+      .then(d => { if (d?.role) setRole(d.role); if (Array.isArray(d?.roles)) setRoles(d.roles); })
+      .catch(() => {});
+  }, [config?.sidecarControlUrl]);
 
   useEffect(() => {
     nativeApi.getAppConfig().then(setConfig).catch((err) => {
@@ -523,14 +669,14 @@ function App() {
             started_at: s.started_at ?? prev.started_at,
           } : prev);
           if (!s.input_alive || !s.output_alive) {
-            setToolError(`${activeTool.name} has stopped. Please start it again.`);
-            setStatus(`${activeTool.name} stopped`);
+            setToolError(`⚠️ ${activeTool.name} 已停止，請重新啟動工具`);
+            setStatus(`${activeTool.name} 已停止`);
           }
         } else {
           // Regular tool: heartbeat + result watch
           if (!s.input_alive || !s.output_alive) {
-            const layer = !s.input_alive ? "Input" : "Output";
-            setToolError(`${layer} process crashed — please Stop and restart the tool`);
+            const layer = !s.input_alive ? "Input（輸入）" : "Output（輸出）";
+            setToolError(`⚠️ ${layer} 程序已停止 — 請按下 Stop 後重新啟動工具`);
             cimLog("warn", `heartbeat: ${layer} process dead for ${s.tool_id}`);
           }
           const mtime = s.result_mtime ?? -1;
@@ -694,20 +840,21 @@ function App() {
     }
   }
 
-  async function handleStart() {
-    const tool = tools.find((t) => t.tool_id === selectedToolId);
-    cimLog("info", `startTool: ${selectedToolId}`);
-    setStatus(`Starting ${tool?.name ?? selectedToolId}…`);
+  async function handleStart(toolIdArg) {
+    const startId = (typeof toolIdArg === "string" && toolIdArg) ? toolIdArg : selectedToolId;
+    const tool = tools.find((t) => t.tool_id === startId);
+    cimLog("info", `startTool: ${startId}`);
+    setStatus(`Starting ${tool?.name ?? startId}…`);
     setIsStarting(true);
     try {
-      const res = await nativeApi.startTool(selectedToolId);
+      const res = await nativeApi.startTool(startId);
       cimLog("info", `startTool response: category=${res.category} sheet_tabs=${res.sheet_tabs?.length ?? 0}`);
       setInputUrl(res.input_url ?? res.url ?? "");
       setOutputBaseUrl(res.output_url ?? "");
       setOutputNonce(0);
       setActiveTool({
-        tool_id: selectedToolId,
-        name: tool?.name ?? selectedToolId,
+        tool_id: startId,
+        name: tool?.name ?? startId,
         category: res.category ?? tool?.category,
         pid: res.pid,
         ready: res.ready,
@@ -719,7 +866,7 @@ function App() {
       setActiveTab("input");
       setDisplayImageUrl(null);
       setToolError(null);
-      setStatus(res.ready ? `${tool?.name ?? selectedToolId} ready` : `${tool?.name ?? selectedToolId} running`);
+      setStatus(res.ready ? `${tool?.name ?? startId} ready` : `${tool?.name ?? startId} running`);
       nativeApi.getRuntimeStatus?.().then(setRuntimeStatus).catch(() => {});
 
       if (res.sheet_tabs?.length > 0) {
@@ -757,6 +904,65 @@ function App() {
       setSidecarRestarting(false);
       setStatus(`Engine restart failed: ${err.message}`);
     }
+  }
+
+  async function handleReload() {
+    // DEV hot-reload: re-scan plugin.yaml / sheet YAML into the catalog, then
+    // refresh the tool list — no full app restart. Pairs with engine POST /reload.
+    if (!config?.sidecarControlUrl) {
+      setStatus("無法熱載：缺 sidecar 控制位址");
+      return;
+    }
+    setReloading(true);
+    setStatus("重新載入工具中…");
+    try {
+      const res = await fetch(`${config.sidecarControlUrl}/reload`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      const items = await nativeApi.listTools().catch(() => []);
+      if (items.length) {
+        setTools(items);
+        if (!items.find(t => t.tool_id === selectedToolId)) {
+          const first = items.find(t => t.category === "sheet") ?? items[0];
+          if (first?.tool_id) setSelectedToolId(first.tool_id);
+        }
+      }
+      const added = (data.added ?? []).length;
+      const missing = data.missing_modules ?? [];
+      // If a tool is currently running, restart it so code/YAML changes take
+      // effect in the live subprocess (catalog reload alone keeps the old code).
+      const activeId = activeTool?.tool_id;
+      if (activeId && (!items.length || items.find(t => t.tool_id === activeId))) {
+        try {
+          await nativeApi.stopTool();
+          await handleStart(activeId);
+        } catch (e) { cimLog("warn", `reload restart active tool failed: ${e.message}`); }
+      }
+      let msg = added ? `已載入 ${added} 個新工具` : "工具已是最新";
+      if (missing.length) msg += `；有 sheet 缺模組：${missing.join(", ")}`;
+      setStatus(msg);
+      cimLog("info", `reload: added=${JSON.stringify(data.added ?? [])} missing=${JSON.stringify(missing)} total=${data.total ?? "?"}`);
+    } catch (err) {
+      cimLog("error", `reload failed: ${err.message}`);
+      setStatus(`熱載失敗：${err.message}`);
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  async function handleSetRole(r) {
+    // DEV role switch so an admin can see RBAC take effect (operator/viewer see
+    // fewer tools / cannot execute). PROD identity comes from SSO/IdP.
+    if (!config?.sidecarControlUrl || r === role) return;
+    try {
+      await fetch(`${config.sidecarControlUrl}/set-role`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: r }),
+      });
+      setRole(r);
+      const items = await nativeApi.listTools().catch(() => []);
+      if (items.length) setTools(items);
+      setStatus(`角色已切換為 ${r}`);
+    } catch (e) { cimLog("error", `set-role failed: ${e.message}`); }
   }
 
   async function handleStop() {
@@ -804,9 +1010,14 @@ function App() {
         activeTool={activeTool}
         onStart={handleStart}
         onStop={handleStop}
+        onReload={handleReload}
+        reloading={reloading}
         status={status}
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
+        role={role}
+        roles={roles}
+        onSetRole={handleSetRole}
       />
       <div className="workspace-body">
         {activeTool?.category === "external" ? (

@@ -30,3 +30,9 @@ sidecar/python-engine/dist/
 sidecar/python-engine/build/
 sidecar/python-engine/*.spec.bak
 sidecar/python-engine/config/*.bak
+
+# pytest cache
+.pytest_cache/
+
+# /goal command artifact (transient prompt scratch, not versioned)
+docs/goal.md

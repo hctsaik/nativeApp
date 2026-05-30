@@ -1,0 +1,18 @@
+id: module_019
+slug: data-downloader
+vendor: cimcore
+domain: pipeline
+name: Data Downloader
+version: "1.0.0"
+category: module
+description: Download source datasets from a remote annotation service before feeding them into the annotation workflow.
+author: system
+enabled: false
+deprecated_at: "2026-05-29"
+deprecated_reason: "功能已整合至 module_026（資料來源），此模組不再於 annotation sheet 中使用"
+tags: [annotation, download, dataset, service]
+runner: cv_framework
+input_file: 019_input.py
+output_file: 019_output.py
+process_file: 019_process.py
+aliases: []

@@ -1,0 +1,16 @@
+id: module_026
+slug: data-source
+vendor: cimcore
+domain: annotation
+name: 資料來源
+version: "1.0.0"
+category: module
+description: 統一資料來源入口 — 本地資料夾或外部任務系統（可擴充），輸出 DatasetManifest 供後續標注使用
+author: system
+enabled: true
+tags: [dataset, source, manifest, iwsc, feeder, downloader]
+runner: cv_framework
+input_file: 026_input.py
+output_file: 026_output.py
+process_file: 026_process.py
+aliases: []

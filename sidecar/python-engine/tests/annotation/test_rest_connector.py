@@ -9,9 +9,9 @@ import httpx
 import pytest
 import respx
 
-from annotation.integrations.connectors.rest_connector import RestConnector
-from annotation.integrations.contracts import AntTask, ConnectorHealth, TaskDetailResponse
-from annotation.integrations.profiles import SystemTenant
+from plugins.labeling.domain.integrations.connectors.rest_connector import RestConnector
+from plugins.labeling.domain.integrations.contracts import AntTask, ConnectorHealth, TaskDetailResponse
+from plugins.labeling.domain.integrations.profiles import SystemTenant
 
 # ── 共用 fixture ───────────────────────────────────────────────────────────────
 

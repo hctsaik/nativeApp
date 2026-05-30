@@ -1,0 +1,75 @@
+# Labeling plugin — declared home / single source of truth for ownership.
+#
+# This manifest declares everything the Labeling feature owns on the platform.
+# Labeling is treated as ONE (important) plugin on the CIM platform, not the
+# platform itself. It depends on platform `core/` and must never be depended on
+# by core (enforced by tests/test_architecture_boundaries.py).
+#
+# NOTE on paths: per owner decision D1/D2 the physical end-state moves these
+# assets *under* plugins/labeling/. That physical relocation is the package-
+# build + golden-path-MCP gated final step (D4). Until it lands, `current_path`
+# is authoritative and this manifest is the discoverability index; `target_path`
+# is where each asset moves to. Module folder/IDs stay numeric (D3); semantic
+# names live here as metadata.
+
+id: labeling
+vendor: cimcore
+domain: annotation
+version: 1.0.0
+
+depends_on:
+  - core            # core.integrations (ExternalSystemConnector / SystemTenant), core shared infra
+                    # direction is one-way: labeling -> core (never core -> labeling)
+
+provides:
+  domain:
+    current_path: plugins/labeling/domain/   # ✅ moved here (P6); imported as `plugins.labeling.domain` (label_ops, services, core, storage, formats, adapters, integrations)
+    import_name: plugins.labeling.domain
+    target_path: plugins/labeling/domain/
+  sheets:
+    - id: annotation
+      current_path: plugins/labeling/sheets/annotation.yaml   # ✅ moved here (P6); engine _reconcile scans sheets/*.yaml + plugins/*/sheets/*.yaml
+      target_path: plugins/labeling/sheets/annotation.yaml
+  mcp:
+    current_path: plugins/labeling/mcp/   # ✅ moved here (P6); launch: python -m plugins.labeling.mcp.server (PYTHONPATH=sidecar/python-engine)
+    target_path: plugins/labeling/mcp/
+  docs:
+    current_path:                                # platform-level docs map: docs/README.md
+      - docs/ANNOTATION_XANYLABELING.md
+      - docs/Annotation_Platform_Interface.md
+      - docs/XANYLABELING_INTEGRATION.md
+      - docs/sync-back-viewer-spec.md
+      - docs/modules/                            # per-module docs (module_006/008/009/012-018/026)
+    target_path: plugins/labeling/docs/
+  tests:
+    current_path: tests/annotation/              # + scripts/module_*/*_test.py
+    target_path: plugins/labeling/tests/
+  modules:
+    current_path: plugins/labeling/modules/   # ✅ moved here (P6); engine + plugin_loader scan scripts/ AND plugins/*/modules/
+    target_path: plugins/labeling/modules/
+    # Active Labeling GUI modules. Folder names + tool IDs stay module_NNN (D3);
+    # semantic names are metadata for discoverability / sidebar grouping.
+    # shared/ stays at scripts/shared (platform-shared, also used by module_021);
+    # moved modules reach it via _HERE.parents[3]/"scripts"/"shared".
+    active:
+      - { id: module_006, slug: animal-image-tagger,     name: 動物影像標記 }
+      - { id: module_008, slug: video-tracking-annotator, name: 影片追蹤標注 }
+      - { id: module_009, slug: unified-annotation-platform, name: 統一標注平台 }
+      - { id: module_012, slug: annotation-session,       name: 標注作業 }
+      - { id: module_013, slug: sync-back,                name: Sync Back }
+      - { id: module_014, slug: annotation-export,        name: 匯出/回傳 }
+      - { id: module_015, slug: annotation-dashboard,     name: Dashboard }
+      - { id: module_016, slug: ai-pre-labeling,          name: AI Pre-labeling }
+      - { id: module_017, slug: label-manager,            name: Label Manager }
+      - { id: module_018, slug: review-gallery,           name: Review Gallery }
+      - { id: module_020, slug: upload-history,           name: 我的上傳記錄 }
+      - { id: module_026, slug: data-source,              name: 資料來源 }
+    # Deprecated (enabled:false in plugin.yaml; code retained, not deleted — CLAUDE.md rule)
+    deprecated:
+      - module_010   # Data Feeder → folded into module_026
+      - module_011   # → module_014
+      - module_019   # Data Downloader → module_026
+      - module_022   # 標註權限管理 → 管理中心
+      - module_023   # 標註任務 → module_026
+      - module_024   # 標注工作台(iWISC) → module_012
+      - module_025   # 完成報表 → module_014

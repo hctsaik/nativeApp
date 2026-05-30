@@ -13,12 +13,19 @@ import sys
 from pathlib import Path
 
 _ENGINE_DIR = Path(__file__).resolve().parent.parent
-_SCRIPTS_DIR = _ENGINE_DIR / "scripts"
+sys.path.insert(0, str(_ENGINE_DIR))
 
 TOOL_ID = os.environ.get("CIM_TOOL_ID", "module_009")
 MODULE_ID = os.environ.get("CIM_MODULE_ID", "009")
 
-_runner_path = _SCRIPTS_DIR / f"module_{MODULE_ID}" / f"{MODULE_ID}_runner.py"
+# Resolve the module folder across scripts/ AND plugins/*/modules/ (the Labeling
+# GUI modules moved to plugins/labeling/modules/ in the platform restructure).
+try:
+    from plugin_loader import find_module_folder  # noqa: PLC0415
+    _module_dir = find_module_folder(f"module_{MODULE_ID}")
+except Exception:
+    _module_dir = _ENGINE_DIR / "scripts" / f"module_{MODULE_ID}"
+_runner_path = _module_dir / f"{MODULE_ID}_runner.py"
 
 if not _runner_path.exists():
     import streamlit as st

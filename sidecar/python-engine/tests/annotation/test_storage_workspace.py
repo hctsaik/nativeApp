@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 from PIL import Image
 
-from annotation.core.models import (
+from plugins.labeling.domain.core.models import (
     Annotation,
     AnnotationSet,
     AnnotationTask,
@@ -24,8 +24,8 @@ from annotation.core.models import (
     TenantUserMapping,
     utc_now_iso,
 )
-from annotation.storage.sqlite_store import SQLiteMetadataStore
-from annotation.storage.workspace import AnnotationWorkspace
+from plugins.labeling.domain.storage.sqlite_store import SQLiteMetadataStore
+from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
 
 
 # ---------------------------------------------------------------------------

@@ -8,8 +8,8 @@
 |------|-----|
 | ID | `module_016` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow` |
-| 上游依賴 | module_010（manifest） |
+| Sheet | `sheet-annotation` |
+| 上游依賴 | module_026（manifest） |
 
 使用本地 YOLO 或影像分類模型對整批圖片做推論，結果寫成 X-AnyLabeling JSON，供人工用 module_012 修正。
 

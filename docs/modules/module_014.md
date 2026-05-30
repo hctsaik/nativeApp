@@ -8,10 +8,10 @@
 |------|-----|
 | ID | `module_014` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow` |
-| 上游依賴 | module_010（manifest）、module_012（分類結果） |
+| Sheet | `sheet-annotation` |
+| 上游依賴 | module_026（manifest）、module_012（分類結果） |
 
-將當前 Manifest 的 X-AnyLabeling 標注結果批次匯出為 ML 訓練常用格式。
+將當前 Manifest 的 X-AnyLabeling 標注結果批次匯出為 ML 訓練常用格式，或回傳至外部任務系統（iWISC deliver_result）。
 
 ---
 

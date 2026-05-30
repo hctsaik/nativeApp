@@ -280,8 +280,23 @@ def collect_integrity_issues(db_path: Path, store: ManagementStore | None = None
     return issues
 
 
+def _resolve_module_folder(scripts_dir: Path, plugin_id: str) -> Path:
+    """Resolve a module folder across scripts/ AND plugins/*/modules/ (the Labeling
+    GUI modules moved to plugins/labeling/modules/ in the platform restructure)."""
+    direct = scripts_dir / plugin_id
+    if direct.is_dir():
+        return direct
+    plugins_dir = scripts_dir.parent / "plugins"
+    if plugins_dir.is_dir():
+        for modroot in sorted(plugins_dir.glob("*/modules")):
+            cand = modroot / plugin_id
+            if cand.is_dir():
+                return cand
+    return direct
+
+
 def module_preflight(scripts_dir: Path, plugin_id: str) -> ModulePreflight:
-    folder = scripts_dir / plugin_id
+    folder = _resolve_module_folder(scripts_dir, plugin_id)
     short_id = plugin_id.split("_", 1)[1] if "_" in plugin_id else plugin_id
     files = {
         "plugin.yaml": folder / "plugin.yaml",
@@ -289,8 +304,32 @@ def module_preflight(scripts_dir: Path, plugin_id: str) -> ModulePreflight:
         "process": folder / f"{short_id}_process.py",
         "output": folder / f"{short_id}_output.py",
     }
+    # No-code layers: a module may declare its input fields in plugin.yaml `form:`
+    # (no *_input.py) and/or its output blocks in `output:` (no *_output.py).
+    declarative_input = declarative_output = external_gui = False
+    if files["plugin.yaml"].exists():
+        try:
+            import yaml  # noqa: PLC0415
+            _meta = yaml.safe_load(files["plugin.yaml"].read_text(encoding="utf-8")) or {}
+            declarative_input = bool(_meta.get("form"))
+            declarative_output = bool(_meta.get("output"))
+            external_gui = bool(_meta.get("external_gui"))
+        except Exception:
+            pass
+    # An external-GUI launcher tool (the Label-tool pattern) ships no
+    # input/process/output code — the framework renders a launch button from the
+    # `external_gui:` block — so only plugin.yaml is required.
+    if external_gui:
+        required = {"plugin.yaml"}
+    else:
+        required = {"plugin.yaml", "process"}
+        if not declarative_input:
+            required.add("input")
+        if not declarative_output:
+            required.add("output")
     checks = {name: path.exists() for name, path in files.items()}
-    issues = [f"Missing {name} file." for name, ok in checks.items() if not ok]
+    issues = [f"Missing {name} file." for name, path in files.items()
+              if name in required and not path.exists()]
 
     process_path = files["process"]
     no_streamlit_import = True
@@ -305,7 +344,7 @@ def module_preflight(scripts_dir: Path, plugin_id: str) -> ModulePreflight:
 
 
 def module_source_snapshot(scripts_dir: Path, plugin_id: str) -> dict[str, str]:
-    folder = scripts_dir / plugin_id
+    folder = _resolve_module_folder(scripts_dir, plugin_id)
     if not folder.is_dir():
         return {}
     content: dict[str, str] = {}

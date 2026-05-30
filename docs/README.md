@@ -1,5 +1,19 @@
 # CIM Hybrid Edge Platform
 
+## 🗺️ 文件地圖（權威來源）
+
+| 想找什麼 | 看這裡（唯一權威） |
+|----------|-------------------|
+| 平台整體架構 | [`docs/platform/ARCHITECTURE.md`](platform/ARCHITECTURE.md) |
+| AI 助理導覽 | [`docs/platform/AI_CONTEXT.md`](platform/AI_CONTEXT.md) |
+| 系統資料流 | [`docs/platform/system-flow.md`](platform/system-flow.md) |
+| **共用功能（DB / Log / config / UI 元件）在哪、怎麼用** | [`docs/platform/shared-components.md`](platform/shared-components.md) |
+| 架構重構計畫與討論記錄 | [`docs/platform/architecture-restructure-discussion.md`](platform/architecture-restructure-discussion.md) |
+| 模組總覽 | [`docs/MODULES.md`](MODULES.md) + [`docs/modules/`](modules/) |
+| Labeling / X-AnyLabeling | [`docs/ANNOTATION_XANYLABELING.md`](ANNOTATION_XANYLABELING.md)、[`docs/Annotation_Platform_Interface.md`](Annotation_Platform_Interface.md) |
+
+> 平台級文件一律放 `docs/platform/`，請勿在 `docs/` 根目錄建立同名重複檔（CI 之後會擋）。
+
 ## Current Annotation Workstream
 
 The annotation common component and X-AnyLabeling integration are documented in:
@@ -15,8 +29,9 @@ Current implementation highlights:
 - `mcp/annotation_mcp/` exposes generic `annotation_*` MCP tools.
 - X-AnyLabeling is installed in `.venv-xanylabeling` and verified as
   `4.0.0-beta.7`.
-- Latest gates: sidecar `396 passed, 1 xpassed`; MCP `43 passed`; both
-  annotation OpenSpec changes validate in strict mode.
+- Test gates: `npm run test:python` (sidecar) + `npm test` (JS shared-protocol /
+  host-electron); see CI or the latest evaluation doc for current pass counts
+  (not hardcoded here to avoid drift).
 
 Windows 桌面應用程式，整合 Electron 主程式、React Portal UI 與 Python FastAPI 側車（Sidecar），提供電腦視覺影像處理工具的本地執行環境。
 
@@ -270,62 +285,50 @@ python -m pytest sidecar/python-engine/tests/ -v
 
 ## 專案結構
 
+> 平台已完成架構重構：**共用碼在 `core/`、Labeling 收成 `plugins/labeling/`**。下圖為現況。
+
 ```
 nativeApp/
 ├── apps/
-│   ├── host-electron/           # Electron 主程式
-│   │   ├── src/
-│   │   │   ├── main.js          # Electron 主程序（Sidecar 管理、IPC 處理）
-│   │   │   └── preload.js       # IPC Bridge（暴露 window.cimHost API）
-│   │   ├── launch-electron.js   # 修復 ELECTRON_RUN_AS_NODE 問題的啟動器
-│   │   ├── dev-wait-portal.js   # 等待 Vite 就緒後啟動 Electron
-│   │   ├── logs/                # 執行期 log（含 tools.sqlite）
-│   │   └── package.json         # Electron Builder 設定
-│   └── portal-react/            # React Portal UI
-│       ├── src/
-│       │   ├── main.jsx         # React 根元件（工具選擇、iframe 嵌入）
-│       │   └── styles.css       # Portal 樣式
-│       ├── dist/                # Vite 建置輸出（PROD 模式使用）
-│       └── vite.config.js
+│   ├── host-electron/           # Electron 主程式（src/main.js、preload.js、launch-electron.js）
+│   └── portal-react/            # React Portal UI（src/main.jsx：工具選擇、iframe、重新載入鈕、角色切換）
 ├── sidecar/
 │   └── python-engine/           # Python FastAPI Sidecar
-│       ├── engine.py            # FastAPI 主程式 + SQLiteToolAdapter
-│       ├── plugin_registry.py   # PluginRegistry（發布/回溯/enabled flags）
-│       ├── plugin_loader.py     # PluginLoader（DEV 從檔案系統 / PROD 從 DB）
-│       ├── auth_provider.py     # AuthProvider（目前為佔位，預設 admin 角色）
-│       ├── requirements.txt     # Python 依賴
-│       ├── engine.spec          # PyInstaller 設定
-│       ├── tools/               # Streamlit 工具 Runner
-│       │   ├── cv_framework_runner.py   # CV 框架主 Runner
-│       │   ├── management_runner.py     # 管理中心 Streamlit UI
-│       │   ├── sheet_runner.py          # Sheet 多分頁 Runner
-│       │   ├── db_utils.py              # SimpleDAO SQLite 工具
-│       │   ├── tool_comms.py            # 工具間通訊
-│       │   ├── tool_result.py           # 結果讀寫
-│       │   ├── log_utils.py             # Log 工具
-│       │   └── ui_utils.py              # Streamlit UI 元件
-│       ├── scripts/             # 模組原始碼
-│       │   ├── module_001/      # 001_input.py / 001_process.py / 001_output.py / plugin.yaml
-│       │   ├── module_002/
-│       │   ├── module_003/
-│       │   ├── module_004/
-│       │   ├── module_005/
-│       │   ├── module_006/
-│       │   ├── shared/          # 共用 UI 元件（image_widget、ui_components）
-│       │   └── sheets/          # Sheet 定義（sheet.yaml）
+│       ├── engine.py            # FastAPI 主程式 + SQLiteToolAdapter（plugin.yaml 自動掃描、/reload 熱載、/whoami /set-role）
+│       ├── plugin_registry.py   # PluginRegistry（發布/回溯/enabled flags；雙根掃描 scripts/ + plugins/*/modules/）
+│       ├── plugin_loader.py     # PluginLoader（DEV 檔案系統 / PROD DB snapshot；dual-root 解析）
+│       ├── auth_provider.py     # AuthProvider（RBAC enforce + 可切換身分 get_current_role/set_identity）
+│       ├── engine.spec          # PyInstaller 設定（自動 collect 每個 plugins/*/domain）
+│       ├── core/                # ★平台共用層（不依賴 plugins）
+│       │   ├── forms.py         #   宣告式 form:（含 date/time）
+│       │   ├── output.py        #   宣告式 output:
+│       │   ├── external_gui.py  #   宣告式 external_gui:（啟動外部 GUI + 回收）
+│       │   ├── rbac.py          #   宣告式 RBAC（config/permissions.yaml）
+│       │   ├── sandbox.py / guidance.py
+│       │   └── integrations/    #   connector.py / tenant.py / registry.py(autodiscover) / connectors/
+│       ├── tools/               # Runner + CLI（cv_framework_runner / management_runner / sheet_runner /
+│       │   │                    #   scaffold.py / set_role.py / db_utils / tool_comms / tool_result / log_utils）
+│       ├── scripts/             # 平台/範例模組（module_001-005、007 零-code 範例）+ shared/（_config_base、UI 元件）
+│       ├── plugins/
+│       │   └── labeling/        # ★Labeling plugin（標竿工具）
+│       │       ├── domain/      #   services / models / adapters / formats / storage / integrations
+│       │       ├── modules/     #   GUI 模組 module_006/008/012-020/026
+│       │       ├── sheets/      #   annotation.yaml（🐜 影像標註，4 tabs）
+│       │       ├── mcp/         #   annotation MCP server（python -m plugins.labeling.mcp.server）
+│       │       └── plugin.manifest.yaml
+│       ├── config/              # tools.sqlite + permissions.yaml / sandbox_policy.yaml / external_systems.yaml
+│       ├── sheets/              # 平台級 sheet YAML
 │       └── tests/               # Python 單元測試
+├── mcp/                         # 根 MCP servers（platform_mcp / cim_gui_mcp）；由 .mcp.json 設定
 ├── packages/
 │   └── shared-protocol/         # Electron ↔ Portal 共用訊息協定
-├── .claude/
-│   └── commands/                # Claude Code 開發者技能
-│       ├── new-cv-module.md     # 建立新 CV 模組骨架
-│       ├── package-build.md     # 打包流程
-│       ├── checkpoint.md        # 工作狀態儲存
-│       └── resume.md            # 工作狀態還原
-├── docs/                        # 文件
-│   ├── README.md                # 本文件
-│   └── AI_CONTEXT.md            # AI 助理導覽文件
-├── start-dev.bat                # DEV 模式一鍵啟動
-├── start-prod.bat               # PROD 模式一鍵啟動
-└── package.json                 # Monorepo 根設定
+├── scripts/                     # 開發/E2E 工具（e2e/ Puppeteer、win/ electron-cache、manual/ 整合腳本）
+├── docs/                        # 文件（README 地圖、MODULES、modules/、platform/、patterns/）
+├── openspec/                    # ADR / changes / project.md
+├── external-system-reference/   # 外部系統 mock server + sample data
+├── .mcp.json                    # MCP server 設定（repo 根）
+├── start-dev.bat / start-prod.bat / start-trusted.bat / build-release.bat
+└── package.json                 # Monorepo 根設定（workspaces: apps/*, packages/*）
 ```
+
+> 模組完整清單見 [`MODULES.md`](MODULES.md)；Labeling GUI 模組（006/008/012–026）物理位置在 `sidecar/python-engine/plugins/labeling/modules/`。

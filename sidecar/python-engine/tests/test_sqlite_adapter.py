@@ -41,21 +41,15 @@ def test_annotation_workflow_tabs_include_dashboard_and_ai(adapter: SQLiteToolAd
     db_path = tmp_path / "data" / "tools.sqlite"
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT plugin_id FROM sheet_tabs WHERE sheet_id='annotation_workflow' ORDER BY tab_order"
+            "SELECT plugin_id FROM sheet_tabs WHERE sheet_id='annotation' ORDER BY tab_order"
         ).fetchall()
 
     plugin_ids = [row[0] for row in rows]
-    # Core annotation workflow modules must be present in order
-    assert "module_019" in plugin_ids  # Data Downloader
-    assert "module_010" in plugin_ids  # Data Feeder
-    assert "module_012" in plugin_ids  # Annotation
-    assert "module_008" in plugin_ids  # Video Annotation
-    assert "module_013" in plugin_ids  # Sync Back
-    assert "module_014" in plugin_ids  # Export
-    assert "module_016" in plugin_ids  # AI Pre-labeling
-    assert "module_017" in plugin_ids  # 管理中心
-    assert "module_018" in plugin_ids  # Review Gallery
-    assert "module_021" in plugin_ids  # Vision DIY
+    # Unified annotation sheet (4 tabs replacing old 11-tab + 4-tab sheets)
+    assert "module_026" in plugin_ids  # 資料來源（統一入口）
+    assert "module_012" in plugin_ids  # 標注工作台
+    assert "module_018" in plugin_ids  # 審查
+    assert "module_014" in plugin_ids  # 匯出 / 回傳
 
 
 def test_module_002_is_hidden_from_portal(adapter: SQLiteToolAdapter) -> None:

@@ -119,6 +119,10 @@ class ToolAdapter(ABC):
     def get_tool(self, tool_id: str) -> ToolDefinition:
         raise NotImplementedError
 
+    def rescan(self) -> dict:
+        """Re-scan plugin/sheet YAML into the catalog (hot-reload). Default no-op."""
+        return {"added": [], "total": len(self.list_tools())}
+
 
 class MockToolAdapter(ToolAdapter):
     def __init__(self) -> None:
@@ -158,245 +162,294 @@ class SQLiteToolAdapter(ToolAdapter):
         return connection
 
     def _initialize(self) -> None:
+        """Build/upgrade the catalog DB. Behaviour-preserving phases (run every
+        startup, all idempotent): create tables → one-time legacy migrations →
+        scan plugin.yaml → seed static (sheet/management/external) tools →
+        reconcile sheet YAML."""
         with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tools (
-                    tool_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    script_relative_path TEXT NOT NULL,
-                    version TEXT NOT NULL,
-                    signature TEXT,
-                    source_commit TEXT,
-                    author TEXT,
-                    approved_at TEXT,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    enabled_prod INTEGER NOT NULL DEFAULT 0,
-                    order_index INTEGER NOT NULL DEFAULT 0
-                )
-                """
-            )
-            # Create tool_versions table (shared with plugin_registry)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tool_versions (
-                    version_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tool_id      TEXT NOT NULL,
-                    version      TEXT NOT NULL,
-                    content_json TEXT NOT NULL,
-                    changelog    TEXT,
-                    author       TEXT,
-                    created_at   TEXT DEFAULT (datetime('now')),
-                    is_active    INTEGER NOT NULL DEFAULT 0,
-                    source       TEXT NOT NULL DEFAULT 'filesystem'
-                )
-                """
-            )
-            # migration：舊 DB 補欄位
-            for col_sql in [
-                "ALTER TABLE tools ADD COLUMN enabled_prod INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE tools ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
-                "ALTER TABLE tools ADD COLUMN description TEXT",
-                "ALTER TABLE tools ADD COLUMN vendor TEXT DEFAULT 'cimcore'",
-                "ALTER TABLE tools ADD COLUMN domain TEXT",
-                "ALTER TABLE tools ADD COLUMN legacy_id TEXT",
-                "ALTER TABLE tools ADD COLUMN deprecated_at TEXT",
-            ]:
-                try:
-                    connection.execute(col_sql)
-                except Exception:
-                    pass
-            # migration：cvmod-* → module_* (one-time rename)
-            for old_id, new_id in [
-                ("cvmod-001", "module_001"),
-                ("cvmod-002", "module_002"),
-                ("cvmod-003", "module_003"),
-                ("cvmod-004", "module_004"),
-                ("cvmod-005", "module_005"),
-            ]:
-                try:
-                    connection.execute(
-                        "UPDATE tools SET tool_id=? WHERE tool_id=?", (new_id, old_id)
-                    )
-                except Exception:
-                    pass
-            # migration：animal-tagger → module_006
-            try:
-                connection.execute(
-                    "UPDATE tools SET tool_id='module_006', script_relative_path='cv_framework_runner.py',"
-                    " name='006 - 動物影像標記' WHERE tool_id='animal-tagger'"
-                )
-            except Exception:
-                pass
-            # migration：retire legacy non-module tools
-            try:
-                connection.execute(
-                    "UPDATE tools SET enabled=0 WHERE tool_id IN (?, ?)",
-                    ("opencv-tool", "cv-framework"),
-                )
-            except Exception:
-                pass
-            # migration：fix sheet_id "edge_analysis" → "edge-analysis" to match tool_id "sheet-edge-analysis"
-            # (CIM_SHEET_ID is now derived by stripping "sheet-" without replacing hyphens)
-            try:
-                connection.execute(
-                    "UPDATE sheet_tabs SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
-                )
-                connection.execute(
-                    "UPDATE sheets SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
-                )
-            except Exception:
-                pass
-            # migration：re-enable module_001 (was archived but has proper scripts)
-            try:
-                connection.execute(
-                    "UPDATE tools SET enabled=1, name='001 - OpenCV 影像處理' WHERE tool_id='module_001'"
-                )
-            except Exception:
-                pass
-            # migration：rename module_008 from old "Annotation Common Component Demo" to new video tracking
-            try:
-                connection.execute(
-                    "UPDATE tools SET name='008 - 影片追蹤標注', version='0.1.0',"
-                    " script_relative_path='cv_framework_runner.py'"
-                    " WHERE tool_id='module_008'"
-                )
-            except Exception:
-                pass
-            # ── Auto-register modules from plugin.yaml (source of truth) ────────
-            self._scan_and_register_plugins(connection)
+            self._create_core_tables(connection)
+            self._run_legacy_migrations(connection)
+            self._scan_and_register_plugins(connection)   # plugin.yaml = source of truth
+            self._seed_static_tools(connection)            # sheet/management/external (no plugin.yaml)
+            self._reconcile_sheets_from_yaml(connection)
 
-            # ── Static seeds: sheet tools + management + external (no plugin.yaml) ─
-            connection.executemany(
+    def _create_core_tables(self, connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tools (
+                tool_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                script_relative_path TEXT NOT NULL,
+                version TEXT NOT NULL,
+                signature TEXT,
+                source_commit TEXT,
+                author TEXT,
+                approved_at TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                enabled_prod INTEGER NOT NULL DEFAULT 0,
+                order_index INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        # Create tool_versions table (shared with plugin_registry)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tool_versions (
+                version_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_id      TEXT NOT NULL,
+                version      TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                changelog    TEXT,
+                author       TEXT,
+                created_at   TEXT DEFAULT (datetime('now')),
+                is_active    INTEGER NOT NULL DEFAULT 0,
+                source       TEXT NOT NULL DEFAULT 'filesystem'
+            )
+            """
+        )
+
+    def _run_legacy_migrations(self, connection) -> None:
+        """One-time, idempotent migrations for old installs (no-op on fresh DBs).
+        Each is guarded; new fresh installs simply match nothing."""
+        # migration：舊 DB 補欄位
+        for col_sql in [
+            "ALTER TABLE tools ADD COLUMN enabled_prod INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tools ADD COLUMN enabled_dev INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE tools ADD COLUMN description TEXT",
+            "ALTER TABLE tools ADD COLUMN vendor TEXT DEFAULT 'cimcore'",
+            "ALTER TABLE tools ADD COLUMN domain TEXT",
+            "ALTER TABLE tools ADD COLUMN legacy_id TEXT",
+            "ALTER TABLE tools ADD COLUMN deprecated_at TEXT",
+        ]:
+            try:
+                connection.execute(col_sql)
+            except Exception:
+                pass
+        # migration：cvmod-* → module_* (one-time rename)
+        for old_id, new_id in [
+            ("cvmod-001", "module_001"),
+            ("cvmod-002", "module_002"),
+            ("cvmod-003", "module_003"),
+            ("cvmod-004", "module_004"),
+            ("cvmod-005", "module_005"),
+        ]:
+            try:
+                connection.execute(
+                    "UPDATE tools SET tool_id=? WHERE tool_id=?", (new_id, old_id)
+                )
+            except Exception:
+                pass
+        # migration：animal-tagger → module_006
+        try:
+            connection.execute(
+                "UPDATE tools SET tool_id='module_006', script_relative_path='cv_framework_runner.py',"
+                " name='006 - 動物影像標記' WHERE tool_id='animal-tagger'"
+            )
+        except Exception:
+            pass
+        # migration：retire legacy non-module tools
+        try:
+            connection.execute(
+                "UPDATE tools SET enabled=0 WHERE tool_id IN (?, ?)",
+                ("opencv-tool", "cv-framework"),
+            )
+        except Exception:
+            pass
+        # migration：fix sheet_id "edge_analysis" → "edge-analysis" to match tool_id "sheet-edge-analysis"
+        # (CIM_SHEET_ID is now derived by stripping "sheet-" without replacing hyphens)
+        try:
+            connection.execute(
+                "UPDATE sheet_tabs SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
+            )
+            connection.execute(
+                "UPDATE sheets SET sheet_id='edge-analysis' WHERE sheet_id='edge_analysis'"
+            )
+        except Exception:
+            pass
+        # migration：re-enable module_001 (was archived but has proper scripts)
+        try:
+            connection.execute(
+                "UPDATE tools SET enabled=1, name='001 - OpenCV 影像處理' WHERE tool_id='module_001'"
+            )
+        except Exception:
+            pass
+        # migration：rename module_008 from old "Annotation Common Component Demo" to new video tracking
+        try:
+            connection.execute(
+                "UPDATE tools SET name='008 - 影片追蹤標注', version='0.1.0',"
+                " script_relative_path='cv_framework_runner.py'"
+                " WHERE tool_id='module_008'"
+            )
+        except Exception:
+            pass
+
+    def _seed_static_tools(self, connection) -> None:
+        """Seed tools that have no plugin.yaml (sheet runners / management /
+        external), then apply product-state fixups. Idempotent."""
+        # ── Static seeds: sheet tools + management + external (no plugin.yaml) ─
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO tools (
+                tool_id, name, script_relative_path, version,
+                signature, source_commit, author, approved_at, enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("sheet-annotation", "🐜 影像標註", "sheet_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("management-center", "管理中心", "management_runner.py",
+                 "1.0.0", None, "seed", "system", None, 1),
+                ("labelme-dino", "LabelMe Dino", "external_labelme_dino",
+                 "0.1.0", None, "seed", "system", None, 1),
+            ],
+        )
+        # Disable legacy tools no longer in the product
+        connection.execute(
+            "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+            ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
+             "sheet-annotation_workflow", "sheet-iwsc-annotation"),
+        )
+        # Ensure all static-seed active tools are prod-enabled
+        connection.execute(
+            "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
+            ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation",
+             "management-center", "labelme-dino", "sheet-annotation"),
+        )
+        # Rename display name for existing installs
+        connection.execute(
+            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+            ("本地標注作業", "sheet-annotation_workflow", "標注工作流"),
+        )
+        connection.execute(
+            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+            ("🐜 影像標註", "sheet-annotation", "Annotation"),
+        )
+        # one-time migration: remove iWISC modules from the local annotation sheet
+        connection.execute(
+            "DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'"
+            " AND plugin_id IN (?,?,?,?)",
+            ("module_022", "module_023", "module_024", "module_025"),
+        )
+
+    def _reconcile_sheets_from_yaml(self, connection) -> list[dict]:
+        """Read sheets/*.yaml and reconcile sheet rows + tabs for each definition.
+
+        Adding a new workflow sheet no longer requires touching engine.py —
+        just drop a YAML file in sidecar/python-engine/sheets/.
+
+        Returns a list of {sheet_id, missing} for sheets whose tabs couldn't be
+        wired because a referenced module isn't registered — surfaced to the
+        portal so the author sees *why* their sheet didn't fully appear.
+        """
+        missing_report: list[dict] = []
+        try:
+            import yaml
+        except ImportError:
+            logging.warning("PyYAML not available; skipping sheet YAML reconciliation")
+            return missing_report
+
+        # Scan both the platform sheets/ dir and each plugin's sheets/ dir
+        # (e.g. plugins/labeling/sheets/). Adding a sheet = drop a YAML in either.
+        yaml_paths = sorted((ROOT_DIR / "sheets").glob("*.yaml"))
+        yaml_paths += sorted((ROOT_DIR / "plugins").glob("*/sheets/*.yaml"))
+        if not yaml_paths:
+            return missing_report
+
+        for yaml_path in yaml_paths:
+            try:
+                data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            except Exception as exc:
+                logging.warning("Failed to parse %s: %s", yaml_path, exc)
+                continue
+
+            sheet_id = data.get("sheet_id")
+            if not sheet_id:
+                continue
+
+            desired_tabs = [
+                (int(t["order"]), t["module_id"], t["label"])
+                for t in data.get("tabs", [])
+            ]
+            if not desired_tabs:
+                continue
+
+            name         = data.get("name", sheet_id)
+            description  = data.get("description", "")
+            enabled_dev  = 1 if data.get("enabled_dev", True)  else 0
+            enabled_prod = 1 if data.get("enabled_prod", False) else 0
+
+            # Auto-register the sheet as a launchable tool (tool_id = sheet-<id>),
+            # so an engineer who authors a new sheet YAML sees it appear WITHOUT
+            # editing engine.py's seed block. Idempotent (INSERT OR IGNORE).
+            connection.execute(
                 """
                 INSERT OR IGNORE INTO tools (
                     tool_id, name, script_relative_path, version,
-                    signature, source_commit, author, approved_at, enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_commit, author, enabled
+                ) VALUES (?, ?, 'sheet_runner.py', '1.0.0', 'sheet.yaml', 'system', 1)
                 """,
-                [
-                    ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("sheet-annotation_workflow", "標注工作流", "sheet_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("management-center", "管理中心", "management_runner.py",
-                     "1.0.0", None, "seed", "system", None, 1),
-                    ("labelme-dino", "LabelMe Dino", "external_labelme_dino",
-                     "0.1.0", None, "seed", "system", None, 1),
-                ],
+                (f"sheet-{sheet_id}", name),
             )
-            # Disable legacy tools no longer in the product
-            connection.execute(
-                "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?)",
-                ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder"),
-            )
-            # Ensure all static-seed active tools are prod-enabled
-            connection.execute(
-                "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?)",
-                ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation_workflow",
-                 "management-center", "labelme-dino"),
-            )
-            self._reconcile_annotation_workflow_tabs(connection)
 
-    def _reconcile_annotation_workflow_tabs(self, connection) -> None:
-        desired_tabs = [
-            (0, "module_019", "\U0001f310 Data Downloader"),
-            (1, "module_010", "\U0001f4e6 Data Feeder"),
-            (2, "module_012", "\U0001f3f7\ufe0f Annotation"),
-            (3, "module_008", "\U0001f3ac Video Annotation"),
-            (4, "module_013", "\U0001f504 Sync Back"),
-            (5, "module_020", "\U0001f4e5 Download"),
-            (6, "module_014", "\U0001f4e4 Export"),
-            (7, "module_016", "\U0001f916 AI Pre-labeling"),
-            (8, "module_017", "\U0001f4ca \u7ba1\u7406\u4e2d\u5fc3"),
-            (9, "module_018", "\U0001f5bc\ufe0f Review Gallery"),
-            (10, "module_021", "\U0001f52d Vision DIY"),
-            (11, "module_022", "\U0001f3e2 Tenant 管理"),
-            (12, "module_023", "\U0001f4cb 公海任務"),
-            (13, "module_024", "✏️ 標注工作台"),
-            (14, "module_025", "\U0001f4ca 完成報表"),
-        ]
-        plugin_ids = [plugin_id for _, plugin_id, _ in desired_tabs]
-        placeholders = ",".join("?" for _ in plugin_ids)
-        existing = {
-            row["tool_id"]
-            for row in connection.execute(
-                f"SELECT tool_id FROM tools WHERE tool_id IN ({placeholders})",
-                plugin_ids,
-            )
-        }
-        if any(plugin_id not in existing for plugin_id in plugin_ids):
-            return
-
-        current = [
-            (row["tab_order"], row["plugin_id"], row["label"])
-            for row in connection.execute(
-                "SELECT tab_order, plugin_id, label FROM sheet_tabs "
-                "WHERE sheet_id='annotation_workflow' ORDER BY tab_order"
-            )
-        ]
-        if current == desired_tabs:
-            return
-
-        connection.execute(
-            """
-            INSERT OR IGNORE INTO sheets (sheet_id, name, description, enabled_dev, enabled_prod)
-            VALUES ('annotation_workflow', 'Annotation Workflow',
-                    'End-to-end annotation workflow', 1, 0)
-            """
-        )
-        connection.execute("DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'")
-        connection.executemany(
-            "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label) VALUES (?, ?, ?, ?)",
-            [("annotation_workflow", tab_order, plugin_id, label) for tab_order, plugin_id, label in desired_tabs],
-        )
-
-        # migration: update module_013 label to Sync Back
-        try:
-            connection.execute(
-                "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
-                ("\U0001f504 Sync Back", "annotation_workflow", "module_013"),
-            )
-        except Exception:
-            pass
-
-        # migration: rename module_020 label to Download
-        try:
-            connection.execute(
-                "UPDATE sheet_tabs SET label=? WHERE sheet_id=? AND plugin_id=?",
-                ("\U0001f4e5 Download", "annotation_workflow", "module_020"),
-            )
-        except Exception:
-            pass
-
-        # migration: insert module_020 (Upload Archive) at tab_order=4
-        try:
-            exists = connection.execute(
-                "SELECT 1 FROM sheet_tabs WHERE sheet_id=? AND plugin_id=?",
-                ("annotation_workflow", "module_020"),
-            ).fetchone()
-            if not exists:
-                connection.execute(
-                    "UPDATE sheet_tabs SET tab_order=-(tab_order+1)"
-                    " WHERE sheet_id=? AND tab_order>=4",
-                    ("annotation_workflow",),
+            # Skip tab wiring if any required module is missing from the DB.
+            # Record WHY in the log so the author isn't left guessing why their
+            # sheet didn't appear (R1 gap: silent skip).
+            plugin_ids = [mid for _, mid, _ in desired_tabs]
+            placeholders = ",".join("?" for _ in plugin_ids)
+            existing = {
+                row["tool_id"]
+                for row in connection.execute(
+                    f"SELECT tool_id FROM tools WHERE tool_id IN ({placeholders})",
+                    plugin_ids,
                 )
-                connection.execute(
-                    "UPDATE sheet_tabs SET tab_order=-tab_order"
-                    " WHERE sheet_id=? AND tab_order<0",
-                    ("annotation_workflow",),
+            }
+            missing = [mid for mid in plugin_ids if mid not in existing]
+            if missing:
+                logging.warning(
+                    "Sheet '%s' tabs not wired: module(s) %s not registered "
+                    "(add their plugin.yaml or check the id).",
+                    sheet_id, ", ".join(missing),
                 )
-                connection.execute(
-                    "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
-                    " VALUES (?,?,?,?)",
-                    ("annotation_workflow", 4, "module_020",
-                     "\U0001f4e5 Download"),
+                missing_report.append({"sheet_id": sheet_id, "missing": missing})
+                continue
+
+            current = [
+                (row["tab_order"], row["plugin_id"], row["label"])
+                for row in connection.execute(
+                    "SELECT tab_order, plugin_id, label FROM sheet_tabs"
+                    " WHERE sheet_id=? ORDER BY tab_order",
+                    (sheet_id,),
                 )
-        except Exception:
-            pass
+            ]
+            if current == desired_tabs:
+                continue
+
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO sheets
+                    (sheet_id, name, description, enabled_dev, enabled_prod)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (sheet_id, name, description, enabled_dev, enabled_prod),
+            )
+            connection.execute(
+                "DELETE FROM sheet_tabs WHERE sheet_id=?", (sheet_id,)
+            )
+            connection.executemany(
+                "INSERT INTO sheet_tabs (sheet_id, tab_order, plugin_id, label)"
+                " VALUES (?, ?, ?, ?)",
+                [(sheet_id, order, mid, label) for order, mid, label in desired_tabs],
+            )
+        return missing_report
 
     def _scan_and_register_plugins(self, connection) -> None:
         """Scan scripts/*/plugin.yaml and upsert each plugin into the DB.
@@ -417,8 +470,11 @@ class SQLiteToolAdapter(ToolAdapter):
             "sheet":            "sheet_runner.py",
             "management":       "management_runner.py",
         }
-        scripts_dir = ROOT_DIR / "scripts"
-        for yaml_path in sorted(scripts_dir.glob("*/plugin.yaml")):
+        # Scan scripts/*/plugin.yaml AND each plugin's modules
+        # (plugins/<plugin>/modules/<module>/plugin.yaml).
+        yaml_paths = sorted((ROOT_DIR / "scripts").glob("*/plugin.yaml"))
+        yaml_paths += sorted((ROOT_DIR / "plugins").glob("*/modules/*/plugin.yaml"))
+        for yaml_path in yaml_paths:
             try:
                 data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
             except Exception as exc:
@@ -461,6 +517,23 @@ class SQLiteToolAdapter(ToolAdapter):
                 """,
                 (name, script, version, enabled, vendor, domain, deprecated_at, slug, tool_id),
             )
+
+    def rescan(self) -> dict:
+        """Re-scan plugin.yaml + sheet YAML into the DB without restarting.
+
+        Powers DEV hot-reload: an engineer drops/edits a plugin.yaml or sheet
+        YAML and hits reload instead of restarting the whole Electron app. Both
+        scans are idempotent (INSERT OR IGNORE + UPDATE), so this is safe to call
+        repeatedly. Returns the tool_ids newly added since the previous state."""
+        with self._connect() as connection:
+            before = {row["tool_id"] for row in connection.execute("SELECT tool_id FROM tools")}
+            self._scan_and_register_plugins(connection)
+            missing_report = self._reconcile_sheets_from_yaml(connection) or []
+            after = {row["tool_id"] for row in connection.execute("SELECT tool_id FROM tools")}
+        added = sorted(after - before)
+        missing_modules = sorted({m for r in missing_report for m in r["missing"]})
+        return {"added": added, "total": len(after),
+                "missing_sheets": missing_report, "missing_modules": missing_modules}
 
     def list_tools(self) -> list[ToolDefinition]:
         rows = self._store.list_enabled_tool_definition_rows()
@@ -517,6 +590,9 @@ class ToolRegistry:
             )
             for tool in self._adapter.list_tools()
         ]
+
+    def rescan(self) -> dict:
+        return self._adapter.rescan()
 
     def get(self, tool_id: str) -> ToolDefinition:
         return self._adapter.get_tool(tool_id)
@@ -1290,6 +1366,12 @@ def run_streamlit_script(script_path: str, port: int) -> None:
         str(port),
         "--server.headless",
         "true",
+        "--server.runOnSave",
+        "false",
+        "--server.fileWatcherType",
+        "none",
+        "--client.toolbarMode",
+        "minimal",
         "--browser.gatherUsageStats",
         "false",
     ]
@@ -1370,9 +1452,40 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="CIM Python Sidecar", version="0.1.0")
 
+    # Auto-register any scaffolded non-REST connectors (core/integrations/connectors/*.py
+    # exposing register()), so `scaffold connector` → drop file → restart/reload works
+    # with no call-site edits. Best-effort: a broken connector never blocks startup.
+    try:
+        from core.integrations.registry import autodiscover  # noqa: PLC0415
+        _registered = autodiscover()
+        if _registered:
+            logging.info("Auto-registered connectors: %s", ", ".join(_registered))
+    except Exception as _exc:  # noqa: BLE001
+        logging.warning("connector autodiscover skipped: %s", _exc)
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/whoami")
+    def whoami() -> dict:
+        """Current RBAC role (so the portal can show it and prove RBAC is live)."""
+        from auth_provider import AuthProvider, VALID_ROLES  # noqa: PLC0415
+        return {"role": AuthProvider(db_path).get_current_role(), "roles": list(VALID_ROLES)}
+
+    @app.post("/set-role")
+    def set_role(body: dict = Body(...)) -> dict:
+        """DEV role switch: write the identity file so an admin can see RBAC take
+        effect (operators/viewers lose tools / execute). In PROD identity comes
+        from CIM_IDENTITY_FILE (SSO/IdP), so this is disabled there."""
+        if os.environ.get("CIM_DEV_MODE", "1") != "1":
+            raise HTTPException(status_code=403, detail="role switch disabled in PROD (use SSO/IdP)")
+        from auth_provider import set_identity  # noqa: PLC0415
+        try:
+            set_identity(str(body.get("role", "")))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"status": "ok", "role": str(body.get("role")).strip().lower()}
 
     @app.get("/version")
     def version() -> dict:
@@ -1390,6 +1503,25 @@ def create_app(
     @app.get("/diagnostics")
     def diagnostics() -> dict:
         return manager.diagnostics()
+
+    @app.post("/reload")
+    def reload_catalog() -> dict:
+        """Hot-reload: re-scan plugin.yaml + sheet YAML into the catalog AND
+        re-run connector autodiscover, without restarting the app. An engineer
+        who just scaffolded/edited a tool (or dropped a connector) calls this (or
+        the portal's reload button) and the new/changed item appears."""
+        try:
+            result = registry.rescan()
+            # Symmetry with module/sheet hot-reload: a freshly scaffolded
+            # connector (core/integrations/connectors/*.py) becomes usable too.
+            try:
+                from core.integrations.registry import autodiscover  # noqa: PLC0415
+                result["connectors"] = autodiscover(force=True)  # re-scan for newly dropped connectors
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("reload connector autodiscover skipped: %s", exc)
+            return {"status": "ok", **result}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/tools", response_model=list[ToolInfo])
     def tools() -> list[ToolInfo]:

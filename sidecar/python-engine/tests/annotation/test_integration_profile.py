@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from annotation.integrations.connectors.fake_connector import FakeConnector
-from annotation.integrations.connectors.file_connector import FileConnector
-from annotation.integrations.profiles import SystemTenant, load_profile, load_profile_from_file
+from plugins.labeling.domain.integrations.connectors.fake_connector import FakeConnector
+from plugins.labeling.domain.integrations.connectors.file_connector import FileConnector
+from plugins.labeling.domain.integrations.profiles import SystemTenant, load_profile, load_profile_from_file
 
 
 # ---------------------------------------------------------------------------

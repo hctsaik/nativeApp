@@ -1,0 +1,29 @@
+id: module_007
+name: 宣告式表單範例（零 input 程式碼）
+version: 1.0.0
+runner: cv_framework
+category: module
+vendor: cimcore
+domain: example
+enabled: true
+slug: declarative-form-demo
+author: system
+description: >
+  示範完全 no-code 工具：input 用 form: 宣告、output 用 output: 宣告，
+  本模組**只有 007_process.py**（純運算），沒有 007_input.py / 007_output.py。
+  框架（cv_framework_runner）自動依 form: 渲染表單、依 output: 呈現結果。
+
+# ── 宣告式 input 表單（取代手寫 *_input.py 的 render_input）──────────────────
+form:
+  - { key: title,  type: text,        label: 標題,       default: "Hello", placeholder: 輸入標題 }
+  - { key: count,  type: slider,      label: 重複次數,   default: 3, min: 1, max: 10, step: 1 }
+  - { key: mode,   type: select,      label: 文字模式,   options: [大寫, 小寫, 原樣], default: 原樣 }
+  - { key: deco,   type: multiselect, label: 行裝飾,     options: [編號, 破折號, 星號], default: [編號] }
+  - { key: indent, type: integer,     label: 縮排空格,   default: 0, min: 0, max: 8, step: 1 }
+  - { key: shout,  type: checkbox,    label: 加上驚嘆號, default: false }
+
+# ── 宣告式 output（取代手寫 *_output.py 的 render_output）────────────────────
+output:
+  - { type: text,   label: 處理後標題, key: title }
+  - { type: metric, label: 行數,       key: count }
+  - { type: list,   key: lines }

@@ -1,5 +1,9 @@
 # Tasks: Annotation Workflow Extensions
 
+> ⚠️ **此 Change 已完成並被新架構取代（2026-05-29）**
+> 原計劃的「擴展 annotation_workflow sheet」已被合併重構為單一「🐜 影像標註」sheet（sheet-annotation）。
+> 相關 sheet 設定現在由 `sidecar/python-engine/sheets/annotation.yaml` 驅動。
+
 ## Phase 0 — Foundation Models and Factory
 
 - [ ] Create `sidecar/python-engine/cim_annotation/` package directory with `__init__.py`.
@@ -40,8 +44,8 @@
 - [ ] Create `scripts/module_017/017_output.py`.
   - Left column: filterable label stats dataframe + near-duplicate warning.
   - Right column tabs: Rename / Merge / Delete with two-step confirmation.
-- [ ] Add `module_017` tab to `annotation_workflow` via `engine.py _initialize()` migration.
-- [ ] Add `module_017` to `scripts/sheets/annotation_workflow/sheet.yaml`.
+- [ ] Add `module_017` tab to `annotation_workflow`（已廢棄） via `engine.py _initialize()` migration.
+- [ ] Add `module_017` to `scripts/sheets/annotation_workflow/sheet.yaml`（已廢棄）.
 - [ ] Write unit tests for `label_ops` in `017_process_test.py`.
   - `scan_labels` counts shapes and flags correctly.
   - `rename_label` renames in both shapes and flags.classification.
@@ -69,7 +73,7 @@
   - "Open in X-AnyLabeling" button via subprocess.
   - "Flag for re-annotation" button writes `.flag` sidecar file.
   - Flagged items show yellow border on thumbnail.
-- [ ] Add `module_018` tab to `annotation_workflow` via engine.py migration.
+- [ ] Add `module_018` tab to `annotation_workflow`（已廢棄） via engine.py migration.
 - [ ] Add `module_018` to sheet.yaml.
 - [ ] Write unit tests for `018_process.py` (item scan + filter logic).
 
@@ -136,7 +140,7 @@
   - How to set up `secrets/connector_creds.json`.
   - How to extract `cim_annotation/` as a git submodule.
 - [ ] Add `module_017` and `module_018` docs to `docs/modules/`.
-- [ ] Update `docs/modules/sheet-annotation_workflow.md` with new tabs.
+- [ ] Update `docs/modules/sheet-annotation_workflow.md`（已廢棄） with new tabs.
 - [ ] Update `docs/MODULES.md` index with new modules and connector guide.
 - [ ] Add `connector.yaml.example` to `scripts/module_010/` as adoption template.
 

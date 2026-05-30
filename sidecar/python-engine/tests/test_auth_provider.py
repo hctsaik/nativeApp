@@ -170,3 +170,61 @@ def test_whitespace_env_falls_back_to_admin(
 ) -> None:
     monkeypatch.setenv("CIM_USER_ROLE", "   ")
     assert auth.get_current_role() == "admin"
+
+
+# ── set_identity + default identity file (no-env-plumbing role switch) ────────
+
+
+def test_set_identity_via_explicit_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auth_provider
+    target = tmp_path / "identity.json"
+    auth_provider.set_identity("operator", path=target)
+    monkeypatch.setenv("CIM_IDENTITY_FILE", str(target))
+    assert AuthProvider().get_current_role() == "operator"
+
+
+def test_default_identity_file_resolves_without_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Writing the DEFAULT identity file switches role with no env var set."""
+    import auth_provider
+    default = tmp_path / "config" / "identity.json"
+    monkeypatch.setattr(auth_provider, "default_identity_file", lambda: default)
+    monkeypatch.delenv("CIM_IDENTITY_FILE", raising=False)
+    monkeypatch.delenv("CIM_USER_ROLE", raising=False)
+    auth_provider.set_identity("viewer")  # writes the (patched) default path
+    assert AuthProvider().get_current_role() == "viewer"
+
+
+def test_default_identity_file_precedes_user_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auth_provider
+    default = tmp_path / "config" / "identity.json"
+    monkeypatch.setattr(auth_provider, "default_identity_file", lambda: default)
+    monkeypatch.delenv("CIM_IDENTITY_FILE", raising=False)
+    auth_provider.set_identity("viewer")
+    monkeypatch.setenv("CIM_USER_ROLE", "admin")  # default file wins over this
+    assert AuthProvider().get_current_role() == "viewer"
+
+
+def test_set_identity_rejects_bad_role(tmp_path: Path) -> None:
+    import auth_provider
+    with pytest.raises(ValueError):
+        auth_provider.set_identity("superuser", path=tmp_path / "id.json")
+
+
+def test_set_role_cli_writes_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import auth_provider
+    import importlib.util
+    default = tmp_path / "config" / "identity.json"
+    monkeypatch.setattr(auth_provider, "default_identity_file", lambda: default)
+    monkeypatch.delenv("CIM_IDENTITY_FILE", raising=False)
+    monkeypatch.delenv("CIM_USER_ROLE", raising=False)
+    spec = importlib.util.spec_from_file_location(
+        "_set_role_cli", Path(__file__).resolve().parents[1] / "tools" / "set_role.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.main(["operator"]) == 0
+    assert AuthProvider().get_current_role() == "operator"
+    assert mod.main(["bogus"]) == 2  # invalid role rejected

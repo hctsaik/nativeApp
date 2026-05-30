@@ -2,6 +2,10 @@
 
 This file is written for AI assistants (Claude, Copilot, etc.) working in this codebase. It provides orientation to the architecture, conventions, and critical gotchas that are not obvious from reading individual files.
 
+> **⚠️ Current structure (post-2026-05 refactor).** Shared code now lives in **`core/`**, the Labeling feature in **`plugins/labeling/`**. Some sections below (Repository Map, How to Add a New Module) still reference **pre-refactor paths that no longer exist**. Use this mapping (authoritative current map: [`../README.md`](../README.md) "專案結構" + [`shared-components.md`](shared-components.md)):
+> `annotation/` → `plugins/labeling/domain/`; `cim_platform/` → `core/integrations/`; `mcp/annotation_mcp/` → `plugins/labeling/mcp/`; top-level `scripts/sheets/` → removed.
+> **To add a tool, prefer `python tools/scaffold.py module|sheet|plugin|connector` (+ `--external-gui`)**, then hot-reload via the portal "reload tools" button or `POST /reload` — no `engine.py` edit needed. Declarative no-code: `form:` / `output:` / `external_gui:` in plugin.yaml. RBAC is live (`core/rbac.py` + `auth_provider`), not a placeholder.
+
 ---
 
 ## Table of Contents

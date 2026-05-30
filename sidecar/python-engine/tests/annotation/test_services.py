@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from annotation.core.errors import ConflictError, NotFoundError
-from annotation.services import AnnotationService
-from annotation.storage.workspace import AnnotationWorkspace
+from plugins.labeling.domain.core.errors import ConflictError, NotFoundError
+from plugins.labeling.domain.services import AnnotationService
+from plugins.labeling.domain.storage.workspace import AnnotationWorkspace
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def test_get_ant_list_tenant_not_found(tmp_path: Path) -> None:
 
 def _seed_task(svc: AnnotationService, tmp_path: Path) -> tuple[str, str]:
     """直接向 DB 寫入一筆 AnnotationTask（繞過 claim_task 的 ZIP 下載流程）。"""
-    from annotation.core.models import AnnotationTask, utc_now_iso
+    from plugins.labeling.domain.core.models import AnnotationTask, utc_now_iso
     from uuid import uuid4
     tid = _register_tenant(svc)
     task_id = str(uuid4())
@@ -135,6 +135,24 @@ def _seed_task(svc: AnnotationService, tmp_path: Path) -> tuple[str, str]:
     )
     svc.workspace.metadata.save_task(task)
     return tid, task_id
+
+
+def test_concurrent_claim_blocked_by_unique(tmp_path: Path) -> None:
+    """原子認領：DB 對 (tenant_id, ant_id) 的 UNIQUE 約束擋下第二位認領者
+    （即使 task_id 不同）。這是 claim_task 本地併發競態防護的基礎。"""
+    from uuid import uuid4
+    from plugins.labeling.domain.core.models import AnnotationTask, utc_now_iso
+    svc = _service(tmp_path)
+    tid, _ = _seed_task(svc, tmp_path)  # 已有 (tid, ANT_001)
+    dup = AnnotationTask(
+        task_id=str(uuid4()),            # 不同 task_id
+        tenant_id=tid, ant_id="ANT_001",  # 相同 (tenant_id, ant_id)
+        ant_active=1, annotated_by="emp999",
+        created_at=utc_now_iso(), updated_at=utc_now_iso(),
+    )
+    with pytest.raises(Exception) as exc:
+        svc.workspace.metadata.save_task(dup)
+    assert "unique" in str(exc.value).lower()
 
 
 def test_get_task(tmp_path: Path) -> None:

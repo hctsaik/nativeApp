@@ -1,5 +1,8 @@
 # module_010 — Data Feeder（資料集來源建立）
 
+> ⚠️ **此模組已廢棄**（deprecated_at: 2026-05-29）
+> 功能已整合至 [module_026（資料來源）](module_026.md) 的「本地資料夾」模式。
+
 > 最後更新：2026-05-19
 
 ## 概覽
@@ -8,7 +11,7 @@
 |------|-----|
 | ID | `module_010` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow`（與 module_012、module_013 組合） |
+| Sheet | （廢棄，原 `sheet-annotation`）（與 module_012、module_013 組合） |
 | 下游 | module_012 讀取 `shared.json` 的 `last_manifest_id` |
 
 Data Feeder 負責把圖片來源整理成 DatasetManifest。後續 Annotation Session 和 Update 都以這份 manifest 作為同一批資料的基準。

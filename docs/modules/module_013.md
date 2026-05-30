@@ -8,7 +8,7 @@
 |------|-----|
 | ID | `module_013` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow`（與 module_010、module_012 組合） |
+| Sheet | `sheet-annotation`（與 module_026、module_012 組合） |
 | 上游依賴 | module_012（Annotation Session）的 manifest-scoped 分類 config |
 
 將 module_012 的標注與分類結果整理成摘要 JSON，並支援：
@@ -171,7 +171,7 @@ manifest DB (.sqlite)                    module_012 classification config
 ### 分類欄位全部空白
 
 `shared.json` 的 manifest_id 對應的分類 config 沒有資料。可能原因：
-1. Data Feeder 又跑了一次建新 manifest → 新 manifest 尚無分類
+1. module_026（資料來源）又執行了一次建立新 manifest → 新 manifest 尚無分類
 2. module_012 未執行（尚未建立分類）
 
 確認 Annotation 和 Update 的 info bar 顯示同一個 manifest 名稱。

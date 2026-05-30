@@ -1,0 +1,22 @@
+# Declarative external-system (tenant) registration (no-code).
+# The data-source module (module_026) syncs these into the workspace on load —
+# edit this file to add/keep external task systems; no code, no rebuild.
+# Tokens are read from the named env var (api_token_env), never stored here.
+# Enforced by core/external_systems.py + AnnotationService.sync_external_systems.
+
+systems: []
+  # Example (uncomment + fill to register):
+  # - system_name: iWISC
+  #   server_host_name: http://localhost:8765
+  #   target_format: xanylabeling
+  #   api_token_env: IWSC_TOKEN
+  #   connector_type: rest   # optional: rest|file|fake (omit = infer from host scheme).
+  #                          # Truly new protocols register a factory via
+  #                          # integrations.registry.register_connector(...).
+  #   # REST variant? declare endpoints/fields here — no new connector class needed:
+  #   rest_mapping:
+  #     list_path:   /v2/tasks
+  #     detail_path: /v2/tasks/detail
+  #     claim_path:  /v2/tasks/{ant_id}/claim
+  #     detail_method: POST          # GET | POST
+  #     fields: { ant_id: id, ant_active: status, ant_period: due, download_url: url }

@@ -437,6 +437,52 @@ def test_set_empty_paths_clears_previous(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Hot-reload + RBAC role endpoints (behavioral, not string-assertion guards)
+# ---------------------------------------------------------------------------
+
+def test_reload_endpoint_rescans_catalog(client: TestClient) -> None:
+    response = client.post("/reload")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "total" in body and isinstance(body.get("added"), list)
+    assert "connectors" in body  # autodiscover ran (symmetry with module/sheet reload)
+
+
+def test_whoami_reports_role_and_roles(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auth_provider
+    monkeypatch.setattr(auth_provider, "default_identity_file", lambda: tmp_path / "absent.json")
+    monkeypatch.delenv("CIM_IDENTITY_FILE", raising=False)
+    monkeypatch.delenv("CIM_USER_ROLE", raising=False)
+    body = client.get("/whoami").json()
+    assert body["role"] == "admin"
+    assert set(body["roles"]) == {"admin", "operator", "viewer"}
+
+
+def test_set_role_then_whoami_roundtrip(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auth_provider
+    monkeypatch.setattr(auth_provider, "default_identity_file", lambda: tmp_path / "id.json")
+    monkeypatch.delenv("CIM_IDENTITY_FILE", raising=False)
+    monkeypatch.delenv("CIM_USER_ROLE", raising=False)
+    monkeypatch.setenv("CIM_DEV_MODE", "1")
+    assert client.post("/set-role", json={"role": "operator"}).status_code == 200
+    assert client.get("/whoami").json()["role"] == "operator"
+    # invalid role rejected
+    assert client.post("/set-role", json={"role": "bogus"}).status_code == 400
+
+
+def test_set_role_blocked_in_prod(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CIM_DEV_MODE", "0")
+    assert client.post("/set-role", json={"role": "operator"}).status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # Shutdown
 # ---------------------------------------------------------------------------
 

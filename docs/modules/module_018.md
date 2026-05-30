@@ -8,8 +8,8 @@
 |------|-----|
 | ID | `module_018` |
 | Runner | `cv_framework` |
-| Sheet | `sheet-annotation_workflow` |
-| 上游依賴 | module_010（manifest）、module_012（標注 JSON） |
+| Sheet | `sheet-annotation` |
+| 上游依賴 | module_026（manifest）、module_012（標注 JSON） |
 
 以 Grid 縮略圖 + BBox overlay 快速瀏覽整批標注結果，支援多種篩選條件和詳細檢視。
 

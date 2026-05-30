@@ -1,19 +1,101 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os as _os
+from pathlib import Path as _Path
+
+from PyInstaller.utils.hooks import collect_submodules
+
+# Auto-collect every submodule of the platform core AND every plugin's domain,
+# so a newly-added plugin (or new submodules in an existing one) never silently
+# falls out of the bundle ("dev-green / package-dead"). Previously only the
+# Labeling plugin was collected, which broke the "add a plugin without touching
+# core/packaging" promise (R1 gap). The explicit list below is a safety net.
+_auto_hidden = collect_submodules('core')
+try:
+    _spec_dir = _Path(SPECPATH)  # injected by PyInstaller in spec files
+except NameError:  # pragma: no cover - defensive
+    _spec_dir = _Path(_os.getcwd())
+for _pdir in sorted((_spec_dir / 'plugins').glob('*')):
+    if (_pdir / 'domain' / '__init__.py').exists():
+        _auto_hidden += collect_submodules(f'plugins.{_pdir.name}.domain')
+
 
 a = Analysis(
     ['engine.py'],
     pathex=[],
     binaries=[],
-    datas=[('tools', 'tools'), ('scripts', 'scripts')],
+    datas=[
+        ('tools',        'tools'),
+        ('scripts',      'scripts'),
+        ('plugins',      'plugins'),        # Labeling plugin home (annotation domain at plugins/labeling/domain)
+        ('core',         'core'),
+        ('config',       'config'),         # declarative policy samples (permissions / external_systems / sandbox)
+        ('sheets',       'sheets'),
+    ],
     hiddenimports=[
+        # management modules (static-seed, not auto-detected by PyInstaller)
         'management_insights',
         'management_oracle_store',
         'management_package_importer',
         'management_schema',
         'management_store',
         'management_use_cases',
-    ],
+        # annotation domain (imported by scripts/*.py data files at runtime)
+        'plugins.labeling.domain',
+        'plugins.labeling.domain.adapters',
+        'plugins.labeling.domain.adapters.coco',
+        'plugins.labeling.domain.adapters.common',
+        'plugins.labeling.domain.adapters.isat',
+        'plugins.labeling.domain.adapters.labeling_runtime',
+        'plugins.labeling.domain.adapters.labelme',
+        'plugins.labeling.domain.adapters.xanylabeling',
+        'plugins.labeling.domain.adapters.xanylabeling_runtime',
+        'plugins.labeling.domain.adapters.yolo_detection',
+        'plugins.labeling.domain.adapters.yolo_segmentation',
+        'plugins.labeling.domain.core',
+        'plugins.labeling.domain.core.errors',
+        'plugins.labeling.domain.core.models',
+        'plugins.labeling.domain.core.states',
+        'plugins.labeling.domain.core.validation',
+        'plugins.labeling.domain.domains',
+        'plugins.labeling.domain.domains.animal',
+        'plugins.labeling.domain.domains.animal.schema_presets',
+        'plugins.labeling.domain.formats',
+        'plugins.labeling.domain.formats.builtins',
+        'plugins.labeling.domain.formats.contracts',
+        'plugins.labeling.domain.formats.registry',
+        'plugins.labeling.domain.integrations',
+        'plugins.labeling.domain.integrations.connectors',
+        'plugins.labeling.domain.integrations.connectors.configurable_rest_connector',
+        'plugins.labeling.domain.integrations.connectors.fake_connector',
+        'plugins.labeling.domain.integrations.connectors.file_connector',
+        'plugins.labeling.domain.integrations.connectors.rest_connector',
+        'plugins.labeling.domain.integrations.contracts',
+        'plugins.labeling.domain.integrations.profiles',
+        'plugins.labeling.domain.integrations.registry',
+        'plugins.labeling.domain.label_ops',
+        'plugins.labeling.domain.services',
+        'plugins.labeling.domain.storage',
+        'plugins.labeling.domain.storage.artifacts',
+        'plugins.labeling.domain.storage.ports',
+        'plugins.labeling.domain.storage.sqlite_store',
+        'plugins.labeling.domain.storage.workspace',
+        'plugins.labeling.domain.tools',
+        'plugins.labeling.domain.tools.builtins',
+        'plugins.labeling.domain.tools.contracts',
+        'plugins.labeling.domain.tools.registry',
+        # platform core (canonical home for external-system integration contracts)
+        'core',
+        'core.forms',
+        'core.output',
+        'core.rbac',
+        'core.sandbox',
+        'core.guidance',
+        'core.external_systems',
+        'core.integrations',
+        'core.integrations.connector',
+        'core.integrations.tenant',
+    ] + _auto_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

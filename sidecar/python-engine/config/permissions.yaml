@@ -1,0 +1,22 @@
+# Declarative RBAC policy (no-code) — edit to grant/revoke; no Python, no rebuild.
+# Enforced by core/rbac.py via auth_provider.check_permission.
+# Role comes from CIM_USER_ROLE (default: admin). See core/rbac.py for semantics.
+
+default_policy: allow        # allow | deny — applied to roles with no rule below
+
+roles:
+  admin:
+    all: true                # full access to every module
+
+  operator:                  # production-floor operator: run the labeling tools
+    view: ["*"]
+    execute:
+      - module_026           # 資料來源
+      - module_012           # 標注工作台
+      - module_018           # 審查
+      - module_014           # 匯出/回傳
+      - module_007           # 宣告式表單範例
+
+  viewer:                    # read-only
+    view: ["*"]
+    # no execute → viewer cannot run anything (explicit role = scoped → deny)
