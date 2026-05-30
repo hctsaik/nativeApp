@@ -1,0 +1,16 @@
+id: module_012
+slug: annotation-session
+vendor: cimcore
+domain: annotation
+name: Annotation Session
+version: "1.0.0"
+category: module
+description: 標注作業管理 - 從 DatasetManifest 開啟標注工作階段，逐張以 X-AnyLabeling 標注，即時追蹤進度
+author: system
+enabled: true
+tags: [annotation, xanylabeling, manifest, session]
+runner: cv_framework
+input_file: 012_input.py
+output_file: 012_output.py
+process_file: 012_process.py
+aliases: []

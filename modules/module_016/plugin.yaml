@@ -1,0 +1,16 @@
+id: module_016
+slug: ai-pre-labeling
+vendor: cimcore
+domain: pipeline
+name: AI Pre-labeling
+version: "1.0.0"
+category: module
+description: 使用本地 YOLO 或分類模型對整批圖片自動預標注，結果寫成 X-AnyLabeling JSON 供人工修正
+author: system
+enabled: true
+tags: [ai, inference, pre-labeling, yolo, classifier, automation]
+runner: cv_framework
+input_file: 016_input.py
+output_file: 016_output.py
+process_file: 016_process.py
+aliases: []

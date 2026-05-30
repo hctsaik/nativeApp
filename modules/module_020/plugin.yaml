@@ -1,0 +1,16 @@
+id: module_020
+slug: upload-history
+vendor: cimcore
+domain: pipeline
+name: 我的上傳記錄
+version: "1.0.0"
+category: module
+description: 查詢並重新下載透過 Sync Back 上傳至 Service 的標注批次
+author: system
+enabled: true
+tags: [annotation, download, archive, service]
+runner: cv_framework
+input_file: 020_input.py
+output_file: 020_output.py
+process_file: 020_process.py
+aliases: []

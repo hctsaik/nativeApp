@@ -1,0 +1,17 @@
+id: module_022
+slug: tenant-management
+vendor: cimcore
+domain: annotation
+name: 標註權限管理
+version: "1.0.0"
+category: module
+description: 管理外部系統（AOI/MES）的 Tenant 設定與標注人員白名單。
+author: system
+enabled: false
+deprecated_at: "2026-05-29"
+deprecated_reason: "Tenant 管理已移至管理中心（待完整實作），不再作為獨立 sheet tab 使用"
+tags: [annotation, tenant, management, admin]
+runner: cv_framework
+input_file: 022_input.py
+output_file: 022_output.py
+process_file: 022_process.py

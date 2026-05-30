@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1a1a2e;
+    background: #f8f9fc;
+    padding: 20px;
+  }
+  h1 { font-size: 22px; color: #0d47a1; margin-bottom: 6px; }
+  h2 { font-size: 16px; color: #0d47a1; margin: 20px 0 8px; border-left: 4px solid #0d47a1; padding-left: 10px; }
+  h3 { font-size: 14px; color: #333; margin: 10px 0 4px; }
+  p  { margin-bottom: 8px; color: #444; }
+  code { background: #e8eaf6; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 16px; }
+
+  /* ── 主流程 SVG 圖 ── */
+  .flow-container {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 12px 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    overflow-x: auto;
+  }
+
+  /* ── 步驟橫排 ── */
+  .flow {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    margin: 14px 0;
+    flex-wrap: wrap;
+  }
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 110px;
+  }
+  .step-icon {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    margin-bottom: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+  }
+  .step-num { font-size: 11px; font-weight: 700; color: #888; margin-bottom: 2px; }
+  .step-label { font-size: 12px; font-weight: 600; color: #333; max-width: 100px; }
+  .step-sub { font-size: 10px; color: #777; max-width: 100px; margin-top: 2px; }
+  .arrow { font-size: 20px; color: #aaa; padding: 0 4px; margin-top: 20px; }
+
+  .s1 .step-icon { background: #e3f2fd; }
+  .s2 .step-icon { background: #f3e5f5; }
+  .s3 .step-icon { background: #e8f5e9; }
+  .s4 .step-icon { background: #fff3e0; }
+  .s5 .step-icon { background: #fce4ec; }
+  .s6 .step-icon { background: #e0f7fa; }
+
+  /* ── 卡片 ── */
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    border-left: 4px solid #0d47a1;
+  }
+  .card.warn  { border-left-color: #f59e0b; }
+  .card.ok    { border-left-color: #16a34a; }
+  .card.tip   { border-left-color: #7c3aed; }
+  .card.error { border-left-color: #dc2626; }
+
+  /* ── 概念圖：Anchor Frame ── */
+  .timeline-demo {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin: 10px 0;
+    flex-wrap: wrap;
+  }
+  .tframe {
+    width: 44px; height: 30px;
+    border-radius: 4px;
+    border: 2px solid #ccc;
+    background: #f5f5f5;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #888;
+    position: relative;
+  }
+  .tframe.anchor {
+    background: #fff3e0;
+    border-color: #ff9800;
+    border-width: 2.5px;
+    color: #e65100;
+    font-weight: 700;
+  }
+  .tframe.tracked { background: #e8f5e9; border-color: #4caf50; color: #2e7d32; }
+  .tframe.untrack { background: #f5f5f5; border-color: #bbb; }
+  .tframe-label {
+    font-size: 9px; color: #555;
+    position: absolute; bottom: -14px;
+    white-space: nowrap;
+  }
+
+  /* ── 信心分數圖例 ── */
+  .conf-row { display: flex; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+  .conf-chip {
+    display: flex; align-items: center; gap: 6px;
+    background: #fff; border-radius: 6px;
+    padding: 4px 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    font-size: 12px;
+  }
+
+  /* ── Output 頁面說明 ── */
+  .output-map {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    margin: 10px 0;
+  }
+  .output-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .output-icon { font-size: 20px; min-width: 28px; text-align: center; }
+  .output-text h4 { font-size: 13px; color: #333; margin-bottom: 2px; }
+  .output-text p  { font-size: 12px; color: #666; margin: 0; }
+
+  /* ── FAQ ── */
+  .faq-item { margin-bottom: 12px; }
+  .faq-q { font-weight: 700; color: #0d47a1; margin-bottom: 3px; }
+  .faq-a { color: #444; font-size: 13px; }
+
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<h1>🎬 影片追蹤標注 — 使用指南</h1>
+<p class="subtitle">Module 008 | 選取關鍵幀，自動追蹤前後時間段，匯出 X-AnyLabeling JSON</p>
+
+<hr>
+
+<!-- ── 流程圖 ── -->
+<h2>工作流程總覽</h2>
+
+<div class="flow">
+  <div class="step s1">
+    <div class="step-num">①</div>
+    <div class="step-icon">🎬</div>
+    <div class="step-label">選擇影片</div>
+    <div class="step-sub">MP4/AVI/MOV</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s2">
+    <div class="step-num">②</div>
+    <div class="step-icon">🖼</div>
+    <div class="step-label">選 Anchor 幀</div>
+    <div class="step-sub">拖拉滑桿</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s3">
+    <div class="step-num">③</div>
+    <div class="step-icon">🖊</div>
+    <div class="step-label">在 X-AnyLabeling 畫框</div>
+    <div class="step-sub">自動存檔</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s4">
+    <div class="step-num">④</div>
+    <div class="step-icon">⏱</div>
+    <div class="step-label">設定時間範圍</div>
+    <div class="step-sub">前後各幾秒</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s5">
+    <div class="step-num">⑤</div>
+    <div class="step-icon">▶</div>
+    <div class="step-label">點「執行」啟動追蹤</div>
+    <div class="step-sub">切換至 Output</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step s6">
+    <div class="step-num">⑥</div>
+    <div class="step-icon">📤</div>
+    <div class="step-label">校正 + 匯出</div>
+    <div class="step-sub">X-AnyLabeling JSON</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ── 概念：Anchor Frame ── -->
+<h2>什麼是 Anchor 幀？</h2>
+
+<p><strong>Anchor 幀</strong>是你親手標注 bounding box 的那一幀影片畫面。系統會以這一幀為基準，自動將 bbox 往前後傳播到你設定的時間範圍。</p>
+
+<div class="flow-container">
+  <p style="font-size:12px;color:#888;margin-bottom:8px;">時間軸示意圖（Anchor 幀在中央，往前後各追蹤 1 秒）</p>
+  <div class="timeline-demo">
+    <div class="tframe untrack">...
+      <span class="tframe-label">更早</span>
+    </div>
+    <div class="tframe tracked">T-3
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe tracked">T-2
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe tracked">T-1
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe anchor">★
+      <span class="tframe-label">Anchor</span>
+    </div>
+    <div class="tframe tracked">T+1
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe tracked">T+2
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe tracked">T+3
+      <span class="tframe-label">追蹤</span>
+    </div>
+    <div class="tframe untrack">...
+      <span class="tframe-label">更後</span>
+    </div>
+  </div>
+  <p style="font-size:11px;color:#888;margin-top:18px;">
+    <span style="color:#ff9800">★ 橘框</span> = Anchor 幀（你手動畫的）｜
+    <span style="color:#4caf50">■ 綠框</span> = 系統自動追蹤的幀
+  </p>
+</div>
+
+<div class="card tip">
+  <h3>💡 如何選好 Anchor 幀？</h3>
+  <p>• 選動物<strong>清晰可見、沒有模糊</strong>的幀</p>
+  <p>• 選動物<strong>位於畫面中央</strong>、沒有被遮擋的幀</p>
+  <p>• 避免選動物快速移動、畫面模糊的瞬間</p>
+</div>
+
+<hr>
+
+<!-- ── 步驟三：畫框 ── -->
+<h2>③ 在 X-AnyLabeling 畫 Bounding Box</h2>
+
+<div class="card">
+  <h3>操作步驟</h3>
+  <p>1. 點擊 <strong>「🖊 在 X-AnyLabeling 畫框」</strong> 按鈕 → X-AnyLabeling 視窗開啟</p>
+  <p>2. 在圖片上的目標部位拖拉畫出矩形框</p>
+  <p>3. 為每個框選擇對應的標注類別（如：眼睛、鼻子）</p>
+  <p>4. X-AnyLabeling 有自動存檔功能，儲存後<strong>回到這個頁面等待更新</strong>（約 2 秒）</p>
+</div>
+
+<div class="card ok">
+  <h3>✅ 已偵測到框的樣子</h3>
+  <p>頁面自動刷新後，你會看到 <strong>「✅ 已偵測到 N 個標注框，點選上方▶執行開始追蹤傳播」</strong> 的綠色提示。</p>
+</div>
+
+<div class="card warn">
+  <h3>⚠️ 畫框注意事項</h3>
+  <p>• 每個框要<strong>緊貼物件邊緣</strong>，不要留太多空白</p>
+  <p>• 可以畫<strong>多個框</strong>（例如左眼、右眼各一個框）</p>
+  <p>• 儲存後回到頁面，如果沒有更新請稍等 2-3 秒讓 autorefresh 讀取</p>
+</div>
+
+<hr>
+
+<!-- ── 步驟四五：執行 ── -->
+<h2>④⑤ 設定時間範圍並啟動追蹤</h2>
+
+<div class="card">
+  <h3>往前幾秒 / 往後幾秒</h3>
+  <p>設定從 Anchor 幀出發，往前/後各追蹤幾秒的影片片段。</p>
+  <p>例如：往前 1 秒 + 往後 1 秒 = 總共 2 秒的追蹤範圍。</p>
+  <p>30fps 的影片中，2 秒 ≈ 60 幀。</p>
+</div>
+
+<p>設定完成後，確認頁面下方出現<strong>綠色提示「✅ 已偵測到標注框」</strong>，再點選上方 <strong>▶ 執行</strong>。</p>
+<p>系統啟動後會顯示「執行完成，請切換至 Output 頁籤查看結果」，請<strong>切換至 Output 頁籤</strong>。</p>
+
+<hr>
+
+<!-- ── Output 頁面說明 ── -->
+<h2>Output 頁面說明</h2>
+
+<div class="output-map">
+  <div class="output-row">
+    <div class="output-icon">⏳</div>
+    <div class="output-text">
+      <h4>追蹤進度</h4>
+      <p>顯示「追蹤中… X/Y 幀」和進度條，完成前每 1.5 秒自動更新。</p>
+    </div>
+  </div>
+  <div class="output-row">
+    <div class="output-icon">🖼</div>
+    <div class="output-text">
+      <h4>時間軸縮圖</h4>
+      <p>所有追蹤幀以縮圖排列，附信心分數徽章。點擊任一縮圖可進入詳細檢視。</p>
+    </div>
+  </div>
+  <div class="output-row">
+    <div class="output-icon">🔍</div>
+    <div class="output-text">
+      <h4>幀詳細檢視</h4>
+      <p>顯示原圖 + 追蹤結果疊合圖，以及各 bbox 的座標與信心值。</p>
+    </div>
+  </div>
+  <div class="output-row">
+    <div class="output-icon">✅</div>
+    <div class="output-text">
+      <h4>手動校正</h4>
+      <p>若某幀的追蹤結果不準確，可調整 bbox 座標後點「確認校正」儲存。</p>
+    </div>
+  </div>
+  <div class="output-row">
+    <div class="output-icon">🔄</div>
+    <div class="output-text">
+      <h4>從此幀重新傳播</h4>
+      <p>校正後點此按鈕，系統會從你校正的這幀重新往前後追蹤，修正後續偏移。</p>
+    </div>
+  </div>
+  <div class="output-row">
+    <div class="output-icon">📤</div>
+    <div class="output-text">
+      <h4>匯出（X-AnyLabeling JSON）</h4>
+      <p>點擊匯出按鈕，將所有幀的 bbox 打包成 X-AnyLabeling 格式，存至 <code>exports/xanylabeling/</code>。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── 信心分數 ── -->
+<h2>信心分數說明</h2>
+
+<p>每個追蹤幀都有一個 0～1 的<strong>信心分數</strong>，表示追蹤結果的可靠程度。</p>
+
+<div class="conf-row">
+  <div class="conf-chip">🟢 ≥ 0.7 &nbsp;<strong>高信心</strong>—追蹤準確</div>
+  <div class="conf-chip">🟡 0.4–0.7 &nbsp;<strong>中信心</strong>—建議手動確認</div>
+  <div class="conf-chip">🔴 &lt; 0.4 &nbsp;<strong>低信心</strong>—建議手動校正</div>
+</div>
+
+<div class="card warn">
+  <h3>⚠️ 低信心幀怎麼處理？</h3>
+  <p>在 Output 頁面的時間軸上，低信心幀（🔴）會特別顯眼。點入該幀，手動調整 bbox 後，點「🔄 從此幀重新傳播」，系統會以你校正的結果重新追蹤後續幀。</p>
+</div>
+
+<hr>
+
+<!-- ── 常見問題 ── -->
+<h2>常見問題</h2>
+
+<div class="faq-item">
+  <div class="faq-q">Q：點了「執行」，但 Output 頁面顯示「請先在 Input 頁面選擇影片並啟動追蹤」？</div>
+  <div class="faq-a">A：請確認 Input 頁面下方有出現<strong>綠色的「✅ 已偵測到 N 個標注框」</strong>提示，再點「▶ 執行」。若尚未在 X-AnyLabeling 畫框，系統不會啟動追蹤。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：X-AnyLabeling 畫完框存檔了，但頁面還是顯示「尚未偵測到標注」？</div>
+  <div class="faq-a">A：頁面每 2 秒自動刷新一次。請稍等，或手動重新整理 Input 頁面。若等待 10 秒以上仍無反應，請確認 X-AnyLabeling 已正確開啟並存檔。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：追蹤速度很慢？</div>
+  <div class="faq-a">A：若機器未安裝 PyTorch（torch），系統會退回到「僅 Optical Flow」模式，速度較快但精度較低。Output 頁面會顯示 ⚠️ 提示。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：匯出的 JSON 檔案在哪裡？</div>
+  <div class="faq-a">A：匯出後的 JSON 存放在：<code>{工作區根目錄}/{session_id}/exports/xanylabeling/</code>。Output 頁面匯出成功後會顯示完整路徑。</div>
+</div>
+
+<div class="faq-item">
+  <div class="faq-q">Q：如何修改「眼睛、鼻子、嘴巴」這些預設標注類別？</div>
+  <div class="faq-a">A：標注類別由 Module 008 獨立設定（<code>config/module_008.json</code>）管理。請聯絡管理員調整，或直接修改設定檔中的 <code>annotation_labels</code> 欄位。</div>
+</div>
+
+</body>
+</html>

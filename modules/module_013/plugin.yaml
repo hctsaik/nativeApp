@@ -1,0 +1,16 @@
+id: module_013
+slug: sync-back
+vendor: cimcore
+domain: pipeline
+name: Sync Back
+version: "2.0.0"
+category: module
+description: 將標注結果（bbox + 分類）批次推送至遠端 Service，並附帶訓練格式壓縮檔
+author: system
+enabled: true
+tags: [annotation, sync, service, export]
+runner: cv_framework
+input_file: 013_input.py
+output_file: 013_output.py
+process_file: 013_process.py
+aliases: []

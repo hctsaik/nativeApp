@@ -1,0 +1,13 @@
+id: module_009
+slug: unified-annotation-platform
+vendor: cimcore
+domain: annotation
+name: 統一標注平台
+version: "1.0.0"
+category: module
+description: 影像與影片一體的標注管理系統，整合 DINOv2 追蹤與 X-AnyLabeling
+author: system
+enabled: true
+tags: [annotation, video, image, tracking]
+runner: annotation_runner
+aliases: []

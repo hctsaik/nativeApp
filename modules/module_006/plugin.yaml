@@ -1,0 +1,16 @@
+id: module_006
+slug: animal-image-tagger
+vendor: cimcore
+domain: annotation
+name: 動物影像標記
+version: "1.0.0"
+category: module
+description: 動物影像資料集標記工具，支援多類別篩選與互動式標記
+author: system
+enabled: true
+tags:
+  - labeling
+  - dataset
+  - annotation
+runner: cv_framework
+aliases: []

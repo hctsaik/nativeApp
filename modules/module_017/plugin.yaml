@@ -1,0 +1,16 @@
+id: module_017
+slug: label-manager
+vendor: cimcore
+domain: pipeline
+name: Label Manager
+version: "1.0.0"
+category: module
+description: 全域標籤管理：掃描、重新命名、合併、刪除 manifest 內所有 X-AnyLabeling JSON 的標籤
+author: system
+enabled: true
+tags: [label, management, rename, merge, delete, annotation]
+runner: cv_framework
+input_file: 017_input.py
+output_file: 017_output.py
+process_file: 017_process.py
+aliases: []

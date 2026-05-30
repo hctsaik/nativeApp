@@ -1,0 +1,16 @@
+id: module_008
+slug: video-tracking-annotator
+vendor: cimcore
+domain: annotation
+name: 影片追蹤標注
+version: "0.1.0"
+category: module
+description: 選取影片關鍵幀標注物件，自動追蹤前後時間段並匯出 X-AnyLabeling JSON
+author: system
+enabled: true
+tags:
+  - video
+  - tracking
+  - annotation
+runner: cv_framework
+aliases: []

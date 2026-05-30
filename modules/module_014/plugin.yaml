@@ -1,0 +1,16 @@
+id: module_014
+slug: annotation-export
+vendor: cimcore
+domain: pipeline
+name: Export
+version: "1.0.0"
+category: module
+description: 多格式標注匯出模組，支援 COCO JSON、YOLO txt、Pascal VOC XML、ImageFolder（分類）、CSV
+author: system
+enabled: true
+tags: [annotation, export, coco, yolo, pascal_voc, imagefolder, csv]
+runner: cv_framework
+input_file: 014_input.py
+output_file: 014_output.py
+process_file: 014_process.py
+aliases: []

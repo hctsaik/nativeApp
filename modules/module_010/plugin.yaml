@@ -1,0 +1,18 @@
+id: module_010
+slug: data-feeder
+vendor: cimcore
+domain: pipeline
+name: Data Feeder
+version: "1.0.0"
+category: module
+description: 資料來源模組 - 從資料夾、資料庫或 API 建立標準化圖片清單（DatasetManifest）
+author: system
+enabled: false
+deprecated_at: "2026-05-29"
+deprecated_reason: "功能已整合至 module_026（資料來源），此模組不再於 annotation sheet 中使用"
+tags: [dataset, source, manifest, feeder]
+runner: cv_framework
+input_file: 010_input.py
+output_file: 010_output.py
+process_file: 010_process.py
+aliases: []

@@ -1,0 +1,17 @@
+id: module_024
+slug: annotation-workspace
+vendor: cimcore
+domain: annotation
+name: 標注工作台
+version: "1.0.0"
+category: module
+description: 對已認領的任務進行標注並標記完成。
+author: system
+enabled: false
+deprecated_at: "2026-05-29"
+deprecated_reason: "標注工作台 iWISC 版功能已整合至 module_012（標注工作台通用版）"
+tags: [annotation, workspace, labeling, task]
+runner: cv_framework
+input_file: 024_input.py
+output_file: 024_output.py
+process_file: 024_process.py

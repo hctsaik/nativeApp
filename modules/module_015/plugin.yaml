@@ -1,0 +1,16 @@
+id: module_015
+slug: annotation-dashboard
+vendor: cimcore
+domain: pipeline
+name: Dashboard
+version: "1.0.0"
+category: module
+description: 標注進度統計總覽，顯示各 Manifest 的標注率、分類分布、BBox 標籤分布與匯出歷史
+author: system
+enabled: true
+tags: [dashboard, statistics, annotation, progress]
+runner: cv_framework
+input_file: 015_input.py
+output_file: 015_output.py
+process_file: 015_process.py
+aliases: []

@@ -1,0 +1,16 @@
+id: module_018
+slug: review-gallery
+vendor: cimcore
+domain: pipeline
+name: Review Gallery
+version: "1.0.0"
+category: module
+description: 標注結果審查：以 Grid 縮略圖 + BBox overlay 快速瀏覽、篩選與確認已標注的圖片
+author: system
+enabled: true
+tags: [review, gallery, annotation, bbox, overlay]
+runner: cv_framework
+input_file: 018_input.py
+output_file: 018_output.py
+process_file: 018_process.py
+aliases: []

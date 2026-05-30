@@ -1,0 +1,14 @@
+id: module_011
+slug: result-sink
+vendor: cimcore
+domain: pipeline
+name: Result Sink
+version: "1.0.0"
+category: module
+description: 標注結果儲存與匯出模組（已停用，功能移至 module_013 Update）
+author: system
+enabled: false
+deprecated_at: "2026-05-17"
+tags: [annotation, export, storage, sink]
+runner: cv_framework
+aliases: []
