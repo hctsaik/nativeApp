@@ -1,5 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
+# Auto-collect every submodule of the platform core and the Labeling plugin
+# domain, so newly-added submodules never silently fall out of the bundle
+# ("dev-green / package-dead"). The explicit list below is kept as a safety net.
+_auto_hidden = collect_submodules('core') + collect_submodules('plugins.labeling.domain')
+
 
 a = Analysis(
     ['engine.py'],
@@ -66,10 +73,11 @@ a = Analysis(
         'core',
         'core.forms',
         'core.output',
+        'core.rbac',
         'core.integrations',
         'core.integrations.connector',
         'core.integrations.tenant',
-    ],
+    ] + _auto_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

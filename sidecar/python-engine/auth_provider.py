@@ -35,14 +35,24 @@ class AuthProvider:
         fully configured).
         """
         role_id = self.get_current_role()
+
+        # Declarative RBAC: when a permissions.yaml policy exists it is the
+        # source of truth (edit YAML to grant/revoke — no code, no GUI).
+        try:
+            from core.rbac import is_allowed, load_policy  # noqa: PLC0415
+            policy = load_policy()
+            if policy is not None:
+                return is_allowed(policy, role_id, plugin_id, action)
+        except Exception:
+            pass
+
+        # Fallback: per-(plugin, role) DB rows, else open by default.
         if self._db_path is None or not self._db_path.exists():
             return True
-
         try:
             permission = self._store.get_permission(plugin_id, role_id, action) if self._store else None
         except Exception:
             return True
-
         if permission is None:
             return True
         return permission
