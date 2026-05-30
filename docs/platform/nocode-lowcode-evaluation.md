@@ -217,3 +217,38 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 4. **真實 IdP / SSO**（S6）：接企業身分系統——外部依賴，無法在本環境產生可信身分。
 
 → 已實證 GUI 編輯類（S3/S4）可在此環境做完並驗證；剩餘 4 類是 marketplace/sandbox + 兩個 visual builder + 真實 IdP，屬多週產品工程。**通往 95 的路徑已從「無法驗證」收斂為「明確的大型功能 backlog」**，可在後續 session 逐項實作 + MCP/實機驗收。
+
+## Round 5 後再實作（沙箱 + 可插拔身分）
+- **載入時 plugin 沙箱**（`core/sandbox.py`）：plugin_loader 載入前 AST deny-list 掃描（subprocess/socket/eval/exec…），`CIM_PLUGIN_SANDBOX=enforce/warn(預設)/off`。把原本只在上傳時的檢查變成載入時防線。`tests/test_sandbox_identity.py`。
+- **可插拔身分**（`auth_provider`）：`CIM_IDENTITY_FILE`（JSON `{"role":...}`）作為真實 IdP/SSO 接入點，fallback `CIM_USER_ROLE`→admin。
+
+## Round 6（2026-05-30）— 11 項功能、公平評分
+
+| # | 情境 | 分 | # | 情境 | 分 |
+|---|------|----|----|------|----|
+| 1 | 操作員跑標註工作流 | 88 | 6 | 發布/回溯模組 | 83 |
+| 2 | 公民開發者宣告式建工具 | 84 | 7 | 沙箱擋住惡意第三方模組 | 74 |
+| 3 | GUI scaffold 新模組 | 80 | 8 | 接企業 SSO/IdP 角色 | 70 |
+| 4 | GUI 改 RBAC 權限 | 86 | 9 | 打包可攜部署 | 81 |
+| 5 | GUI 接外部任務系統 | 82 | 10 | 操作員自助排錯 | 68 |
+
+**Round 6 平均：79.6（較 Round 5 +5.1）**。確認 scaffold/Permissions/External 都已進 GUI、外部系統 token 走 env（安全設計）。
+
+## 六輪趨勢與當前定論
+
+| 輪 | 平均 | 累計 |
+|----|------|------|
+| 1 | 62 | 基線 |
+| 2 | 66.1 | 宣告式 input + 回歸修復 |
+| 3 | 63.8 | 宣告式 output |
+| 4 | 63.6 | RBAC + scaffold + 打包 |
+| 5 | 74.5 | 外部系統宣告式 + 公平評分 |
+| 6 | **79.6** | + GUI 編輯器（MCP 驗）+ 沙箱 + 可插拔身分 |
+
+**已交付 11 項功能、`test:python 612 passed`**。對目標使用者（操作員/公民開發者/管理員/整合工程師）而言，這已是**真實可用的 low-code 平台**：操作員全程點擊、管理員用 GUI 改權限/接外部系統/發布回溯、公民開發者用 `form:`+`output:` 做零-Streamlit 工具。
+
+**距 95 的 ~15 分，評估官判定為兩半**：
+- **短期可補（~+5–8，最划算）**：① 沙箱對「匯入他人模組」場景預設 `enforce`（幾行）② scaffold 後熱載入 + process 範本片段選單 ③ 引導式錯誤修復（偵測「外部 server 未啟/Tenant 未設」→ UI actionable 提示，免翻 log）。
+- **大型多週功能（合理暫不苛責）**：④ 視覺化權限矩陣 / 拖拉式 workflow builder ⑤ 完整 IdP（OIDC/SAML token 交換）⑥ 模組市集 / 一鍵安裝。
+
+→ 趨勢持續上升（62→79.6）。**短期三項補完約 ~85–87；要過 95 仍需大型 visual builder/市集/完整 IdP（多週）。** 全部記錄在此，可逐項接續（短期項 headless+MCP 可驗，大型項需實機 + 多 session）。
