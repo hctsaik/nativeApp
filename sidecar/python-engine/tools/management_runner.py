@@ -1010,12 +1010,59 @@ def _render_sheets_tab(
                     _confirm_archive_dialog(reg, sel_id, sel_row["name"])
 
 
+def _render_external_system_register() -> None:
+    """No-code: register external task systems (writes config/external_systems.yaml)."""
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    cfg_path = _Path(__file__).resolve().parent.parent / "config" / "external_systems.yaml"
+    try:
+        data = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+    except Exception:
+        data = {}
+    systems = (data or {}).get("systems") or []
+
+    st.subheader("🔌 外部系統註冊（宣告式）")
+    st.caption("新增的系統寫入 config/external_systems.yaml；資料來源頁載入時自動同步（token 從環境變數讀）。")
+    if systems:
+        for s in systems:
+            st.markdown(f"- **{s.get('system_name','?')}** — `{s.get('server_host_name','')}` "
+                        f"({s.get('target_format','')})")
+    else:
+        st.caption("（目前無宣告的外部系統）")
+
+    with st.form("ext_sys_register", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        name = col1.text_input("系統名稱", placeholder="iWISC")
+        host = col2.text_input("Server host", placeholder="http://localhost:8765")
+        col3, col4 = st.columns(2)
+        fmt = col3.selectbox("目標格式", ["xanylabeling", "coco", "yolo", "labelme"])
+        token_env = col4.text_input("API token 環境變數名", placeholder="IWSC_TOKEN")
+        if st.form_submit_button("➕ 新增外部系統", type="primary"):
+            if not (name and host):
+                st.error("系統名稱與 host 為必填。")
+            else:
+                entry = {"system_name": name, "server_host_name": host, "target_format": fmt}
+                if token_env:
+                    entry["api_token_env"] = token_env
+                systems = [s for s in systems
+                           if not (s.get("system_name") == name
+                                   and s.get("server_host_name") == host)]
+                systems.append(entry)
+                cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                cfg_path.write_text(_yaml.safe_dump({"systems": systems}, allow_unicode=True),
+                                    encoding="utf-8")
+                st.success(f"✅ 已新增「{name}」，資料來源頁載入時自動生效。")
+
+
 def _render_external_tab(
     reg: PluginRegistry,
     external_rows: list[dict[str, Any]],
     readiness_by_id: dict[str, Any],
     manage_disabled: bool,
 ) -> None:
+    _render_external_system_register()
+    st.markdown("---")
     if not external_rows:
         st.info("No external tools registered.")
         return
@@ -1741,11 +1788,32 @@ def _page_runs(reg: PluginRegistry) -> None:
 
 
 def _page_permissions(reg: PluginRegistry) -> None:
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
     st.header(":material/lock: Permissions")
-    st.info(
-        "This page is read-only for now. Local role checks use `admin` by default; "
-        "enterprise permission editing will be wired to a production identity service later."
+
+    # ── 宣告式 RBAC 編輯器（no-code）：讀/寫 config/permissions.yaml ──────────
+    policy_path = _Path(__file__).resolve().parent.parent / "config" / "permissions.yaml"
+    st.subheader("宣告式權限政策（permissions.yaml）")
+    st.caption(
+        "編輯後按「儲存」即生效（由 core/rbac.py 在每次執行前強制檢查；"
+        "角色來自 CIM_USER_ROLE）。schema：default_policy: allow|deny；roles.<role>.{all|view|execute}。"
     )
+    default_policy = "default_policy: allow\nroles:\n  admin:\n    all: true\n"
+    current = policy_path.read_text(encoding="utf-8") if policy_path.exists() else default_policy
+    edited = st.text_area("permissions.yaml", value=current, height=280, key="perm_yaml")
+    if st.button("💾 儲存權限政策", type="primary", key="perm_save"):
+        try:
+            parsed = _yaml.safe_load(edited)
+            if parsed is not None and not isinstance(parsed, dict):
+                raise ValueError("最外層必須是物件（含 default_policy / roles）")
+            policy_path.parent.mkdir(parents=True, exist_ok=True)
+            policy_path.write_text(edited, encoding="utf-8")
+            st.success("✅ 已儲存，立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"YAML 格式錯誤，未儲存：{exc}")
+    st.markdown("---")
 
     st.markdown("**Defined roles:**")
     roles = _store().list_role_rows()
@@ -1974,8 +2042,8 @@ def main() -> None:
         st.stop()
         return
 
-    tab_health, tab_modules, tab_runs, tab_sheets, tab_repairs, tab_audit = st.tabs(
-        ["Health", "Tools", "Runs & Usage", "Sheets", "Repairs", "Audit & Database"]
+    tab_health, tab_modules, tab_runs, tab_sheets, tab_perms, tab_repairs, tab_audit = st.tabs(
+        ["Health", "Tools", "Runs & Usage", "Sheets", "Permissions", "Repairs", "Audit & Database"]
     )
 
     with tab_health:
@@ -1989,6 +2057,9 @@ def main() -> None:
 
     with tab_sheets:
         _page_sheets(reg)
+
+    with tab_perms:
+        _page_permissions(reg)
 
     with tab_repairs:
         _page_repairs(reg)
