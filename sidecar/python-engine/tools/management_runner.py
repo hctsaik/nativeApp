@@ -1054,6 +1054,22 @@ def _render_external_system_register() -> None:
                                     encoding="utf-8")
                 st.success(f"✅ 已新增「{name}」，資料來源頁載入時自動生效。")
 
+    # 一鍵測試連線（補「設定後不確定通不通」的摩擦）
+    _tc1, _tc2 = st.columns([3, 1])
+    _test_host = _tc1.text_input("測試連線 host", placeholder="http://localhost:8765",
+                                 key="ext_test_host", label_visibility="collapsed")
+    if _tc2.button("🔌 測試連線", key="ext_test_btn", use_container_width=True):
+        if not _test_host.strip():
+            st.warning("請先填入要測試的 host。")
+        else:
+            try:
+                import urllib.request  # noqa: PLC0415
+                req = urllib.request.Request(_test_host.strip(), method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                    st.success(f"✅ 連線成功（HTTP {resp.status}）。")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"❌ 連不上：{exc}。請確認 server 已啟動且 host 正確。")
+
 
 def _render_external_tab(
     reg: PluginRegistry,
@@ -1842,6 +1858,15 @@ def _page_permissions(reg: PluginRegistry) -> None:
             st.success(f"✅ 已更新角色「{_role}」權限，立即生效。")
         except Exception as exc:  # noqa: BLE001
             st.error(f"寫入失敗：{exc}")
+
+    # 以角色視角預覽：此角色實際可見/可執行哪些模組（讀目前已存的政策）
+    with st.expander(f"👁 預覽：角色「{_role}」實際可存取的模組", expanded=False):
+        from core.rbac import is_allowed as _is_allowed  # noqa: PLC0415
+        _prev = [{"模組": _m,
+                  "可檢視": "✅" if _is_allowed(_policy, _role, _m, "view") else "—",
+                  "可執行": "✅" if _is_allowed(_policy, _role, _m, "execute") else "—"}
+                 for _m in _all_ids]
+        st.dataframe(pd.DataFrame(_prev), use_container_width=True, hide_index=True)
     st.markdown("---")
 
     # ── 進階：直接編 YAML（讀/寫 config/permissions.yaml）────────────────────

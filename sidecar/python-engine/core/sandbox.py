@@ -22,8 +22,41 @@ BLOCKED_IMPORTS = {"subprocess", "socket", "ctypes", "multiprocessing"}
 BLOCKED_CALLS = {"eval", "exec", "compile", "__import__", "os.system", "os.popen"}
 
 
+def _policy_overrides() -> tuple[set, set]:
+    """No-code extension: read extra/allowed rules from config/sandbox_policy.yaml.
+
+        blocked_imports: [requests]      # add to the deny-list
+        blocked_calls:   [open]
+        allow_imports:   [socket]        # remove from the deny-list (trusted)
+        allow_calls:     [compile]
+    """
+    blocked_i, blocked_c = set(BLOCKED_IMPORTS), set(BLOCKED_CALLS)
+    try:
+        import yaml  # noqa: PLC0415
+        for p in (_cfg_dir() / "sandbox_policy.yaml",):
+            if p.exists():
+                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+                blocked_i |= set(data.get("blocked_imports") or [])
+                blocked_c |= set(data.get("blocked_calls") or [])
+                blocked_i -= set(data.get("allow_imports") or [])
+                blocked_c -= set(data.get("allow_calls") or [])
+    except Exception:
+        pass
+    return blocked_i, blocked_c
+
+
+def _cfg_dir():
+    from pathlib import Path  # noqa: PLC0415
+    log_dir = os.environ.get("CIM_LOG_DIR")
+    if log_dir and (Path(log_dir) / "config" / "sandbox_policy.yaml").exists():
+        return Path(log_dir) / "config"
+    return Path(__file__).resolve().parents[1] / "config"
+
+
 def scan_source(source: str, filename: str = "<module>") -> list[str]:
-    """Return a list of human-readable violations (empty = clean). Pure."""
+    """Return a list of human-readable violations (empty = clean). Pure (reads the
+    optional declarative sandbox_policy.yaml for no-code rule overrides)."""
+    blocked_imports, blocked_calls = _policy_overrides()
     violations: list[str] = []
     try:
         tree = ast.parse(source, filename=filename)
@@ -33,15 +66,15 @@ def scan_source(source: str, filename: str = "<module>") -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
-                if root in BLOCKED_IMPORTS:
+                if root in blocked_imports:
                     violations.append(f"{filename}:{node.lineno}: 禁用模組 import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             root = (node.module or "").split(".")[0]
-            if root in BLOCKED_IMPORTS:
+            if root in blocked_imports:
                 violations.append(f"{filename}:{node.lineno}: 禁用模組 from {node.module} import …")
         elif isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in BLOCKED_CALLS:
+            if name in blocked_calls:
                 violations.append(f"{filename}:{node.lineno}: 禁用呼叫 {name}(…)")
     return violations
 

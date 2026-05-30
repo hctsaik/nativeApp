@@ -45,6 +45,22 @@ def test_check_source_off_skips(monkeypatch):
     assert sandbox.check_source("import subprocess\n", "x.py") == []
 
 
+def test_declarative_sandbox_policy_overrides(tmp_path, monkeypatch):
+    """No-code rule editing: config/sandbox_policy.yaml extends/relaxes the deny-list."""
+    import importlib
+    import yaml
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "sandbox_policy.yaml").write_text(
+        yaml.safe_dump({"blocked_imports": ["requests"], "allow_imports": ["socket"]}),
+        encoding="utf-8")
+    monkeypatch.setenv("CIM_LOG_DIR", str(tmp_path))
+    importlib.reload(sandbox)
+    assert sandbox.scan_source("import requests\n")       # newly blocked via YAML
+    assert sandbox.scan_source("import socket\n") == []    # relaxed via allow_imports
+    assert sandbox.scan_source("import subprocess\n")      # built-in still blocked
+
+
 def test_plugin_loader_enforces_sandbox(tmp_path, monkeypatch):
     """plugin_loader refuses to load a module with violations when enforce."""
     import sys

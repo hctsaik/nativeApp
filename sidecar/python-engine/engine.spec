@@ -17,6 +17,7 @@ a = Analysis(
         ('scripts',      'scripts'),
         ('plugins',      'plugins'),        # Labeling plugin home (annotation domain at plugins/labeling/domain)
         ('core',         'core'),
+        ('config',       'config'),         # declarative policy samples (permissions / external_systems / sandbox)
         ('sheets',       'sheets'),
     ],
     hiddenimports=[
