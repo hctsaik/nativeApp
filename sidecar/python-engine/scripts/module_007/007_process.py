@@ -17,5 +17,16 @@ def execute_logic(params: dict) -> dict:
         title = title.lower()
     if params.get("shout"):
         title = f"{title}!"
-    lines = [f"{i + 1}. {title}" for i in range(count)]
+    deco = params.get("deco") or []
+    indent = " " * int(params.get("indent", 0) or 0)
+    lines = []
+    for i in range(count):
+        prefix = ""
+        if "編號" in deco:
+            prefix += f"{i + 1}. "
+        if "破折號" in deco:
+            prefix += "- "
+        if "星號" in deco:
+            prefix += "★ "
+        lines.append(f"{indent}{prefix}{title}")
     return {"mode": "ready", "title": title, "count": count, "lines": lines}

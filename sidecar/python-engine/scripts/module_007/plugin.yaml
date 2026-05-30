@@ -15,10 +15,12 @@ description: >
 
 # ── 宣告式 input 表單（取代手寫 *_input.py 的 render_input）──────────────────
 form:
-  - { key: title, type: text,     label: 標題,       default: "Hello", placeholder: 輸入標題 }
-  - { key: count, type: integer,  label: 重複次數,   default: 3, min: 1, max: 10, step: 1 }
-  - { key: mode,  type: select,   label: 文字模式,   options: [大寫, 小寫, 原樣], default: 原樣 }
-  - { key: shout, type: checkbox, label: 加上驚嘆號, default: false }
+  - { key: title,  type: text,        label: 標題,       default: "Hello", placeholder: 輸入標題 }
+  - { key: count,  type: slider,      label: 重複次數,   default: 3, min: 1, max: 10, step: 1 }
+  - { key: mode,   type: select,      label: 文字模式,   options: [大寫, 小寫, 原樣], default: 原樣 }
+  - { key: deco,   type: multiselect, label: 行裝飾,     options: [編號, 破折號, 星號], default: [編號] }
+  - { key: indent, type: integer,     label: 縮排空格,   default: 0, min: 0, max: 8, step: 1 }
+  - { key: shout,  type: checkbox,    label: 加上驚嘆號, default: false }
 
 # ── 宣告式 output（取代手寫 *_output.py 的 render_output）────────────────────
 output:
