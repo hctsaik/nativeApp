@@ -1118,6 +1118,9 @@ def _render_external_system_register() -> None:
     _test_tokenenv = _tc1.text_input("token 環境變數（選填，會帶 Authorization: Bearer）",
                                      value=_pre_tokenenv, placeholder="IWSC_TOKEN",
                                      key=f"ext_test_tokenenv_{_pick}")
+    _test_fmt = _tc2.text_input("detail format", value=(_picked or {}).get("target_format", "coco")
+                                if _picked else "coco", key=f"ext_test_fmt_{_pick}",
+                                help="detail 端點 payload 的 format（多格式系統可調）")
     if _tc3.button("🔌 測試", key="ext_test_btn", use_container_width=True):
         if not _test_host.strip():
             st.warning("請先填入要測試的 host。")
@@ -1144,19 +1147,26 @@ def _render_external_system_register() -> None:
                         from plugins.labeling.domain.integrations.connectors.configurable_rest_connector import (  # noqa: PLC0415,E501
                             map_list_item, resolve_paths)
                         _fields = resolve_paths(_pick_mapping)["fields"]
-                        _t = map_list_item(_data[0], _fields)
-                        st.caption("依欄位映射解析的第一筆任務（確認 ant_id/狀態是否對上）：")
-                        st.json({"ant_id": _t.ant_id, "ant_active": _t.ant_active,
-                                 "ant_period": _t.ant_period, "external_context": _t.external_context})
+                        _n = min(3, len(_data))
+                        st.caption(f"依欄位映射解析前 {_n} 筆任務（確認 ant_id/狀態是否對上）：")
+                        _t0 = None
+                        for _i in range(_n):
+                            if isinstance(_data[_i], dict):
+                                _ti = map_list_item(_data[_i], _fields)
+                                _t0 = _t0 or _ti
+                                st.json({"ant_id": _ti.ant_id, "ant_active": _ti.ant_active,
+                                         "ant_period": _ti.ant_period,
+                                         "external_context": _ti.external_context})
                         # detail 端點預覽：用第一筆 ant_id 打 detail_path，確認 download_url 映射
                         _rp = resolve_paths(_pick_mapping)
-                        if _t.ant_id and _rp.get("detail_path"):
+                        if _t0 and _t0.ant_id and _rp.get("detail_path"):
                             try:
                                 _durl = _test_host.strip().rstrip("/") + "/" + _rp["detail_path"].lstrip("/")
-                                _payload = _json.dumps({"antID": _t.ant_id, "format": "coco"}).encode()
+                                _fmt = (_test_fmt or "coco").strip()
+                                _payload = _json.dumps({"antID": _t0.ant_id, "format": _fmt}).encode()
                                 if (_rp.get("detail_method") or "POST").upper() == "GET":
                                     _dreq = urllib.request.Request(
-                                        _durl + "?antID=" + _t.ant_id, method="GET", headers=_headers)
+                                        f"{_durl}?antID={_t0.ant_id}&format={_fmt}", method="GET", headers=_headers)
                                 else:
                                     _dh = {**_headers, "Content-Type": "application/json"}
                                     _dreq = urllib.request.Request(_durl, data=_payload, method="POST", headers=_dh)
@@ -1167,7 +1177,12 @@ def _render_external_system_register() -> None:
                                 st.caption(f"detail 端點 OK — download_url（映射鍵 `{_dlkey}`）："
                                            f"{'✅ ' + _dl if _dl else '⚠️ 解析為空，請確認 download_url 映射'}")
                             except Exception as _de:  # noqa: BLE001
-                                st.caption(f"（detail 端點預覽略過：{_de}）")
+                                from core import guidance as _g  # noqa: PLC0415
+                                _card = _g.diagnose(str(_de))
+                                if _card:
+                                    st.warning(f"detail 端點：{_card['title']} — {_card['hint']}")
+                                else:
+                                    st.caption(f"（detail 端點預覽略過：{_de}）")
                 except Exception:  # noqa: BLE001
                     pass
                 if body.strip():
