@@ -199,7 +199,7 @@ All 41 unit tests run without a real browser or sidecar (mocked with respx + Asy
 
 ## Claude Code integration
 
-The `.claude/mcp.json` at the repo root configures this server automatically:
+The `.mcp.json` at the repo root configures this server automatically:
 
 ```json
 {
@@ -207,7 +207,7 @@ The `.claude/mcp.json` at the repo root configures this server automatically:
     "cim-gui": {
       "command": "python",
       "args": ["-m", "cim_gui_mcp.server"],
-      "cwd": "C:/code/claude/nativeApp_Management/mcp"
+      "cwd": "C:/code/claude/nativeApp/mcp"
     }
   }
 }
