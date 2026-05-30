@@ -301,3 +301,22 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 \* R9 為公平含硬情境取樣；#8/#9 修復後同類情境預估回升至 ~85–88。`test:python 625 passed`。
 
 **距 95 的最終定論（跨 R6–R9 一致）**：在平台**定位內**，補完中型 GUI（連接器工廠 ✅、操作端引導 ✅、rollback diff、workflow 條件分支）可達 ~90–93；跨 95 的主要殘餘阻力為**領域外**三類——企業 OIDC/SAML IdP、跨機模組市集 + 簽章、OS/容器級沙箱隔離——屬單機 Electron + Streamlit 邊緣平台的合理上限，需多週/外部系統，**不應以其缺席作為平台在其定位內不易用的依據**。對目標使用者（操作員/公民開發者/管理員/整合工程師）而言，本平台已是相當完整、可自助的 low-code 平台。
+
+## Round 10（2026-05-30）— 連接器工廠 + 操作端引導，回升至 86.1
+
+修復 R9 兩個領域內硬缺口後平均 **86.1（+3.6 vs R9）**：接新協定 60→90、操作端排錯 76→86。評估官另查出兩個「最後一吋」小缺口並**當輪修復**：① input/output 排錯文案未同源 → input 頁改走 `core/guidance.render`；② GUI 連接器型別 selectbox 硬寫清單 → 改用 `registry.available_types()` 動態產生（`register_connector` 新協定會自動出現，MCP assert_text PASS）。
+
+## Round 11（2026-05-30）— 89.1（R1→R11 新高）+ 宣告式 REST adapter
+
+平均 **89.1（+3.0 vs R10）**，創軌跡新高。評估官查證 R10 修復屬實，並修正先前低估（`annotation_tasks` 本就有 `UNIQUE(tenant_id, ant_id)` + 外部 `ConflictError` 雙層防重複認領；`external_systems.yaml` 編輯即生效不需重啟）。
+
+唯一真正的**領域內天花板**＝情境 3「接全新協定須寫 Python factory（70）」——公民開發者唯一撞牆處。**當輪修復：宣告式 REST adapter**：
+- 新增 `connectors/configurable_rest_connector.py`（`ConfigurableRestConnector` + 純函式 `resolve_paths`/`map_list_item`）：`external_systems.yaml` 用 `rest_mapping:` 宣告 endpoint 路徑（list/detail/claim）+ HTTP method + 欄位映射（ant_id/ant_active/ant_period/download_url），未宣告者回退內建 iWISC 契約。**接 REST 變體系統＝純宣告，免寫 class。**
+- `SystemTenant.connector_config`（JSON 持久化，sqlite ALTER TABLE，已驗 DB round-trip）；`sync_external_systems` 從 YAML `rest_mapping` 帶入；registry `rest` 工廠在有 config 時自動改用 ConfigurableRestConnector（無 config 維持原 RestConnector，向後相容）。
+- `tests/test_configurable_rest_connector.py`（6）。`test:python 631 passed`。
+
+| 輪 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 |
+|----|---|---|---|---|---|---|---|---|---|----|----|
+| 平均 | 62 | 66.1 | 63.8 | 63.6 | 74.5 | 79.6 | 84.4 | 87.9 | 82.5 | 86.1 | **89.1** |
+
+**最終結論（R11 評估官）**：在**不做領域外大型功能**的前提下，平台對四類目標使用者已達「未來容易使用」：操作員有引導式錯誤自助修復、管理員 YAML 編輯即生效 + 視覺化 RBAC、公民開發者純參數工具零 code、整合工程師連接器 GUI 動態化 + 錯誤規則集中 + REST 變體純宣告。剩餘 ~5 分為領域內低成本收尾（並行認領競態走引導文案、token 熱載、guidance 規則外移 YAML）+ 領域外三類（企業 IdP／跨機市集／OS 級沙箱，不計扣分）。

@@ -11,5 +11,12 @@ systems: []
   #   target_format: xanylabeling
   #   api_token_env: IWSC_TOKEN
   #   connector_type: rest   # optional: rest|file|fake (omit = infer from host scheme).
-  #                          # New protocols register a factory via
+  #                          # Truly new protocols register a factory via
   #                          # integrations.registry.register_connector(...).
+  #   # REST variant? declare endpoints/fields here — no new connector class needed:
+  #   rest_mapping:
+  #     list_path:   /v2/tasks
+  #     detail_path: /v2/tasks/detail
+  #     claim_path:  /v2/tasks/{ant_id}/claim
+  #     detail_method: POST          # GET | POST
+  #     fields: { ant_id: id, ant_active: status, ant_period: due, download_url: url }

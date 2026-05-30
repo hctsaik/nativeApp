@@ -29,6 +29,8 @@ class SystemTenant:
     created_at: str = field(default_factory=utc_now_iso)
     # 宣告式連接器選型（rest/file/fake/…）；None 時由 server_host_name 的 scheme 推斷
     connector_type: str | None = None
+    # 宣告式連接器設定（如 REST 變體的 endpoint/欄位映射）；接新 REST 系統免寫 class
+    connector_config: dict | None = None
 
 
 @dataclass

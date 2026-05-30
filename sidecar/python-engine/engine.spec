@@ -54,6 +54,7 @@ a = Analysis(
         'plugins.labeling.domain.formats.registry',
         'plugins.labeling.domain.integrations',
         'plugins.labeling.domain.integrations.connectors',
+        'plugins.labeling.domain.integrations.connectors.configurable_rest_connector',
         'plugins.labeling.domain.integrations.connectors.fake_connector',
         'plugins.labeling.domain.integrations.connectors.file_connector',
         'plugins.labeling.domain.integrations.connectors.rest_connector',
