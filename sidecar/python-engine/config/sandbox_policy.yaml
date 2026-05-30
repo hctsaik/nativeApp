@@ -3,6 +3,7 @@
 # Built-in deny-list: imports {subprocess, socket, ctypes, multiprocessing};
 # calls {eval, exec, compile, __import__, os.system, os.popen}.
 
+mode: warn            # enforce | warn | off  (GUI-settable; CIM_PLUGIN_SANDBOX env overrides)
 blocked_imports: []   # add module names to deny (e.g. [requests, urllib])
 blocked_calls:   []   # add call names to deny (e.g. [open])
 allow_imports:   []   # remove from the built-in deny-list (trust them)

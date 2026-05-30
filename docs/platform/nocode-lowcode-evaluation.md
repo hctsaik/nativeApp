@@ -252,3 +252,26 @@ F. 外部貢獻沙箱 + 市集流程（安全）。
 - **大型多週功能（合理暫不苛責）**：④ 視覺化權限矩陣 / 拖拉式 workflow builder ⑤ 完整 IdP（OIDC/SAML token 交換）⑥ 模組市集 / 一鍵安裝。
 
 → 趨勢持續上升（62→79.6）。**短期三項補完約 ~85–87；要過 95 仍需大型 visual builder/市集/完整 IdP（多週）。** 全部記錄在此，可逐項接續（短期項 headless+MCP 可驗，大型項需實機 + 多 session）。
+
+## Round 7（2026-05-30）— 視覺化 RBAC 矩陣 + 上傳沙箱硬阻擋 + GUI sheet builder
+
+平均 **84.4（+4.8）**。新增並 MCP 驗證：① 管理中心 Permissions 改為**視覺化權限矩陣**（選角色→勾選 view/execute→寫 permissions.yaml）；② 上傳模組 zip 時**硬阻擋**危險副檔名 + AST 危險呼叫並附 how_to_fix；③ GUI sheet builder（Add/Up/Down/Del step、選 module、prod readiness、稽核）。評估官分類剩餘：A＝小修、B＝中型 Streamlit GUI、C＝真正大型/外部（完整 OIDC、跨機市集、OS 級沙箱）。
+
+## Round 8（2026-05-30）— config 沙箱 + RBAC 角色視角預覽 + 測試連線
+
+平均 **87.9（+3.5）**。新增並 MCP 驗證（`test:python 614 passed`）：
+- **config 驅動沙箱規則 + GUI 模式開關**：`core/sandbox.py` 讀 `config/sandbox_policy.yaml`（`mode: enforce|warn|off` + blocked/allow imports/calls），管理中心 Permissions 頁加「插件沙箱政策」面板可 no-code 切模式與增刪 deny-list（MCP `assert_text` PASS）。環境變數 `CIM_PLUGIN_SANDBOX` 仍可覆蓋。
+- **RBAC 角色視角預覽**：Permissions 頁 expander 以 `core.rbac.is_allowed` 逐模組算「可檢視/可執行」並以表格呈現（設定後可驗證）。
+- **外部系統測試連線深化**：可帶 path + token 環境變數（Authorization: Bearer）打實際 endpoint 並顯示樣本回應。
+
+| 輪 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|----|---|---|---|---|---|---|---|---|
+| 平均 | 62 | 66.1 | 63.8 | 63.6 | 74.5 | 79.6 | 84.4 | **87.9** |
+
+**距 95 的剩餘（評估官第 8 輪判定）**：
+- **A 類 — Streamlit 可補的中型 GUI（平台合理應做，約 +5–7）**：沙箱模式 GUI 開關（✅本輪完成）、測試連線帶 token（✅本輪完成）、宣告式 form 型別擴充（`core/forms.py` 已支援 text/textarea/number/integer/select/multiselect/checkbox/slider/file，需在 demo/文件凸顯）、rollback 版本 diff 可見性、AST 靜態檢查的誠實標示（✅本輪於 GUI 加註）。
+- **B 類 — 真正大型/外部（單機邊緣平台的合理上限，不應苛責）**：OS 級/容器級沙箱隔離、企業 OIDC/SAML IdP 整合、跨機模組市集 + 簽章驗證、執行期資源配額/網路防火牆。
+
+**結論趨勢 62→87.9 持續收斂**。A 類補完預估 ~91–93；跨 95 的主要阻力為 B 類大型/外部系統，屬此類單機 Electron + Streamlit 邊緣平台的合理領域上限。對目標使用者（邊緣 CV/標註的操作員、公民開發者、管理員、整合工程師）而言已是相當完整的 low-code 平台。
+
+> 註：`module_016` classifier 自身 2 個 `skipped`-count 業務測試為**既有失敗**（不在 `test:python` 範圍，與本評估之 no-code 變更無關），另案處理。

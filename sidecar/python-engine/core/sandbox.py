@@ -88,7 +88,21 @@ def _call_name(node: ast.AST) -> str:
 
 
 def mode() -> str:
-    return (os.environ.get("CIM_PLUGIN_SANDBOX") or "warn").strip().lower()
+    """Enforcement mode: CIM_PLUGIN_SANDBOX env wins; else `mode:` in
+    config/sandbox_policy.yaml (GUI-settable from the Management Center); else 'warn'."""
+    env = os.environ.get("CIM_PLUGIN_SANDBOX")
+    if env:
+        return env.strip().lower()
+    try:
+        import yaml  # noqa: PLC0415
+        p = _cfg_dir() / "sandbox_policy.yaml"
+        if p.exists():
+            m = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("mode")
+            if m:
+                return str(m).strip().lower()
+    except Exception:
+        pass
+    return "warn"
 
 
 class SandboxViolation(RuntimeError):

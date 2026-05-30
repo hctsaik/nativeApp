@@ -1054,21 +1054,37 @@ def _render_external_system_register() -> None:
                                     encoding="utf-8")
                 st.success(f"✅ 已新增「{name}」，資料來源頁載入時自動生效。")
 
-    # 一鍵測試連線（補「設定後不確定通不通」的摩擦）
-    _tc1, _tc2 = st.columns([3, 1])
-    _test_host = _tc1.text_input("測試連線 host", placeholder="http://localhost:8765",
+    # 一鍵測試連線（補「設定後不確定通不通」的摩擦）— 可帶 path + token、顯示樣本回應
+    st.markdown("**測試連線**")
+    _tc1, _tc2, _tc3 = st.columns([3, 2, 1])
+    _test_host = _tc1.text_input("host", placeholder="http://localhost:8765",
                                  key="ext_test_host", label_visibility="collapsed")
-    if _tc2.button("🔌 測試連線", key="ext_test_btn", use_container_width=True):
+    _test_path = _tc2.text_input("path", value="/", placeholder="/api/tasks",
+                                 key="ext_test_path", label_visibility="collapsed")
+    _test_tokenenv = _tc1.text_input("token 環境變數（選填，會帶 Authorization: Bearer）",
+                                     placeholder="IWSC_TOKEN", key="ext_test_tokenenv")
+    if _tc3.button("🔌 測試", key="ext_test_btn", use_container_width=True):
         if not _test_host.strip():
             st.warning("請先填入要測試的 host。")
         else:
             try:
+                import os as _os  # noqa: PLC0415
                 import urllib.request  # noqa: PLC0415
-                req = urllib.request.Request(_test_host.strip(), method="GET")
+                _url = _test_host.strip().rstrip("/") + "/" + _test_path.strip().lstrip("/")
+                _headers = {}
+                _tok = _os.environ.get((_test_tokenenv or "").strip()) if _test_tokenenv.strip() else None
+                if _tok:
+                    _headers["Authorization"] = f"Bearer {_tok}"
+                req = urllib.request.Request(_url, method="GET", headers=_headers)
                 with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    st.success(f"✅ 連線成功（HTTP {resp.status}）。")
+                    body = resp.read(800).decode("utf-8", "replace")
+                _authnote = "（已帶 token）" if _tok else ("（token 環境變數未設定值）"
+                                                          if _test_tokenenv.strip() else "")
+                st.success(f"✅ 連線成功 HTTP {resp.status} {_authnote} — {_url}")
+                if body.strip():
+                    st.code(body + ("…" if len(body) >= 800 else ""), language="json")
             except Exception as exc:  # noqa: BLE001
-                st.error(f"❌ 連不上：{exc}。請確認 server 已啟動且 host 正確。")
+                st.error(f"❌ 連不上：{exc}。請確認 server 已啟動、host/path 正確、token 有效。")
 
 
 def _render_external_tab(
@@ -1803,6 +1819,68 @@ def _page_runs(reg: PluginRegistry) -> None:
             )
 
 
+def _render_sandbox_policy() -> None:
+    """No-code editor for the load-time plugin sandbox (core/sandbox.py reads
+    config/sandbox_policy.yaml). Lets a security admin pick enforce/warn/off and
+    extend/relax the deny-list — without env vars or code."""
+    import yaml as _yaml  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    st.subheader("插件沙箱政策（執行安全）")
+    st.caption("第三方/手放模組載入前會靜態掃描危險構造（process/網路/shell、動態執行）。"
+               "此處設定即時生效，免改環境變數或程式碼。")
+    sp_path = _Path(__file__).resolve().parent.parent / "config" / "sandbox_policy.yaml"
+    try:
+        _sp = _yaml.safe_load(sp_path.read_text(encoding="utf-8")) if sp_path.exists() else {}
+    except Exception:
+        _sp = {}
+    if not isinstance(_sp, dict):
+        _sp = {}
+
+    import os as _os  # noqa: PLC0415
+    _env_override = _os.environ.get("CIM_PLUGIN_SANDBOX")
+    _modes = ["enforce", "warn", "off"]
+    _cur_mode = (_sp.get("mode") or "warn").strip().lower()
+    _mode = st.radio(
+        "強制模式", _modes,
+        index=_modes.index(_cur_mode) if _cur_mode in _modes else 1,
+        horizontal=True, key="sbx_mode",
+        help="enforce＝有違規拒絕載入；warn＝記錄但放行；off＝跳過掃描",
+        disabled=bool(_env_override))
+    if _env_override:
+        st.warning(f"目前由環境變數 CIM_PLUGIN_SANDBOX={_env_override} 覆蓋，此下拉暫不生效。")
+
+    _c1, _c2 = st.columns(2)
+    _bi = _c1.text_input("額外禁用 import（逗號分隔）",
+                         value=", ".join(_sp.get("blocked_imports") or []), key="sbx_bi",
+                         placeholder="requests, urllib")
+    _bc = _c2.text_input("額外禁用呼叫（逗號分隔）",
+                         value=", ".join(_sp.get("blocked_calls") or []), key="sbx_bc",
+                         placeholder="open")
+    _ai = _c1.text_input("信任放行 import（從內建黑名單移除）",
+                         value=", ".join(_sp.get("allow_imports") or []), key="sbx_ai",
+                         placeholder="socket")
+    _ac = _c2.text_input("信任放行呼叫", value=", ".join(_sp.get("allow_calls") or []),
+                         key="sbx_ac")
+    if st.button("💾 儲存沙箱政策", type="primary", key="sbx_save"):
+        def _split(s: str) -> list:
+            return [x.strip() for x in (s or "").replace("，", ",").split(",") if x.strip()]
+        _sp["mode"] = _mode
+        _sp["blocked_imports"] = _split(_bi)
+        _sp["blocked_calls"] = _split(_bc)
+        _sp["allow_imports"] = _split(_ai)
+        _sp["allow_calls"] = _split(_ac)
+        try:
+            sp_path.parent.mkdir(parents=True, exist_ok=True)
+            sp_path.write_text(_yaml.safe_dump(_sp, allow_unicode=True, sort_keys=False),
+                               encoding="utf-8")
+            st.success(f"✅ 已儲存沙箱政策（模式：{_mode}），立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"寫入失敗：{exc}")
+    st.caption("⚠️ 此為靜態 AST 檢查（載入前防呆），非執行期/OS 級隔離；"
+               "高敏環境請搭配 enforce 模式並審查模組來源。")
+
+
 def _page_permissions(reg: PluginRegistry) -> None:
     import yaml as _yaml  # noqa: PLC0415
     from pathlib import Path as _Path  # noqa: PLC0415
@@ -1888,6 +1966,10 @@ def _page_permissions(reg: PluginRegistry) -> None:
             st.success("✅ 已儲存，立即生效。")
         except Exception as exc:  # noqa: BLE001
             st.error(f"YAML 格式錯誤，未儲存：{exc}")
+    st.markdown("---")
+
+    # ── 插件沙箱政策（執行安全，no-code）──────────────────────────────────────
+    _render_sandbox_policy()
     st.markdown("---")
 
     st.markdown("**Defined roles:**")
