@@ -1792,10 +1792,60 @@ def _page_permissions(reg: PluginRegistry) -> None:
     from pathlib import Path as _Path  # noqa: PLC0415
 
     st.header(":material/lock: Permissions")
-
-    # ── 宣告式 RBAC 編輯器（no-code）：讀/寫 config/permissions.yaml ──────────
     policy_path = _Path(__file__).resolve().parent.parent / "config" / "permissions.yaml"
-    st.subheader("宣告式權限政策（permissions.yaml）")
+
+    # ── 視覺化權限矩陣（no-code：勾選即可，免寫 YAML）────────────────────────
+    st.subheader("視覺化權限編輯")
+    st.caption("選角色 → 勾選可檢視/可執行的模組 → 儲存。直接寫入 config/permissions.yaml，立即生效。")
+    try:
+        _policy = _yaml.safe_load(policy_path.read_text(encoding="utf-8")) if policy_path.exists() else {}
+    except Exception:
+        _policy = {}
+    if not isinstance(_policy, dict):
+        _policy = {}
+    _roles_d = _policy.get("roles") if isinstance(_policy.get("roles"), dict) else {}
+    _all_ids = sorted(p.plugin_id for p in reg.list_plugins())
+    _role_names = list(_roles_d.keys()) or ["admin"]
+    _c1, _c2 = st.columns([2, 2])
+    _sel_role = _c1.selectbox("角色", _role_names, key="perm_role_sel")
+    _new_role = _c2.text_input("或新增角色", key="perm_new_role", placeholder="operator")
+    _role = (_new_role.strip() or _sel_role)
+    _rule = _roles_d.get(_role) if isinstance(_roles_d.get(_role), dict) else {}
+    _is_all = st.checkbox("完整存取（all：可看可執行全部）", value=bool(_rule.get("all")), key=f"perm_all_{_role}")
+    _view_all = ("*" in (_rule.get("view") or []))
+    _view_allchk = False
+    _view_sel: list = []
+    _exec_sel: list = []
+    if not _is_all:
+        _view_allchk = st.checkbox("可檢視全部模組（view: *）", value=_view_all, key=f"perm_vall_{_role}")
+        if not _view_allchk:
+            _view_sel = st.multiselect("可檢視的模組（view）", _all_ids,
+                                       default=[m for m in (_rule.get("view") or []) if m in _all_ids],
+                                       key=f"perm_view_{_role}")
+        _exec_sel = st.multiselect("可執行的模組（execute）", _all_ids,
+                                   default=[m for m in (_rule.get("execute") or []) if m in _all_ids],
+                                   key=f"perm_exec_{_role}")
+    if st.button("💾 儲存此角色權限", type="primary", key="perm_save_visual"):
+        _new_rule: dict = {}
+        if _is_all:
+            _new_rule["all"] = True
+        else:
+            _new_rule["view"] = ["*"] if _view_allchk else _view_sel
+            _new_rule["execute"] = _exec_sel
+        _roles_d[_role] = _new_rule
+        _policy["roles"] = _roles_d
+        _policy.setdefault("default_policy", "allow")
+        try:
+            policy_path.parent.mkdir(parents=True, exist_ok=True)
+            policy_path.write_text(_yaml.safe_dump(_policy, allow_unicode=True, sort_keys=False),
+                                   encoding="utf-8")
+            st.success(f"✅ 已更新角色「{_role}」權限，立即生效。")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"寫入失敗：{exc}")
+    st.markdown("---")
+
+    # ── 進階：直接編 YAML（讀/寫 config/permissions.yaml）────────────────────
+    st.subheader("進階：直接編輯 permissions.yaml")
     st.caption(
         "編輯後按「儲存」即生效（由 core/rbac.py 在每次執行前強制檢查；"
         "角色來自 CIM_USER_ROLE）。schema：default_policy: allow|deny；roles.<role>.{all|view|execute}。"
