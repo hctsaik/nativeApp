@@ -304,17 +304,22 @@ def module_preflight(scripts_dir: Path, plugin_id: str) -> ModulePreflight:
         "process": folder / f"{short_id}_process.py",
         "output": folder / f"{short_id}_output.py",
     }
-    # No-code input: a module may declare its input fields in plugin.yaml `form:`
-    # instead of shipping an *_input.py — in that case input is not required.
-    declarative_input = False
+    # No-code layers: a module may declare its input fields in plugin.yaml `form:`
+    # (no *_input.py) and/or its output blocks in `output:` (no *_output.py).
+    declarative_input = declarative_output = False
     if files["plugin.yaml"].exists():
         try:
             import yaml  # noqa: PLC0415
             _meta = yaml.safe_load(files["plugin.yaml"].read_text(encoding="utf-8")) or {}
             declarative_input = bool(_meta.get("form"))
+            declarative_output = bool(_meta.get("output"))
         except Exception:
             pass
-    required = {"plugin.yaml", "process", "output"} | (set() if declarative_input else {"input"})
+    required = {"plugin.yaml", "process"}
+    if not declarative_input:
+        required.add("input")
+    if not declarative_output:
+        required.add("output")
     checks = {name: path.exists() for name, path in files.items()}
     issues = [f"Missing {name} file." for name, path in files.items()
               if name in required and not path.exists()]

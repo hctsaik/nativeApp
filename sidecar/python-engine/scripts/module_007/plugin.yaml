@@ -9,9 +9,9 @@ enabled: true
 slug: declarative-form-demo
 author: system
 description: >
-  示範 no-code input：input 欄位完全用 plugin.yaml 的 form: 宣告，
-  本模組沒有 007_input.py。框架（cv_framework_runner）會自動依 form: 渲染表單。
-  只需寫 process（運算）與 output（呈現）。
+  示範完全 no-code 工具：input 用 form: 宣告、output 用 output: 宣告，
+  本模組**只有 007_process.py**（純運算），沒有 007_input.py / 007_output.py。
+  框架（cv_framework_runner）自動依 form: 渲染表單、依 output: 呈現結果。
 
 # ── 宣告式 input 表單（取代手寫 *_input.py 的 render_input）──────────────────
 form:
@@ -19,3 +19,9 @@ form:
   - { key: count, type: integer,  label: 重複次數,   default: 3, min: 1, max: 10, step: 1 }
   - { key: mode,  type: select,   label: 文字模式,   options: [大寫, 小寫, 原樣], default: 原樣 }
   - { key: shout, type: checkbox, label: 加上驚嘆號, default: false }
+
+# ── 宣告式 output（取代手寫 *_output.py 的 render_output）────────────────────
+output:
+  - { type: text,   label: 處理後標題, key: title }
+  - { type: metric, label: 行數,       key: count }
+  - { type: list,   key: lines }

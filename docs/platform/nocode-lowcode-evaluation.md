@@ -52,3 +52,34 @@
 未通過。要拉高分數需**實作**降低開發門檻的能力（最高槓桿＝declarative 表單層 + 平台內建 scaffolding + tenant GUI + RBAC + /new-plugin）。逐項實作後再跑新一輪 10 情境重評。
 
 ---
+
+## Round 1 後實作的改進（2026-05-30）
+1. **修 P6e 真實回歸**：labeling 模組搬到 plugins/labeling/modules/ 後，`cv_framework_runner`/`annotation_runner`/`management_runner`/`management_insights` 仍 hardcode `scripts/` → 開工具/管理/發布都會找不到。加 `plugin_loader.find_module_folder/module_yaml_paths` dual-root 解析、`management_insights._resolve_module_folder`，並以 `tests/test_module_roots.py` 守住。（pytest/pyinstaller 之前漏掉，因為是 Streamlit/admin runtime path。）
+2. **宣告式 no-code input 表單**：`core/forms.py` + `cv_framework_runner` run_input fallback；模組可不寫 `*_input.py`，改用 plugin.yaml `form:`；`module_preflight` 對宣告式 input 視 input 為非必需；範例 `scripts/module_007/`（零 input 程式碼）；`tests/test_forms.py`。
+3. CLAUDE.md tenant 文件修正、shared-components 索引補 forms。
+
+## Round 2（2026-05-30）— 改進後重評
+
+| # | 情境 | 分 | # | 情境 | 分 |
+|---|------|----|----|------|----|
+| 1 | no-code 純參數 CV 工具 | 78 | 6 | 外部貢獻 zip 投稿 | 48 |
+| 2 | 新人宣告式表單 demo | 80 | 7 | 設定模組 RBAC | 55 |
+| 3 | GUI scaffold 新模組 | 60 | 8 | 註冊外部系統租戶 | 38 |
+| 4 | GUI 組工作流 sheet | 82 | 9 | 打包可攜部署 | 68 |
+| 5 | 使用者跑 annotation 流程 | 80 | 10 | dual-root 模組搬移 | 72 |
+
+**Round 2 平均：66.1（較 Round 1 +4.1）**。提升集中在宣告式表單（情境 1/2）與 dual-root 修復（情境 10）。
+
+### Round 2 發現的真問題（待修）
+- `core.forms` 未進 engine.spec hiddenimports → 打包版 no-code 表單有風險。
+- no-code 只覆蓋 **input 層**；process/output 仍要寫 Python → 「加工具」封頂 ~60–80。
+- scaffold（GUI/skill）仍產手寫 `*_input.py` stub，未對齊 form-first；manifest 無 vendor/domain/slug。
+
+### 距 95 前 5 大缺口（Round 2 共識）
+1. **宣告式 process + output 層**（最高槓桿）：讓簡單工具連 output 都宣告，才能真正 no-code。
+2. 外部系統租戶註冊 GUI（後端 register_tenant/SystemTenant 已備，缺前端）。
+3. 真實身分 + 權限矩陣 GUI（auth_provider 是 placeholder allow-all）。
+4. 外部貢獻安全（上傳碼直接 exec，無沙箱/簽章）+ no-code 投稿封包。
+5. 打包 hiddenimports 自動收集（取代手寫白名單）。
+
+---

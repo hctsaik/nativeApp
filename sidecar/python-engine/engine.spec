@@ -64,6 +64,8 @@ a = Analysis(
         'plugins.labeling.domain.tools.registry',
         # platform core (canonical home for external-system integration contracts)
         'core',
+        'core.forms',
+        'core.output',
         'core.integrations',
         'core.integrations.connector',
         'core.integrations.tenant',

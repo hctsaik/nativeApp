@@ -121,17 +121,20 @@ def _post_message(msg_type: str, payload: dict) -> None:
     )
 
 
-def _load_form_schema(plugin_id: str):
-    """Return the `form:` declarative input schema from a module's plugin.yaml
-    (or None). Used to auto-render input for modules that ship no *_input.py."""
+def _load_plugin_meta(plugin_id: str) -> dict:
+    """Read a module's plugin.yaml as a dict (for declarative `form:`/`output:`)."""
     try:
         import yaml  # noqa: PLC0415
         from plugin_loader import find_module_folder  # noqa: PLC0415
         yaml_path = find_module_folder(plugin_id) / "plugin.yaml"
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-        return data.get("form")
+        return yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except Exception:
-        return None
+        return {}
+
+
+def _load_form_schema(plugin_id: str):
+    """The `form:` declarative input schema (or None)."""
+    return _load_plugin_meta(plugin_id).get("form")
 
 
 def run_input() -> None:
@@ -229,10 +232,23 @@ def run_output() -> None:
     if module_id:
         try:
             content_json = _get_content_json(module_id) if not PluginLoader.is_dev_mode() else None
-            output_mod = load_layer(module_id, "output", content_json)
-            if "resolution" in data and isinstance(data["resolution"], list):
-                data["resolution"] = tuple(data["resolution"])
-            output_mod.render_output(data)
+            # No-code output: a module may ship no *_output.py and instead declare
+            # `output:` blocks in plugin.yaml — the framework auto-renders them.
+            try:
+                output_mod = load_layer(module_id, "output", content_json)
+            except (FileNotFoundError, KeyError):
+                output_mod = None
+            if output_mod is not None:
+                if "resolution" in data and isinstance(data["resolution"], list):
+                    data["resolution"] = tuple(data["resolution"])
+                output_mod.render_output(data)
+            else:
+                schema = _load_plugin_meta(module_id).get("output")
+                if schema is not None:
+                    from core.output import render as _render_out  # noqa: PLC0415
+                    _render_out(schema, data, st)
+                else:
+                    st.table({"欄位": list(data.keys()), "值": [str(v) for v in data.values()]})
         except Exception as _exc:
             # Re-raise Streamlit control-flow exceptions (RerunException, StopException)
             # so that st.rerun() / st.stop() inside render_output() work correctly.
