@@ -1,0 +1,25 @@
+# Labeling plugin — runtime dependencies (labeling independence plan P2).
+#
+# Packages the Labeling feature needs ON TOP OF the platform's shared engine
+# environment (sidecar/python-engine/requirements.txt). Mirrors AI4BI's optional
+# extra: the host engine already provides streamlit / numpy / pandas / Pillow /
+# opencv (shared by other CV tools) and httpx / psutil (core infra), so those are
+# NOT repeated here — only labeling-specific deps are listed.
+#
+# Measured from the import surface on 2026-05-31: each package below is imported
+# ONLY by plugins/labeling (0 import sites elsewhere), except streamlit-image-
+# annotation whose single out-of-plugin use is the shared annotation image widget.
+#
+# When labeling becomes a git submodule (P3), this file moves with it and is
+# installed into the engine's Python 3.11 alongside the core requirements:
+#   python -m pip install -r plugins/labeling/requirements-labeling.txt
+
+# Annotation UI
+streamlit-image-annotation        # bbox / polygon annotation canvas (module_012, …)
+streamlit-autorefresh             # incremental refresh on annotation / output pages
+
+# AI pre-labeling (module_016) — YOLO + optional transformer detectors
+ultralytics                       # YOLO detector; pulls torch
+torch
+torchvision
+transformers                      # optional transformer-based detectors

@@ -61,10 +61,15 @@
 做法：在 `core/` 建薄轉接層（re-export 既有實作，**不搬實作、不改行為**），逐模組切換 import，
 每切一個就跑 `test:python` + 該模組 MCP golden path。隱性 → 可版本化的顯性契約。
 
-### P2 — 相依與安裝收斂
-- 建 labeling 自己的相依清單（annotation stack：streamlit-image-annotation、PIL、torch/ultralytics/transformers（AI 預標）、cv2…），
-  併進 `verify-setup.ps1` doctor 與安裝文件。
-- 在 doctor 增加「labeling 契約檢查」：確認 host 提供的 `core` 契約版本相容。
+### P2 — 相依與安裝收斂 ✅ 已完成
+- 建 labeling 專屬相依清單
+  [`plugins/labeling/requirements-labeling.txt`](../../sidecar/python-engine/plugins/labeling/requirements-labeling.txt)：
+  只列「在 labeling 外 0 個 import 站點」的專屬套件（streamlit-image-annotation、streamlit-autorefresh、
+  ultralytics/torch/torchvision/transformers）；與其他 CV 工具共享的 cv2/numpy/PIL/pandas 仍留在核心
+  `requirements.txt`（**未改動主清單 → 零安裝破壞風險**）。對應 AI4BI 的 `[llm]` extra 概念。
+- `verify-setup.ps1` doctor 新增「Labeling 影像標註」區段：檢查 plugin 存在、**平台契約檔齊全**
+  （`core/` + 5 個共用工具檔）、annotation UI 相依可匯入（缺則 FAIL）、AI 預標相依（缺則 WARN，基本標注不受影響）。
+  → 這同時就是「host 提供的 `core` 契約是否相容」的安裝期檢查。
 
 ### P3 — 物理搬遷成 submodule（需 owner 的 GitHub 操作，最後一步）
 1. 建 `labeling` repo，把 `plugins/labeling/` 內容移入。
@@ -83,5 +88,10 @@
 
 ## 5. 進度
 
-- **P0**：進行中（本文件 + contract 測試）。
-- P1–P3：未開始。
+- **P0 ✅**：契約凍結 — 本文件 + `tests/test_labeling_platform_contract.py`（3 測試綠）。
+- **P2 ✅**：相依與安裝收斂 — `requirements-labeling.txt` + doctor「Labeling」區段（實機全 PASS）。
+- **P1（可選打磨）**：把隱性耦合改寫成顯性 `core.*`。**非抽離硬阻擋**（§2 已證 `parents[3]`
+  動態載入在 submodule 化後仍解析到 host 根、照常運作），故在「避免改壞功能」優先下延後；
+  要做時逐模組切換 + 每步 `test:python` 全綠 + MCP golden path。
+- **P3（需 owner GitHub 操作）**：建 `labeling` repo、`plugins/labeling/` 掛 submodule。
+  其餘機制（submodule 工作流、doctor、相依清單、契約測試）皆已就緒，屬 push-button 收尾。

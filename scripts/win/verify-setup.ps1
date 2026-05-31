@@ -120,7 +120,46 @@ if ($pyExe) {
     }
 }
 
-# ── 6. LLM 模式（選用，資訊性）─────────────────────────────
+# ── 6. Labeling 影像標註（與 AI4BI 並行的獨立功能）─────────
+Section "Labeling 影像標註"
+$labelingDir = Join-Path $repoRoot 'sidecar\python-engine\plugins\labeling'
+if (Test-Path (Join-Path $labelingDir 'plugin.manifest.yaml')) {
+    Pass "labeling plugin 存在（plugin.manifest.yaml）"
+} else {
+    Fail "找不到 plugins/labeling/plugin.manifest.yaml"
+}
+# 平台契約檔：labeling 依賴的 host 共用碼（見 docs/platform/labeling-independence-plan.md §2）
+$contractFiles = @(
+    'sidecar\python-engine\core',
+    'sidecar\python-engine\scripts\shared\_config_base.py',
+    'sidecar\python-engine\scripts\shared\_help.py',
+    'sidecar\python-engine\scripts\shared\_manifest_db.py',
+    'sidecar\python-engine\scripts\shared\ui_components.py',
+    'sidecar\python-engine\tools\db_utils.py'
+)
+$missingContract = @($contractFiles | Where-Object { -not (Test-Path (Join-Path $repoRoot $_)) })
+if ($missingContract.Count -eq 0) {
+    Pass "平台契約齊全（core/ + 5 個共用工具檔）"
+} else {
+    Fail "缺少 labeling 契約檔：$($missingContract -join ', ')"
+}
+if ($pyExe) {
+    $labelingReq = "& `"$pyExe`" -m pip install -r `"$repoRoot\sidecar\python-engine\plugins\labeling\requirements-labeling.txt`""
+    # Annotation UI 相依（labeling 專屬 — 缺了基本標注會壞）
+    foreach ($mod in 'streamlit_image_annotation', 'streamlit_autorefresh') {
+        & $pyExe -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('$mod') else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) { Pass "$mod 可匯入（annotation UI）" }
+        else { Fail "$mod 缺少（annotation UI）"; Write-Host "         → $labelingReq" -ForegroundColor DarkGray }
+    }
+    # AI 預標相依（選用 — 缺了 AI Pre-labeling 不可用，基本標注不受影響）
+    foreach ($mod in 'ultralytics', 'torch') {
+        & $pyExe -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('$mod') else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) { Pass "$mod 可匯入（AI 預標）" }
+        else { Warn "$mod 未裝 — AI Pre-labeling (module_016) 不可用，基本標注不受影響" }
+    }
+}
+
+# ── 7. LLM 模式（選用，資訊性）─────────────────────────────
 Section "LLM 模式（選用）"
 if ($env:ANTHROPIC_API_KEY) {
     Pass "ANTHROPIC_API_KEY 已設 — 可用自然語言/LLM 模式"
@@ -131,7 +170,7 @@ if ($env:ANTHROPIC_API_KEY) {
 # ── 結果 ────────────────────────────────────────────────────
 Section "結果"
 if ($script:fail -eq 0) {
-    Write-Host "[OK] 全部通過（提醒 $($script:warn) 項）。start-dev.bat 應可乾淨啟動，含 AI Report (AI4BI)。" -ForegroundColor Green
+    Write-Host "[OK] 全部通過（提醒 $($script:warn) 項）。start-dev.bat 應可乾淨啟動，含 AI Report (AI4BI) 與 影像標註。" -ForegroundColor Green
     exit 0
 } else {
     Write-Host "[X] 失敗 $($script:fail) 項、提醒 $($script:warn) 項。請依上面 → 的指示修正後再跑一次。" -ForegroundColor Red
