@@ -50,22 +50,40 @@ function isAllowedOrigin(origin, allowedOrigins = []) {
   return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
 }
 
-// ── Tool category grouping ────────────────────────────────
-const CATEGORY_LABELS = {
-  module:     "模組",
-  sheet:      "頁面套件",
-  app:        "應用程式",
-  management: "管理",
-  external: "External",
+// ── Top-level menu groups (display) ───────────────────────
+// A tool's menu group is decoupled from its runtime category: 'sheet' tools are
+// multi-tab, 'app' tools are a single iframe, 'management' is the admin center —
+// but how they're grouped/labeled in the portal menu is a product decision set
+// here. Runtime routing (SheetLayout vs AppPanel) still keys off the real
+// category and is unaffected by this grouping.
+const MENU_GROUP_LABELS = {
+  common:     "共同應用程式",
+  dedicated:  "專屬應用程式",
+  management: "CIM 管理中心",
 };
-const CATEGORY_ORDER = ["module", "sheet", "app", "external", "management"];
+const MENU_GROUP_ORDER = ["common", "dedicated", "management"];
 
-function groupTools(tools) {
+// 影像標註 (sheet-annotation) runs as a multi-tab sheet, but is a platform-wide
+// shared capability, so it sits under 共同應用程式 next to AI4BI. List any other
+// "common but technically a sheet" tool here.
+const COMMON_GROUP_TOOL_IDS = new Set(["app-ai4bi", "sheet-annotation"]);
+
+// Map a tool to its top-level menu group, or null to hide it from the menu
+// (module / external tools are used via sheets, not selected directly).
+function menuGroupFor(tool) {
+  if (tool.category === "management") return "management";
+  if (COMMON_GROUP_TOOL_IDS.has(tool.tool_id)) return "common";
+  if (tool.category === "app") return "common";       // apps are 共同 by default
+  if (tool.category === "sheet") return "dedicated";  // sheets = 專屬 (domain-specific) packages
+  return null;
+}
+
+function groupToolsByMenu(tools) {
   const groups = {};
   for (const t of tools) {
-    const cat = t.category ?? "tool";
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(t);
+    const g = menuGroupFor(t);
+    if (!g) continue;
+    (groups[g] ??= []).push(t);
   }
   return groups;
 }
@@ -194,12 +212,8 @@ function injectStreamlitErrorTranslator(iframeEl) {
 }
 
 
-// Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用。
-// 'app' = 內嵌的完整外部 Streamlit 應用（如 AI4BI），以頂層應用出現。
-const PORTAL_VISIBLE_CATEGORIES = ["sheet", "app", "management"];
-
 function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, role, roles, onSetRole }) {
-  const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
+  const visibleOrder = MENU_GROUP_ORDER;
 
   return (
     <header className="toolbar">
@@ -236,12 +250,12 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
             disabled={sidecarDown || !!activeTool}
           >
             {(() => {
-              const groups = groupTools(tools);
+              const groups = groupToolsByMenu(tools);
               return visibleOrder
-                .filter(cat => groups[cat]?.length)
-                .map(cat => (
-                  <optgroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
-                    {groups[cat].map(t => (
+                .filter(g => groups[g]?.length)
+                .map(g => (
+                  <optgroup key={g} label={MENU_GROUP_LABELS[g]}>
+                    {groups[g].map(t => (
                       <option key={t.tool_id} value={t.tool_id}>{t.name}</option>
                     ))}
                   </optgroup>
