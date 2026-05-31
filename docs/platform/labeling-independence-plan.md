@@ -51,15 +51,21 @@
   （如 `import engine` / `management_store`）即測試失敗。**這是獨立性的守門員**，也防止後續重構把耦合擴大。
 - 不動任何執行碼 → 零破壞風險。
 
-### P1 — 契約顯性化（把隱性耦合收進 `core`）
-把 P0 凍結的 5 個共用檔提升為**正式的 `core/` 契約**，讓 labeling 改用 `import core.X`，
-不再靠 `parents[3]` 路徑算法與 bare import：
-- `core.config_base`（← `scripts/shared/_config_base`）
-- `core.ui`（← `scripts/shared/ui_components` / `_help` / `image_widget`）
-- `core.manifest_db`（← `scripts/shared/_manifest_db`）
-- `core.db`（← `tools/db_utils`）
-做法：在 `core/` 建薄轉接層（re-export 既有實作，**不搬實作、不改行為**），逐模組切換 import，
-每切一個就跑 `test:python` + 該模組 MCP golden path。隱性 → 可版本化的顯性契約。
+### P1 — 契約顯性化（可選打磨，**高風險，預設不做**）
+構想是把 5 個共用檔提升為 `core.config_base` / `core.ui` / `core.manifest_db` / `core.db`，
+讓 labeling 改用 `from core.X import`，不再靠 `parents[3]` 路徑算法 + `spec_from_file_location`。
+
+> **2026-05-31 調查結論：暫不執行。** GUI 模組對 `core` 的 import **全是延遲匯入**（在函式內、附
+> `# noqa: PLC0415`，如 `module_026`），因為 Streamlit 子程序在**模組頂層執行時 `core` 尚未在
+> sys.path 上**，要等 bootstrap 後才可用。共用碼改用 `spec_from_file_location`（絕對路徑、永遠可用）
+> 正是為了繞過這個時序問題 —— **這是刻意且健壯的設計，不是技術債**。
+>
+> 因此把頂層動態載入改成頂層 `from core.X import` **會有破壞風險**（頂層匯入時機 core 未必可用），
+> 與本計畫「避免改壞功能」相牴觸；而且 **P0 契約測試無論靜態或動態都已鎖住邊界、§2 已證動態載入在
+> submodule 化後照常運作**，P1 對「獨立性」本身是零增益、純清晰度。故預設不做。
+>
+> 若未來仍要做：須逐模組改成**延遲匯入** `from core.X import`（比照現有 core import 的 pattern），
+> 每切一個跑 `test:python` + 該模組 MCP golden path，且先確保子程序 sys.path 已含 python-engine。
 
 ### P2 — 相依與安裝收斂 ✅ 已完成
 - 建 labeling 專屬相依清單
@@ -119,8 +125,8 @@ npm run test:python                                                     # 契約
 
 - **P0 ✅**：契約凍結 — 本文件 + `tests/test_labeling_platform_contract.py`（3 測試綠）。
 - **P2 ✅**：相依與安裝收斂 — `requirements-labeling.txt` + doctor「Labeling」區段（實機全 PASS）。
-- **P1（可選打磨）**：把隱性耦合改寫成顯性 `core.*`。**非抽離硬阻擋**（§2 已證 `parents[3]`
-  動態載入在 submodule 化後仍解析到 host 根、照常運作），故在「避免改壞功能」優先下延後；
-  要做時逐模組切換 + 每步 `test:python` 全綠 + MCP golden path。
+- **P1（可選打磨）：預設不做**。調查發現模組對 `core` 採延遲匯入（子程序頂層 sys.path 時序），
+  動態 `spec_from_file_location` 是刻意健壯設計；改頂層 `core.X` 有破壞風險、對獨立性零增益
+  （契約已由 P0 鎖住）。詳見 §3 P1 結論。
 - **P3（需 owner GitHub 操作）**：建 `labeling` repo、`plugins/labeling/` 掛 submodule。
   其餘機制（submodule 工作流、doctor、相依清單、契約測試）皆已就緒，屬 push-button 收尾。
