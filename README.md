@@ -46,6 +46,10 @@ so the portal iframe loads only after the tool server is accepting connections.
 
 ## 全新電腦安裝（含 AI4BI）
 
+> 完整、經 clean-room 實測、可讓 **Claude Code 直接照做**的下載＋安裝 runbook 見
+> **[`docs/INSTALL.md`](docs/INSTALL.md)**（含三 repo clone、隔離 venv、doctor 驗證、實測結果）。
+> 以下為摘要。
+
 AI4BI（📊 AI Report）以 git submodule 置於 `sidecar/python-engine/vendor/AI4BI`，
 並 editable 裝進 **engine 所用的同一支 Python 3.11**。完整流程如下。
 
