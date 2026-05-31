@@ -208,20 +208,17 @@ def test_portal_role_switcher_wired() -> None:
     assert "handleSetRole" in src and "onSetRole={handleSetRole}" in src
 
 
-def test_portal_reload_button_wired() -> None:
-    """The portal must actually call POST /reload, refresh tools, AND wire the
-    button into <TopBar>. Guards the R2/R4 'fake green' regressions where the
-    handler/button existed but were never connected."""
+def test_portal_reload_button_removed() -> None:
+    """The dev-only 重新載入工具 (Reload Tools) button was intentionally removed
+    from the portal (owner request, 2026-05-31), along with its dead supporting
+    code (handleReload / onReload / the reloading state). Guard that it stays
+    removed so it isn't accidentally re-added. The engine POST /reload endpoint
+    remains for programmatic / MCP use — covered by
+    test_api.test_reload_endpoint_rescans_catalog."""
     src = (ENGINE_DIR.parents[1] / "apps" / "portal-react" / "src" / "main.jsx").read_text(encoding="utf-8")
-    assert "handleReload" in src
-    assert "/reload" in src and 'method: "POST"' in src
-    # The button must be passed to TopBar (R4: it wasn't → never rendered).
-    assert "onReload={handleReload}" in src and "reloading={reloading}" in src
-    # handleReload must restart the running tool via the real state field
-    # `activeTool?.tool_id` (R4: it used undefined `activeToolId` → ReferenceError).
-    assert "const activeId = activeTool?.tool_id" in src
-    # handleStart must accept a tool id so reload can restart the running tool.
-    assert "function handleStart(toolIdArg" in src
+    assert "重新載入工具" not in src
+    assert "handleReload" not in src
+    assert "onReload" not in src
 
 
 def test_tool_registry_delegates_rescan() -> None:

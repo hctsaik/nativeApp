@@ -92,7 +92,7 @@ start-dev.bat
 - 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py`（或宣告式 `form:`）+ `*_output.py`（或宣告式 `output:`）
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
 - **新工具免改 engine.py**：`engine._scan_and_register_plugins` 啟動時掃 `scripts/*/plugin.yaml` + `plugins/*/modules/*/plugin.yaml` 自動註冊；`engine.py` 的 seed 區塊**只剩** sheet/management/external 等無 plugin.yaml 的工具。
-- **熱載（免重啟整個 app）**：新增/改 plugin.yaml 或 sheet YAML 後，按 portal「重新載入工具」鈕（或 `POST /reload`）即重掃並出現（執行中的工具會自動重啟套用改動）。connector 同樣經 `/reload` 的 `autodiscover()` 生效。
+- **熱載（免重啟整個 app）**：新增/改 plugin.yaml 或 sheet YAML 後，呼叫 `POST /reload`（engine 端點，可由 MCP 或 `curl` 觸發；portal 上的「重新載入工具」鈕已移除）即重掃並出現（執行中的工具會自動重啟套用改動）。connector 同樣經 `/reload` 的 `autodiscover()` 生效。
 - 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py（drop YAML 即自動註冊 `sheet-<id>` 可啟動工具）。
 - 廢棄模組（010、019、022-025）：已標記 `enabled: false`，程式碼保留不刪除
 
