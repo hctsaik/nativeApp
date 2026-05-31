@@ -73,9 +73,16 @@ npm install
 & "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
     -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
 
-# 5) 啟動整個 app
+# 5) 影像標註（labeling 為 submodule，步驟 1 已拉下；裝它的專屬相依）
+& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
+    -m pip install -r "sidecar/python-engine/plugins/labeling/requirements-labeling.txt"
+
+# 6) 啟動整個 app
 start-dev.bat
 ```
+
+> 影像標註（labeling）與 AI4BI 一樣是 git submodule（`github.com/hctsaik/ANnoTation`）；
+> 日後更新只需在 `sidecar/python-engine/plugins/labeling` 內 `git pull`。
 
 ### ⚠️ 最關鍵的一步：對齊 engine 的 Python
 
