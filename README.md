@@ -44,6 +44,72 @@ ports, and opens the React portal. The sample Streamlit tool starts on demand.
 The sidecar waits for Streamlit to be fully ready before returning the tool URL,
 so the portal iframe loads only after the tool server is accepting connections.
 
+## 全新電腦安裝（含 AI4BI）
+
+AI4BI（📊 AI Report）以 git submodule 置於 `sidecar/python-engine/vendor/AI4BI`，
+並 editable 裝進 **engine 所用的同一支 Python 3.11**。完整流程如下。
+
+### 前置需求
+
+- Git、Node.js（LTS）
+- **Python 3.11**（需與 engine host 直譯器一致；目前 dev 預設 `pythoncore-3.11-64`）
+- AI4BI submodule 來源是私有 repo（`github.com/hctsaik/AI4BI`），新機器需有存取權
+
+### 步驟
+
+```powershell
+# 1) Clone 時一併拉 submodule（若已 clone，改跑第 2 行）
+git clone --recurse-submodules <native-app repo url>
+git submodule update --init --recursive
+
+# 2) Node 依賴（Electron + portal + workspaces）
+npm install
+
+# 3) engine 的 Python 依賴（用那支 3.11）
+& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
+    -m pip install -r sidecar/python-engine/requirements.txt
+
+# 4) AI4BI（editable，務必裝進同一支 3.11）
+& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
+    -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
+
+# 5) 啟動整個 app
+start-dev.bat
+```
+
+### ⚠️ 最關鍵的一步：對齊 engine 的 Python
+
+dev 模式下 engine 由 `start-dev.bat` 的 `set PYTHON=...` 那一行啟動
+（傳給 Electron，見 `apps/host-electron/src/main.js` 的 `process.env.PYTHON`）。
+**該行目前硬編了特定使用者路徑**，新電腦務必改成你機器上 3.11 的 `python.exe` 絕對路徑，
+且步驟 3、4 要裝進**同一支**——否則 engine 啟動或 `import ai4bi` 會失敗。
+
+### 確保安裝成功：跑驗證腳本
+
+安裝完成後跑一次 doctor 腳本，全部 PASS 才代表 `start-dev.bat` 能乾淨啟動：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\win\verify-setup.ps1
+```
+
+它會解析 `start-dev.bat` 實際使用的 Python，並在**那一支**直譯器內逐項檢查：
+git/node/npm、Python 3.11、submodule 已 checkout、`node_modules`、
+engine 依賴（fastapi/streamlit/pandas）、AI4BI 依賴（ai4bi/duckdb/plotly）、
+以及進入點 `ai4bi.ui.app`；任何一項 FAIL 都會印出對應修法。
+
+### 常見地雷
+
+| 症狀 | 原因 | 解法 |
+|------|------|------|
+| engine 啟動後立刻退出 / 找不到 python | `start-dev.bat` 的 `set PYTHON=` 指向不存在的路徑 | 改成本機 3.11 的 `python.exe` 絕對路徑 |
+| 啟動 AI Report 報 `ModuleNotFoundError: ai4bi` | AI4BI 裝到了別支 Python（非 engine 用的那支） | 用步驟 4 同一支 python 重裝 |
+| `vendor/AI4BI` 是空資料夾 | clone 時沒帶 submodule | `git submodule update --init --recursive` |
+| AI Report 的自然語言/LLM 功能無反應 | 未設 `ANTHROPIC_API_KEY` | 設環境變數後重啟（不設則走非-LLM 模式） |
+| 更新 AI4BI 後沒生效 | — | 進 `vendor/AI4BI` 做 `git pull`（editable 即時生效）；新增相依套件時才需再跑步驟 4 |
+
+> 正式 release（PyInstaller `engine.exe`）需另把 AI4BI 套件納入打包，
+> 細節見 [`docs/AI4BI_INTEGRATION.md`](docs/AI4BI_INTEGRATION.md)。
+
 ## Implemented First Pass
 
 - Electron host starts and stops the Python FastAPI sidecar.
