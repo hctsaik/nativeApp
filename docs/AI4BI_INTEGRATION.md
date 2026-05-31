@@ -49,7 +49,7 @@ external GUI(桌面 exe)。這些都不適合「**一個完整的外部 Streamli
 
 ```
 start-dev.bat → Electron → FastAPI engine
-  → 選擇「AI 商業分析 (AI4BI)」(category=app)
+  → 選擇「📊 AI Report (AI4BI)」(category=app)
     → _start_app spawn 一次:streamlit run tools/bi_runner.py
       → runpy 執行 ai4bi/ui/app.py(其 __main__ 守衛觸發 main())
     → portal 以單一 iframe 內嵌
