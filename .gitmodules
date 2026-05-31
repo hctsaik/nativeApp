@@ -1,3 +1,6 @@
 [submodule "sidecar/python-engine/vendor/AI4BI"]
 	path = sidecar/python-engine/vendor/AI4BI
 	url = https://github.com/hctsaik/AI4BI.git
+[submodule "sidecar/python-engine/plugins/labeling"]
+	path = sidecar/python-engine/plugins/labeling
+	url = https://github.com/hctsaik/ANnoTation
