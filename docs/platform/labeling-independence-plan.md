@@ -77,11 +77,19 @@
   （`core/` + 5 個共用工具檔）、annotation UI 相依可匯入（缺則 FAIL）、AI 預標相依（缺則 WARN，基本標注不受影響）。
   → 這同時就是「host 提供的 `core` 契約是否相容」的安裝期檢查。
 
-### P3 — 物理搬遷成 submodule（需 owner 的 GitHub 操作，最後一步）
+### P3 — 物理搬遷成 submodule ✅ 已完成（2026-05-31）
 
-其餘機制都已就緒（契約測試、doctor、`requirements-labeling.txt`、submodule 工作流已由 AI4BI 驗證過），
-P3 是 push-button 收尾。**前置**：工作樹乾淨、`npm run test:python` 與 `npm test` 全綠、先開好空的
-`labeling` GitHub repo。以下保留完整 git 歷史（用 `git subtree split`）：
+labeling 已是 git submodule：**`https://github.com/hctsaik/ANnoTation`**，掛在
+`sidecar/python-engine/plugins/labeling`（與 AI4BI 並列於 `.gitmodules`）。歷史以
+`git subtree split` 保留後推到新 repo 的 `main`（commit f189e82）。驗證：`test:python` 717 passed、
+doctor Labeling 區段全 PASS、MCP golden path（影像標註 sheet「資料來源」分頁）渲染正常。
+備份分支 `backup/pre-labeling-submodule` 保留作安全網。
+
+**日後維護**：在 submodule 內 `git pull` 即更新 labeling，平台端不需改動（與 AI4BI 完全相同的工作流）。
+全新 clone：`git submodule update --init --recursive` 取得 labeling + AI4BI；
+`pip install -r plugins/labeling/requirements-labeling.txt` 補裝 annotation 相依。
+
+以下為當時實際執行的步驟（保留完整 git 歷史，供日後類似抽離參考）：
 
 ```powershell
 # 0) 安全網：先開備份分支
@@ -128,5 +136,5 @@ npm run test:python                                                     # 契約
 - **P1（可選打磨）：預設不做**。調查發現模組對 `core` 採延遲匯入（子程序頂層 sys.path 時序），
   動態 `spec_from_file_location` 是刻意健壯設計；改頂層 `core.X` 有破壞風險、對獨立性零增益
   （契約已由 P0 鎖住）。詳見 §3 P1 結論。
-- **P3（需 owner GitHub 操作）**：建 `labeling` repo、`plugins/labeling/` 掛 submodule。
-  其餘機制（submodule 工作流、doctor、相依清單、契約測試）皆已就緒，屬 push-button 收尾。
+- **P3 ✅**：labeling 已是 git submodule（`github.com/hctsaik/ANnoTation`），歷史保留、測試全綠、
+  MCP golden path 驗證 OK。**目標達成：labeling 現與 AI4BI 同樣可獨立維護（submodule `git pull`）。**
