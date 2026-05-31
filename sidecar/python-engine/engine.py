@@ -570,6 +570,10 @@ def _derive_category(tool_id: str) -> str:
         return "external"
     if tool_id.startswith("sheet-"):
         return "sheet"
+    # 'app-…' = a self-contained external Streamlit app embedded as a top-level
+    # tool (one runner, one iframe) — e.g. AI4BI vendored as a submodule.
+    if tool_id.startswith("app-"):
+        return "app"
     if tool_id.startswith("management-"):
         return "management"
     return "module"
@@ -737,6 +741,8 @@ class ToolProcessManager:
                 return self._start_external(tool)
             if _derive_category(tool.tool_id) == "sheet":
                 return self._start_sheet(tool)
+            if _derive_category(tool.tool_id) == "app":
+                return self._start_app(tool)
             return self._start_regular(tool)
 
     def _labelme_dino_exe(self) -> Path:
@@ -1000,7 +1006,8 @@ class ToolProcessManager:
                     "ready_file": str(self._external_ready_file) if self._external_ready_file else None,
                 }
             else:
-                status = {"active": True, "tool_id": self._tool_id, "category": "module", "run_id": self._run_id}
+                status = {"active": True, "tool_id": self._tool_id,
+                          "category": _derive_category(self._tool_id), "run_id": self._run_id}
         return {
             "ok": True,
             "sidecar_pid": os.getpid(),
@@ -1107,6 +1114,55 @@ class ToolProcessManager:
             output_url=f"http://127.0.0.1:{output_port}",
             input_port=input_port,
             output_port=output_port,
+            category=_derive_category(tool.tool_id),
+            run_id=run_id,
+        )
+
+    def _start_app(self, tool: ToolDefinition) -> ToolStartResponse:
+        """Launch a self-contained external Streamlit app in ONE iframe.
+
+        Unlike _start_regular (cv_framework input+output panes) or _start_sheet
+        (multi-tab), an 'app' tool (tool_id 'app-…') is a full external Streamlit
+        application — e.g. AI4BI, developed in its own repo and vendored as a
+        git submodule under vendor/, installed editable into the engine's Python.
+        We spawn its runner once and expose a single URL; the portal renders one
+        iframe. The app owns its own page config / layout, so we must NOT wrap it
+        in the cv_framework chrome.
+        """
+        result_file = self._log_dir / f"{tool.tool_id}_result.json"
+        result_file.unlink(missing_ok=True)
+
+        script = tool.script_path
+        if not script.exists():
+            raise FileNotFoundError(script)
+
+        port = find_free_port()
+        self._input_process = self._spawn(script, tool, port, "app")
+        self._tool_id = tool.tool_id
+
+        if not wait_for_port(port):
+            self.stop()
+            raise RuntimeError(f"Streamlit app for {tool.tool_id} did not become ready in time")
+
+        run_id = SQLiteManagementStore(self._db_path).start_tool_run(
+            tool.tool_id,
+            _derive_category(tool.tool_id),
+            "iframe",
+            actor=os.environ.get("USERNAME") or os.environ.get("USER") or "system",
+            input_port=port,
+            output_port=port,
+            pid=self._input_process.pid if self._input_process else None,
+        )
+        self._run_id = run_id
+        self._input_port = port
+        self._output_port = port
+        url = f"http://127.0.0.1:{port}"
+        return ToolStartResponse(
+            tool_id=tool.tool_id,
+            input_url=url,
+            output_url=url,
+            input_port=port,
+            output_port=port,
             category=_derive_category(tool.tool_id),
             run_id=run_id,
         )

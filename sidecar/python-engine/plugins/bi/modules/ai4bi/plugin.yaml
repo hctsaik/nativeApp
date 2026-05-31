@@ -1,0 +1,16 @@
+id: app-ai4bi
+name: AI 商業分析 (AI4BI)
+version: 1.0.0
+runner: bi
+category: app
+vendor: cimcore
+domain: analytics
+enabled: true
+slug: ai4bi
+author: system
+description: >
+  AI4BI 自助式商業分析 — 用自然語言探索資料、自動產生圖表與洞察。
+  以「單一畫面內嵌的完整 Streamlit 應用」方式啟動（runner: bi → tools/bi_runner.py，
+  app 類型工具，見 ToolProcessManager._start_app）。原始碼以 git submodule 置於
+  sidecar/python-engine/vendor/AI4BI，可獨立持續開發；更新只需在 submodule 內
+  git pull（editable 安裝即時生效），平台端不需改動。

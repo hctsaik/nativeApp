@@ -1,0 +1,11 @@
+id: bi
+vendor: cimcore
+domain: analytics
+version: 1.0.0
+depends_on:
+  - core
+provides:
+  modules:
+    current_path: plugins/bi/modules/
+  sheets:
+    current_path: plugins/bi/sheets/

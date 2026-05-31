@@ -54,10 +54,11 @@ function isAllowedOrigin(origin, allowedOrigins = []) {
 const CATEGORY_LABELS = {
   module:     "模組",
   sheet:      "頁面套件",
+  app:        "應用程式",
   management: "管理",
   external: "External",
 };
-const CATEGORY_ORDER = ["module", "sheet", "external", "management"];
+const CATEGORY_ORDER = ["module", "sheet", "app", "external", "management"];
 
 function groupTools(tools) {
   const groups = {};
@@ -193,8 +194,9 @@ function injectStreamlitErrorTranslator(iframeEl) {
 }
 
 
-// Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用
-const PORTAL_VISIBLE_CATEGORIES = ["sheet", "management"];
+// Module / External Tool 不出現在 Portal 主選單；透過 Sheet 組合使用。
+// 'app' = 內嵌的完整外部 Streamlit 應用（如 AI4BI），以頂層應用出現。
+const PORTAL_VISIBLE_CATEGORIES = ["sheet", "app", "management"];
 
 function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, onReload, reloading, role, roles, onSetRole }) {
   const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
@@ -319,6 +321,33 @@ function LeftPanel({ activeTab, onTabChange, inputUrl, outputUrl, isExecuting, i
         <div className="loading-overlay">
           <div className="loading-spinner" />
           <span>執行中…</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── App panel ─────────────────────────────────────────────
+// A self-contained external Streamlit app (category 'app', e.g. AI4BI):
+// one full-height iframe, no Input/Output split — the app owns its own layout.
+function AppPanel({ url, isStarting }) {
+  const iframeRef = useRef(null);
+  useEffect(() => {
+    const cleanup = injectStreamlitErrorTranslator(iframeRef.current);
+    return () => cleanup?.();
+  }, [url]);
+  return (
+    <div className="left-panel">
+      <div className="tab-content">
+        {url
+          ? <iframe ref={iframeRef} title="App" src={url} style={{ display: "block" }} />
+          : <div className="tab-empty">應用程式準備中，請按下 Start Tool</div>}
+      </div>
+      {isStarting && (
+        <div className="loading-overlay">
+          <div className="loading-spinner" />
+          <span>應用程式載入中，請稍候…</span>
         </div>
       )}
     </div>
@@ -1022,6 +1051,8 @@ function App() {
       <div className="workspace-body">
         {activeTool?.category === "external" ? (
           <ExternalToolPanel activeTool={activeTool} isStarting={isStarting} runtimeStatus={runtimeStatus} />
+        ) : activeTool?.category === "app" ? (
+          <AppPanel url={inputUrl} isStarting={isStarting} />
         ) : sheetTabs.length > 0 ? (
           <SheetLayout
             sheetTabs={sheetTabs}
