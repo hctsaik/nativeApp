@@ -1,1 +1,0 @@
-"""Annotation MCP server package."""
