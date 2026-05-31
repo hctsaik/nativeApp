@@ -72,10 +72,39 @@
   → 這同時就是「host 提供的 `core` 契約是否相容」的安裝期檢查。
 
 ### P3 — 物理搬遷成 submodule（需 owner 的 GitHub 操作，最後一步）
-1. 建 `labeling` repo，把 `plugins/labeling/` 內容移入。
-2. 在原位 `plugins/labeling/` 掛 git submodule（照搬 AI4BI 的 `.gitmodules` 模式）。
-3. `git submodule update --init` 即到位；`requirements-labeling.txt` 補裝 annotation 相依。
-4. 釘 labeling submodule 對應的 `core` 契約版本；保留契約測試當守門員。
+
+其餘機制都已就緒（契約測試、doctor、`requirements-labeling.txt`、submodule 工作流已由 AI4BI 驗證過），
+P3 是 push-button 收尾。**前置**：工作樹乾淨、`npm run test:python` 與 `npm test` 全綠、先開好空的
+`labeling` GitHub repo。以下保留完整 git 歷史（用 `git subtree split`）：
+
+```powershell
+# 0) 安全網：先開備份分支
+git switch -c backup/pre-labeling-extract
+
+# 1) 把 plugins/labeling 的歷史抽成獨立分支（保留 commit 歷史）
+git subtree split --prefix=sidecar/python-engine/plugins/labeling -b labeling-export
+
+# 2) 推到新 repo（先在 GitHub 建好空的 <labeling repo url>）
+git push <labeling repo url> labeling-export:main
+
+# 3) 回主分支，移除原目錄並改掛 submodule
+git switch feat/platform-restructure
+git rm -r sidecar/python-engine/plugins/labeling
+git commit -m "chore(labeling): replace in-tree plugin with submodule"
+git submodule add <labeling repo url> sidecar/python-engine/plugins/labeling
+git commit -m "chore(labeling): vendor labeling as git submodule"
+
+# 4) 驗證（與 AI4BI 同樣的關卡）
+git submodule update --init --recursive
+powershell -ExecutionPolicy Bypass -File scripts\win\verify-setup.ps1   # Labeling 區段須全 PASS
+npm run test:python                                                     # 契約測試 + 全套件須綠
+```
+
+完成後：日後維護 labeling 只需在 submodule 內 `git pull`；契約測試 + doctor 守住與 host `core` 的相容性。
+`requirements-labeling.txt` 隨 submodule 一起移動，安裝時 `pip install -r plugins/labeling/requirements-labeling.txt`。
+
+> 注意：`.gitmodules` 會多一筆 labeling 條目（與既有 AI4BI 並列）。釘 submodule commit = 釘 labeling
+> 對應的 `core` 契約版本，達成「可重現的 release」。
 
 ## 4. 風險與防護（如何「不改壞功能」）
 
