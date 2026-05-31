@@ -13,7 +13,7 @@
     "package:portable": "npm run package:portable -w apps/host-electron",
     "package:portable:x64": "npm run package:portable:x64 -w apps/host-electron",
     "test": "npm run test -w packages/shared-protocol && npm run test -w apps/host-electron",
-    "test:python": "python -m pytest sidecar/python-engine/tests/ -v"
+    "test:python": "python -m pytest sidecar/python-engine/tests sidecar/python-engine/plugins/labeling/tests -v"
   },
   "devDependencies": {
     "puppeteer": "^24.42.0"
