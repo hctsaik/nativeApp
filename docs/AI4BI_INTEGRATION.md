@@ -35,10 +35,12 @@ external GUI(桌面 exe)。這些都不適合「**一個完整的外部 Streamli
 | `engine.py` `start()` | category `app` → 新的 `_start_app` |
 | `engine.py` `_start_app()` | **只 spawn 一個** Streamlit 程序、回傳單一 URL(不走 input/output 雙畫面、不走分頁) |
 | `engine.py` `diagnostics()` | active tool 的 category 改用 `_derive_category`(正確回報 `app`) |
+| `engine.py` `/tools/active/status` | 新增 **app 分支**:app 只有單一程序(無 output pane),`output_alive` 改讀那唯一程序——否則落入「regular tool」分支會從未 spawn 的 `_output_process` 讀出「死亡」,portal poller 誤報「Output 程序已停止」 |
 | `apps/portal-react/src/main.jsx` | 新增 `AppPanel`(單一 iframe);`app` 加入可見類別/排序/標籤;render 分支 |
 | `tools/bi_runner.py`(新) | `runpy.run_module("ai4bi.ui.app", run_name="__main__")` 啟動 AI4BI |
 | `plugins/bi/`(新) | plugin manifest + `modules/ai4bi/plugin.yaml`(`id: app-ai4bi`、`runner: bi`) |
 | `tests/test_app_tool_type.py`(新) | 驗證 category 推導與 app-ai4bi 接線 |
+| `tests/test_api.py` | 回歸測試:app 工具的 status endpoint 回報單一程序存活(`output_alive=true`),防止假「Output 程序已停止」橫幅 |
 
 `runner: bi` 由 engine 的 runner map fallback(`f"{runner}_runner.py"`)對應到 `tools/bi_runner.py`,
 不需改 engine 的對照表。

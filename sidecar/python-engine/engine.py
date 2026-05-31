@@ -1787,6 +1787,29 @@ def create_app(
                 "sheet_tab_urls": tab_urls,
             }
 
+        # App tool: a single self-contained Streamlit process (see _start_app).
+        # Only _input_process exists (no output pane), so report its liveness for
+        # both input/output — mirroring the single-process 'external' branch above.
+        # Without this, the fall-through "Regular tool" branch reads output_alive
+        # from the never-spawned _output_process and falsely reports it dead.
+        if _derive_category(tool_id) == "app":
+            alive = (
+                manager._input_process is not None
+                and manager._input_process.poll() is None
+            )
+            in_port = manager._input_port
+            return {
+                "active": True,
+                "tool_id": tool_id,
+                "category": "app",
+                "input_alive": alive,
+                "output_alive": alive,
+                "result_mtime": -1,
+                "run_id": manager._run_id,
+                "input_url": f"http://127.0.0.1:{in_port}" if in_port else "",
+                "output_url": f"http://127.0.0.1:{in_port}" if in_port else "",
+            }
+
         # Regular tool
         input_alive = (
             manager._input_process is not None

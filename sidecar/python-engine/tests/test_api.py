@@ -237,6 +237,39 @@ def test_sheet_start_is_lazy_and_can_start_tab_on_demand(tmp_path: Path) -> None
     manager.stop()
 
 
+def test_app_tool_status_reports_single_process_alive(tmp_path: Path) -> None:
+    """An 'app' tool (e.g. AI4BI) runs ONE Streamlit process — _start_app sets
+    _input_process only, never _output_process. The status endpoint must report
+    output_alive from that single process, not from the never-spawned output
+    process; otherwise the portal poller shows a false 'Output 程序已停止' banner
+    even though the app is running fine. Regression for the AI4BI integration.
+    """
+    db_path = tmp_path / "data" / "tools.sqlite"
+    selected_paths = SelectedPathStore(tmp_path / "selected_paths.json")
+    registry = ToolRegistry(MockToolAdapter())
+    manager = ToolProcessManager(tmp_path / "logs", tmp_path / "selected_paths.json", db_path)
+    app = create_app(manager, registry, selected_paths, db_path)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    # Simulate a live app tool: single process, no output pane.
+    proc = MagicMock()
+    proc.poll.return_value = None  # alive
+    manager._tool_id = "app-ai4bi"
+    manager._input_process = proc
+    manager._output_process = None  # app tools never spawn one
+    manager._input_port = 59812
+    manager._run_id = "run-app"
+
+    status = client.get("/tools/active/status").json()
+    assert status["active"] is True
+    assert status["category"] == "app"
+    assert status["input_alive"] is True
+    assert status["output_alive"] is True  # NOT false despite _output_process is None
+    assert status["input_url"] == status["output_url"] == "http://127.0.0.1:59812"
+
+    manager.stop()
+
+
 # ---------------------------------------------------------------------------
 # Management DB path
 # ---------------------------------------------------------------------------
