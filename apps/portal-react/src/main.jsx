@@ -198,7 +198,7 @@ function injectStreamlitErrorTranslator(iframeEl) {
 // 'app' = 內嵌的完整外部 Streamlit 應用（如 AI4BI），以頂層應用出現。
 const PORTAL_VISIBLE_CATEGORIES = ["sheet", "app", "management"];
 
-function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, onReload, reloading, role, roles, onSetRole }) {
+function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onStop, status, sidecarDown, devMode, role, roles, onSetRole }) {
   const visibleOrder = CATEGORY_ORDER.filter(c => PORTAL_VISIBLE_CATEGORIES.includes(c));
 
   return (
@@ -249,16 +249,6 @@ function TopBar({ tools, selectedToolId, onToolChange, activeTool, onStart, onSt
             })()}
           </select>
         </div>
-        {devMode && onReload && (
-          <button
-            onClick={onReload}
-            disabled={sidecarDown || reloading}
-            title="重新掃描 plugin.yaml / sheet YAML（免重啟整個 app）；若有工具執行中會一併重啟以套用改動"
-          >
-            <RefreshCw size={17} className={reloading ? "spin" : undefined} />
-            重新載入工具
-          </button>
-        )}
         {activeTool ? (
           <button onClick={onStop} className="btn-danger">
             <Square size={17} />
@@ -544,7 +534,6 @@ function App() {
   const [status, setStatus] = useState("Ready");
   const [sidecarDown, setSidecarDown] = useState(false);
   const [sidecarRestarting, setSidecarRestarting] = useState(false);
-  const [reloading, setReloading] = useState(false);
   const [role, setRole] = useState("admin");
   const [roles, setRoles] = useState(["admin", "operator", "viewer"]);
   const [toolError, setToolError] = useState(null);
@@ -935,49 +924,6 @@ function App() {
     }
   }
 
-  async function handleReload() {
-    // DEV hot-reload: re-scan plugin.yaml / sheet YAML into the catalog, then
-    // refresh the tool list — no full app restart. Pairs with engine POST /reload.
-    if (!config?.sidecarControlUrl) {
-      setStatus("無法熱載：缺 sidecar 控制位址");
-      return;
-    }
-    setReloading(true);
-    setStatus("重新載入工具中…");
-    try {
-      const res = await fetch(`${config.sidecarControlUrl}/reload`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      const items = await nativeApi.listTools().catch(() => []);
-      if (items.length) {
-        setTools(items);
-        if (!items.find(t => t.tool_id === selectedToolId)) {
-          const first = items.find(t => t.category === "sheet") ?? items[0];
-          if (first?.tool_id) setSelectedToolId(first.tool_id);
-        }
-      }
-      const added = (data.added ?? []).length;
-      const missing = data.missing_modules ?? [];
-      // If a tool is currently running, restart it so code/YAML changes take
-      // effect in the live subprocess (catalog reload alone keeps the old code).
-      const activeId = activeTool?.tool_id;
-      if (activeId && (!items.length || items.find(t => t.tool_id === activeId))) {
-        try {
-          await nativeApi.stopTool();
-          await handleStart(activeId);
-        } catch (e) { cimLog("warn", `reload restart active tool failed: ${e.message}`); }
-      }
-      let msg = added ? `已載入 ${added} 個新工具` : "工具已是最新";
-      if (missing.length) msg += `；有 sheet 缺模組：${missing.join(", ")}`;
-      setStatus(msg);
-      cimLog("info", `reload: added=${JSON.stringify(data.added ?? [])} missing=${JSON.stringify(missing)} total=${data.total ?? "?"}`);
-    } catch (err) {
-      cimLog("error", `reload failed: ${err.message}`);
-      setStatus(`熱載失敗：${err.message}`);
-    } finally {
-      setReloading(false);
-    }
-  }
-
   async function handleSetRole(r) {
     // DEV role switch so an admin can see RBAC take effect (operator/viewer see
     // fewer tools / cannot execute). PROD identity comes from SSO/IdP.
@@ -1039,8 +985,6 @@ function App() {
         activeTool={activeTool}
         onStart={handleStart}
         onStop={handleStop}
-        onReload={handleReload}
-        reloading={reloading}
         status={status}
         sidecarDown={sidecarDown}
         devMode={config?.devMode ?? true}
