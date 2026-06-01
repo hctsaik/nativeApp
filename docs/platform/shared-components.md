@@ -11,7 +11,9 @@
 | 宣告式 input 表單（no-code，免寫 `*_input.py`）| `core.forms` | plugin.yaml 加 `form:` 欄位清單（含 date/time）；框架自動渲染。範例 `scripts/module_007/`。`from core.forms import render` | `core/forms.py` | ✅ 已在 core |
 | 宣告式 output（no-code，免寫 `*_output.py`）| `core.output` | plugin.yaml 加 `output:` 區塊（metric/text/table/list/json…）；`from core.output import render` | `core/output.py` | ✅ 已在 core |
 | 啟動外部 GUI 工具（Label tool 模式，零 code）| `core.external_gui` | plugin.yaml 宣告 `external_gui:`（exe 來源/args/collect.parse）；框架渲染啟動鈕、回收輸出、啟動前查 RBAC。`from core.external_gui import render_launcher` | `core/external_gui.py` | ✅ 已在 core |
-| 建工具/sheet/plugin/connector 骨架（CLI）| `tools/scaffold.py` | `python tools/scaffold.py module\|sheet\|plugin\|connector [--external-gui] [--create-stubs]`；id 可省略自動配號 | `tools/scaffold.py` | — |
+| 建工具/sheet/plugin/connector 骨架（CLI）| `tools/scaffold.py` | `python tools/scaffold.py module\|sheet\|plugin\|connector [--external-gui] [--requires a,b] [--create-stubs]`；id 可省略自動配號 | `tools/scaffold.py` | — |
+| 工具自帶 Python 相依（per-tool venv，免汙染全域）| `core.tool_deps` | plugin.yaml 加 `requires: [pkg>=x]`；engine `_make_env` 自動建隔離 venv 安裝並注入子程序 PYTHONPATH。frozen 用 `CIM_PYTHON`、離線用 `CIM_WHEELHOUSE`。見 [`per-tool-dependencies.md`](per-tool-dependencies.md) | `core/tool_deps.py` | ✅ 已在 core |
+| Fleet 分發（把已核准工具版本派送到 N 台裝置）| `core.distribution` | `ToolDistributionSource`（`LocalFsSource`/`HttpRegistrySource`）+ 簽章 `make_artifact`/`verify_artifact`；registry-server（`tools/registry_server.py`）+ 發布 CLI（`tools/fleet_publish.py`）+ `start-fleet.bat` 單機模擬。env-gated `CIM_DISTRIBUTION_SOURCE`。見 [`fleet-distribution.md`](fleet-distribution.md) | `core/distribution/` | ✅ 已在 core |
 | 熱載新增/改動的工具（免重啟）| engine `/reload` | `POST /reload` → `rescan()` 重掃 plugin.yaml+sheet YAML+connector autodiscover；portal 有「重新載入工具」鈕 | `engine.py`（`rescan`）| — |
 | 找模組資料夾（scripts/ 或 plugins/*/modules/）| `find_module_folder` | `from plugin_loader import find_module_folder, module_yaml_paths` | `plugin_loader.py` | core/plugins |
 | 寫 log | `get_logger` | `from log_utils import get_logger; log = get_logger("module_012")` | `tools/log_utils.py` | `core/logging` |

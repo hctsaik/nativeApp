@@ -48,6 +48,30 @@ def test_scaffold_full_split_tool_module(tmp_path):
     assert pf.ok, pf.issues
 
 
+def test_scaffold_requires_emits_active_block(tmp_path):
+    """--requires → an active per-tool-deps `requires:` block (#7); yaml still parses."""
+    import yaml  # noqa: PLC0415
+
+    folder = scaffold.scaffold_module("047", "需相依工具", "cimcore", "cv", "system",
+                                      full=False, base=tmp_path,
+                                      requires=["shapely>=2.0", "scikit-image"])
+    meta = yaml.safe_load((folder / "plugin.yaml").read_text(encoding="utf-8"))
+    assert meta["requires"] == ["shapely>=2.0", "scikit-image"]
+    # still a valid runnable form-first module
+    pf = module_preflight(tmp_path, "module_047")
+    assert pf.ok, pf.issues
+
+
+def test_scaffold_without_requires_has_no_active_requires(tmp_path):
+    """No --requires → only a commented example, so `requires` is absent (zero cost)."""
+    import yaml  # noqa: PLC0415
+
+    folder = scaffold.scaffold_module("048", "無相依工具", "cimcore", "cv", "system",
+                                      full=False, base=tmp_path)
+    meta = yaml.safe_load((folder / "plugin.yaml").read_text(encoding="utf-8"))
+    assert "requires" not in meta
+
+
 def test_scaffold_rejects_bad_id(tmp_path):
     with pytest.raises(SystemExit):
         scaffold.scaffold_module("9", "x", "v", "d", "a", full=False, base=tmp_path)

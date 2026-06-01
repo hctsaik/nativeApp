@@ -646,6 +646,26 @@ def _terminate_process(process: subprocess.Popen, label: str) -> None:
         process.wait(timeout=5)
 
 
+def _read_tool_requires(module_id: str) -> list[str]:
+    """Read a module's declared Python dependencies from its plugin.yaml `requires:`.
+
+    Powers per-tool dependencies (#7). Returns [] for anything without a module
+    folder / plugin.yaml (sheets, management, external tools) — those incur zero
+    cost. Never raises: a malformed yaml just yields no extra deps.
+    See docs/platform/per-tool-dependencies.md.
+    """
+    try:
+        import yaml  # noqa: PLC0415
+        from plugin_loader import find_module_folder  # noqa: PLC0415
+
+        yaml_path = find_module_folder(module_id) / "plugin.yaml"
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        reqs = data.get("requires") or []
+        return [str(r) for r in reqs if r and str(r).strip()]
+    except Exception:
+        return []
+
+
 class ToolProcessManager:
     def __init__(self, log_dir: Path, selected_paths_file: Path, db_path: Path) -> None:
         self._log_dir = log_dir.resolve()
@@ -693,6 +713,33 @@ class ToolProcessManager:
         if plugin_id:
             env["CIM_PLUGIN_ID"] = plugin_id
         env["CIM_TOOLS_DB"] = str(self._db_path)
+
+        # Per-tool dependencies (#7): if the module declares `requires:` in its
+        # plugin.yaml, ensure an isolated per-tool venv has them and prepend its
+        # site-packages onto the subprocess PYTHONPATH (so a tool's own pinned
+        # versions win). Modules with no requires return instantly (no venv).
+        # Dependency handling never blocks launch — on failure we log and start
+        # the subprocess without the extra path. For a sheet tab, plugin_id is
+        # the real module being spawned, so key deps on it (not the sheet id).
+        deps_module = plugin_id or tool.tool_id
+        try:
+            requires = _read_tool_requires(deps_module)
+            if requires:
+                from core.tool_deps import ensure_tool_deps  # noqa: PLC0415
+
+                dep = ensure_tool_deps(deps_module, requires)
+                if dep.ok and dep.site_packages:
+                    existing = env.get("PYTHONPATH", "")
+                    extra = os.pathsep.join(dep.site_packages)
+                    env["PYTHONPATH"] = extra + (os.pathsep + existing if existing else "")
+                    logging.info("Per-tool deps ready for %s: %s",
+                                 deps_module, dep.installed or "(cached)")
+                elif not dep.ok:
+                    logging.warning("Per-tool deps for %s unavailable: %s",
+                                    deps_module, dep.message)
+        except Exception as exc:  # never block tool launch on dep handling
+            logging.warning("Per-tool dependency handling skipped for %s: %s",
+                            deps_module, exc)
         return env
 
     def _spawn(self, script: Path, tool: ToolDefinition, port: int, label: str,
@@ -1575,6 +1622,12 @@ def create_app(
                 result["connectors"] = autodiscover(force=True)  # re-scan for newly dropped connectors
             except Exception as exc:  # noqa: BLE001
                 logging.warning("reload connector autodiscover skipped: %s", exc)
+            # Fleet distribution (#1): also re-pull approved artifacts so a device
+            # picks up newly-published tools on reload (no restart). No-op unless
+            # CIM_DISTRIBUTION_SOURCE is set.
+            _dist_source = os.environ.get("CIM_DISTRIBUTION_SOURCE", "").strip()
+            if _dist_source:
+                result["distribution"] = pull_distribution_into_catalog(db_path, _dist_source)
             return {"status": "ok", **result}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1968,6 +2021,79 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _distribution_source_from_spec(spec: str):
+    """Build a ToolDistributionSource from a CIM_DISTRIBUTION_SOURCE spec.
+
+    Accepts ``local:<dir>``, a bare path (→ local), or ``http(s)://<host>`` (→
+    the registry server). See docs/platform/fleet-distribution.md.
+    """
+    from core.distribution import HttpRegistrySource, LocalFsSource, get_secret  # noqa: PLC0415
+
+    secret = get_secret()
+    if spec.startswith(("http://", "https://")):
+        return HttpRegistrySource(spec, secret=secret)
+    if spec.startswith("local:"):
+        spec = spec[len("local:"):]
+    return LocalFsSource(Path(spec).expanduser(), secret=secret)
+
+
+def _artifact_tool_name(artifact) -> str:
+    """Best-effort display name from an artifact's bundled plugin.yaml."""
+    try:
+        import yaml  # noqa: PLC0415
+
+        meta = yaml.safe_load(artifact.content.get("plugin.yaml", "")) or {}
+        return str(meta.get("name") or artifact.tool_id)
+    except Exception:
+        return artifact.tool_id
+
+
+def pull_distribution_into_catalog(db_path: Path, source_spec: str,
+                                   channel: str = "prod") -> dict:
+    """Fleet distribution (#1): pull centrally-approved tool artifacts from a
+    distribution source into THIS device's local catalog.
+
+    Each ``fetch`` verifies the artifact signature, so tampered/unsigned code is
+    rejected before it can be published locally. env-gated by
+    ``CIM_DISTRIBUTION_SOURCE`` (a no-op when unset), so default single-machine
+    behaviour is unchanged. Never raises — a broken source or a single bad
+    artifact must not block engine startup. Returns a small report dict.
+    See docs/platform/fleet-distribution.md.
+    """
+    store = SQLiteManagementStore(db_path)
+    pulled: list[str] = []
+    skipped: list[str] = []
+    try:
+        source = _distribution_source_from_spec(source_spec)
+        metas = source.list_artifacts(channel)
+    except Exception as exc:  # source unreachable / misconfigured
+        logging.warning("Distribution source unavailable (%s): %s", source_spec, exc)
+        return {"pulled": pulled, "skipped": skipped, "error": str(exc)}
+
+    for meta in metas:
+        ref = f"{meta.tool_id}@{meta.version}"
+        try:
+            artifact = source.fetch(meta.tool_id, meta.version)  # verifies signature
+            content_json = json.dumps(artifact.content, ensure_ascii=False)
+            store.publish_tool_snapshot(
+                artifact.tool_id,
+                _artifact_tool_name(artifact),
+                artifact.version,
+                content_json,
+                changelog=f"distribution:{channel}",
+                author=artifact.author or "registry",
+            )
+            pulled.append(ref)
+        except Exception as exc:  # bad signature / write error — skip, don't abort
+            logging.warning("Skip distribution artifact %s: %s", ref, exc)
+            skipped.append(ref)
+
+    if pulled:
+        logging.info("Pulled %d tool(s) from %s into catalog: %s",
+                     len(pulled), source_spec, pulled)
+    return {"pulled": pulled, "skipped": skipped}
+
+
 def main() -> None:
     args = parse_args()
     if args.run_streamlit_script:
@@ -1985,6 +2111,12 @@ def main() -> None:
     os.environ["CIM_TOOLS_DB"] = str(db_path)
     selected_paths = SelectedPathStore(args.log_dir / "selected_paths.json")
     registry = ToolRegistry(SQLiteToolAdapter(db_path))
+    # Fleet distribution (#1): when CIM_DISTRIBUTION_SOURCE is set, pull
+    # centrally-approved (signed) tool artifacts into this device's catalog.
+    # Unset → no-op, so single-machine behaviour is unchanged.
+    _dist_source = os.environ.get("CIM_DISTRIBUTION_SOURCE", "").strip()
+    if _dist_source:
+        pull_distribution_into_catalog(db_path, _dist_source)
     manager = ToolProcessManager(args.log_dir, args.log_dir / "selected_paths.json", db_path)
     app = create_app(manager, registry, selected_paths, db_path, args.log_dir)
     uvicorn.run(app, host="127.0.0.1", port=args.control_port, log_level="info")

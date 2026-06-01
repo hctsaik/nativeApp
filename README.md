@@ -258,6 +258,12 @@ python sidecar/python-engine/tools/scaffold.py connector my-eqp                 
 `external_gui:`（啟動外部桌面程式 → 作業 → 關閉自動回收輸出，框架處理 env 淨化 / WDAC workaround / 單例鎖 / RBAC 檢查）。
 範例：`sidecar/python-engine/scripts/module_007/`（完全零 Streamlit code）。
 
+**工具自帶相依（per-tool deps）**：工具需要額外 Python 套件時，在 `plugin.yaml` 加
+`requires: [shapely>=2.0, ...]`（或 `scaffold module --requires shapely>=2.0,scikit-image`）。
+engine 啟動該工具時自動建**隔離 per-tool venv** 安裝並注入 PYTHONPATH，不汙染全域、免改
+`requirements.txt`。frozen 打包需設 `CIM_PYTHON`；離線工廠用 `CIM_WHEELHOUSE`。
+詳見 [`docs/platform/per-tool-dependencies.md`](docs/platform/per-tool-dependencies.md)。
+
 開發迴圈：改 plugin.yaml / sheet YAML → portal「重新載入工具」鈕（或 `POST /reload`）即重掃出現，執行中的工具會自動重啟套用改動。
 
 ### 替代：使用 /new-split-tool Skill（Claude Code 環境）
@@ -398,6 +404,33 @@ The JavaScript test suite covers:
 - `MessageTypes` — constants and immutability
 - `createMessage` — source, type, timestamp, payload defaults, payload passthrough
 - `isProtocolMessage` — valid/invalid messages, all edge cases
+
+> Note: the repo's `python` resolves to `.venv-xanylabeling` (no pytest/fastapi).
+> To run pytest directly use `py -3.11 -m pytest sidecar/python-engine/tests/`.
+
+## Fleet Distribution (single-machine simulation)
+
+A "fleet" is N state-isolated engine instances (each with its own `--log-dir` /
+`tools.sqlite`) all subscribing to one registry. `start-fleet.bat` runs one
+registry plus two devices on this machine so the whole publish→pull flow can be
+exercised without any cloud infrastructure:
+
+```powershell
+start-fleet.bat
+# publish a tool to the whole fleet (signs the snapshot, POSTs to the registry):
+py -3.11 sidecar\python-engine\tools\fleet_publish.py `
+    sidecar\python-engine\scripts\module_007 `
+    --registry http://127.0.0.1:9000 --channel prod
+# each device pulls it (no restart):
+#   POST http://127.0.0.1:8100/reload   and   http://127.0.0.1:8101/reload
+```
+
+Each device verifies the artifact signature on fetch, so tampered/unsigned code
+is rejected before it can be published locally. Enabled per device by
+`CIM_DISTRIBUTION_SOURCE` (unset = unchanged single-machine behaviour). The HMAC
+shared-secret signing is an MVP; production should set a real
+`CIM_DISTRIBUTION_SECRET` and upgrade to Ed25519. See
+[`docs/platform/fleet-distribution.md`](docs/platform/fleet-distribution.md).
 
 ## Verification Notes
 

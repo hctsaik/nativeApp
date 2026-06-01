@@ -41,6 +41,7 @@ description: >
   {name}（no-code form-first）：input 用 form: 宣告、output 用 output: 宣告，
   只需在 {mid}_process.py 寫純運算邏輯（無 Streamlit）。
 
+{requires_block}
 # 宣告式 input（免寫 *_input.py）
 form:
   - {{ key: text, type: text, label: 輸入文字, default: "" }}
@@ -80,7 +81,7 @@ enabled: true
 slug: {slug}
 author: {author}
 description: {name}
-"""
+{requires_block}"""
 
 _FULL_INPUT = '''\
 """Input layer for module_{mid}."""
@@ -155,6 +156,7 @@ description: >
   {name}（外部 GUI 啟動工具）：啟動一個桌面程式（像 Label tool 啟動 X-AnyLabeling），
   完成後關閉視窗即可。本模組無 input/process/output 程式碼，全靠下方 external_gui: 宣告。
 
+{requires_block}
 # 先用 form: 收集要傳給外部程式的參數（可選）
 form:
   - {{ key: input_dir,  type: text, label: 輸入資料夾, default: "" }}
@@ -296,9 +298,26 @@ def next_free_module_id(base: Path) -> str:
     return f"{n:03d}"
 
 
+def _requires_block(requires: list[str] | None) -> str:
+    """Render the plugin.yaml `requires:` block for per-tool dependencies (#7).
+
+    With deps → an active block; without → a commented example so engineers
+    discover the feature. See docs/platform/per-tool-dependencies.md.
+    """
+    if requires:
+        lines = "\n".join(f"  - {r}" for r in requires)
+        return ("# 本工具自帶的 Python 相依（框架自動建 per-tool venv 安裝並注入）\n"
+                f"requires:\n{lines}\n")
+    return ("# 本工具自帶的 Python 相依（取消註解即啟用 per-tool venv 安裝；\n"
+            "# 見 docs/platform/per-tool-dependencies.md）\n"
+            "# requires:\n"
+            "#   - shapely>=2.0\n")
+
+
 def scaffold_module(mid: str | None, name: str, vendor: str, domain: str,
                     author: str, full: bool, base: Path,
-                    external_gui: bool = False) -> Path:
+                    external_gui: bool = False,
+                    requires: list[str] | None = None) -> Path:
     if mid is None:
         mid = next_free_module_id(base)
     mid = mid.removeprefix("module_")
@@ -310,7 +329,8 @@ def scaffold_module(mid: str | None, name: str, vendor: str, domain: str,
     folder.mkdir(parents=True)
     ctx = dict(mid=mid, name=name, vendor=vendor, domain=domain,
                author=author, slug=name.lower().replace(" ", "-"),
-               env_var=f"{(name or 'MYTOOL').upper().replace(' ', '_')}_EXE")
+               env_var=f"{(name or 'MYTOOL').upper().replace(' ', '_')}_EXE",
+               requires_block=_requires_block(requires))
     (folder / "__init__.py").write_text("", encoding="utf-8")
     if external_gui:
         (folder / "plugin.yaml").write_text(_EXTGUI_PLUGIN_YAML.format(**ctx), encoding="utf-8")
@@ -421,6 +441,8 @@ def main(argv: list[str] | None = None) -> int:
     pm.add_argument("--full", action="store_true", help="hand-written input/output (default: no-code form-first)")
     pm.add_argument("--external-gui", dest="external_gui", action="store_true",
                     help="external-GUI launcher tool (Label-tool pattern; no code)")
+    pm.add_argument("--requires", default="",
+                    help="comma-separated Python deps for a per-tool venv, e.g. 'shapely>=2.0,scikit-image'")
     pm.add_argument("--dest", default=str(ENGINE_DIR / "scripts"))
 
     psh = sub.add_parser("sheet", help="generate a multi-tab workflow sheet YAML")
@@ -445,9 +467,10 @@ def main(argv: list[str] | None = None) -> int:
     _reload_hint = ("   熱載：呼叫 POST http://127.0.0.1:<engine_port>/reload "
                     "（或重啟 start-dev）即會出現，免重啟整個 app。")
     if args.cmd == "module":
+        requires = [r.strip() for r in args.requires.split(",") if r.strip()]
         folder = scaffold_module(args.id, args.name, args.vendor, args.domain,
                                  args.author, args.full, Path(args.dest),
-                                 external_gui=args.external_gui)
+                                 external_gui=args.external_gui, requires=requires)
         kind = ("external-GUI 啟動工具" if args.external_gui
                 else "full split-tool" if args.full else "no-code form-first")
         print(f"✅ 已建立 {kind} 模組：{folder}")
