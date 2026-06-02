@@ -1,0 +1,15 @@
+sheet_id: edge-analysis
+name: 邊緣品質分析（套件）
+description: 整合邊框生成、邊緣完整度偵測與歷史查詢的邊緣品質分析工作流
+enabled_dev: true
+enabled_prod: true
+tabs:
+  - order: 0
+    module_id: module_003
+    label: "影像來源"
+  - order: 1
+    module_id: module_004
+    label: "偵測分析"
+  - order: 2
+    module_id: module_005
+    label: "歷史查詢"

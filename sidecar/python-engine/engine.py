@@ -371,8 +371,6 @@ class SQLiteToolAdapter(ToolAdapter):
             [
                 ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
                  "1.0.0", None, "seed", "system", None, 1),
-                ("sheet-共用標註功能_-_套件", "共用標註功能 - 套件", "sheet_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
                 ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
                  "1.0.0", None, "seed", "system", None, 1),
                 ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
@@ -391,10 +389,17 @@ class SQLiteToolAdapter(ToolAdapter):
             ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
              "sheet-annotation_workflow", "sheet-iwsc-annotation"),
         )
+        # Remove the orphaned garbage sheet seed: a Chinese tool_id auto-derived
+        # from a test sheet name ("共用標註功能 - 套件") that never had a backing
+        # sheet definition (no YAML, no sheet_tabs). It appeared in the catalog
+        # but failed on launch with the cryptic "Missing CIM_SHEET_ID or
+        # CIM_PLUGIN_ID" (orphan sheet -> _start_regular without a plugin_id).
+        # Idempotent cleanup so existing installs lose it too.
+        connection.execute("DELETE FROM tools WHERE tool_id = 'sheet-共用標註功能_-_套件'")
         # Ensure all static-seed active tools are prod-enabled
         connection.execute(
-            "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
-            ("sheet-edge-analysis", "sheet-共用標註功能_-_套件", "sheet-annotation",
+            "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?)",
+            ("sheet-edge-analysis", "sheet-annotation",
              "management-center", "labelme-dino", "sheet-annotation"),
         )
         # Rename display name for existing installs
@@ -1335,7 +1340,22 @@ class ToolProcessManager:
         sheet_id = tool.tool_id[len("sheet-"):]
         tabs = self._get_sheet_tabs(sheet_id)
         if not tabs:
-            return self._start_regular(tool)
+            # Orphaned sheet: a "sheet-*" tool row with no sheet definition / tabs
+            # (its sheets/*.yaml is missing or its modules aren't registered).
+            # Previously this silently fell back to _start_regular, which launched
+            # sheet_runner.py WITHOUT a plugin_id -> the cryptic, hard-to-diagnose
+            # "Missing CIM_SHEET_ID or CIM_PLUGIN_ID". Fail loudly instead, with a
+            # greppable [CIM-PREFLIGHT] marker and an actionable message (surfaces
+            # to the portal as HTTP 500 via the start_tool handler).
+            msg = (
+                f"Sheet '{sheet_id}' has no tabs -- its definition is missing, so "
+                f"tool '{tool.tool_id}' is an orphan. Add "
+                f"sidecar/python-engine/sheets/{sheet_id}.yaml (with tabs whose "
+                f"module_id are registered), or remove the tool. "
+                f"(孤兒 sheet：缺對應的 sheet YAML 定義或模組未註冊)"
+            )
+            logging.error("[CIM-PREFLIGHT] %s", msg)
+            raise RuntimeError(msg)
 
         input_script, output_script = _split_scripts(tool)
         if not input_script.exists():
