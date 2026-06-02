@@ -4,6 +4,10 @@ echo [FLEET] Single-machine fleet simulation: 1 registry + 2 devices.
 echo [FLEET] Each device is a state-isolated engine (own --log-dir / tools.sqlite)
 echo [FLEET] all subscribing to one registry via CIM_DISTRIBUTION_SOURCE.
 
+rem Preflight: abort with an actionable message if git submodules are missing (see scripts\win\preflight-submodules.bat)
+call "%~dp0scripts\win\preflight-submodules.bat"
+if errorlevel 1 exit /b 1
+
 setlocal
 set PYTHON=C:\Users\hctsa\AppData\Local\Python\pythoncore-3.11-64\python.exe
 set ENGINE_DIR=%~dp0sidecar\python-engine

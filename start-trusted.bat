@@ -1,6 +1,10 @@
 @echo off
 setlocal
 
+rem Preflight: abort with an actionable message if git submodules are missing (see scripts\win\preflight-submodules.bat)
+call "%~dp0scripts\win\preflight-submodules.bat"
+if errorlevel 1 exit /b 1
+
 rem Starts CIM with an Electron executable from an allow-listed/trusted path.
 rem Usage:
 rem   start-trusted.bat dev

@@ -21,6 +21,18 @@ packages/
 
 ## Development
 
+> ⚠️ **不要用 GitHub「Download ZIP」取得本專案。** 影像標註（Labeling）與 AI Report
+> (AI4BI) 以 git **submodule** 掛載；ZIP / 淺 clone **不含** submodule 內容，會讓這些工具
+> 從清單消失、且 app 無法正常啟動。務必用 `git clone --recurse-submodules`。
+
+Clone **with submodules** (Labeling + AI4BI live in git submodules):
+
+```bash
+git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git
+# already cloned without submodules? run this at the repo root:
+git submodule update --init --recursive
+```
+
 Install JavaScript dependencies:
 
 ```bash
@@ -114,7 +126,8 @@ engine 依賴（fastapi/streamlit/pandas）、AI4BI 依賴（ai4bi/duckdb/plotly
 |------|------|------|
 | engine 啟動後立刻退出 / 找不到 python | `start-dev.bat` 的 `set PYTHON=` 指向不存在的路徑 | 改成本機 3.11 的 `python.exe` 絕對路徑 |
 | 啟動 AI Report 報 `ModuleNotFoundError: ai4bi` | AI4BI 裝到了別支 Python（非 engine 用的那支） | 用步驟 4 同一支 python 重裝 |
-| `vendor/AI4BI` 是空資料夾 | clone 時沒帶 submodule | `git submodule update --init --recursive` |
+| 清單缺「影像標註」、或啟動印出 `[CIM-PREFLIGHT]` | submodule 未初始化（多半用了 ZIP 下載或 clone 沒帶 submodule） | 在專案根目錄 `git submodule update --init --recursive`；start-*.bat 啟動前會自動檢查並擋下 |
+| `vendor/AI4BI` 是空資料夾、AI Report 點了壞 | clone 時沒帶 submodule | `git submodule update --init --recursive` |
 | AI Report 的自然語言/LLM 功能無反應 | 未設 `ANTHROPIC_API_KEY` | 設環境變數後重啟（不設則走非-LLM 模式） |
 | 更新 AI4BI 後沒生效 | — | 進 `vendor/AI4BI` 做 `git pull`（editable 即時生效）；新增相依套件時才需再跑步驟 4 |
 

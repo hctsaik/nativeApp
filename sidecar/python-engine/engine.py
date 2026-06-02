@@ -50,6 +50,79 @@ def resolve_tools_db_path(log_dir: Path | None = None) -> Path:
     return (ROOT_DIR / "config" / "tools.sqlite").resolve()
 
 
+# Sentinel files that only exist once each git submodule has been checked out.
+# Kept in sync with scripts/win/verify-setup.ps1 and preflight-submodules.bat.
+# A missing sentinel almost always means the project was obtained via GitHub
+# "Download ZIP" or cloned without --recurse-submodules (neither contains
+# submodule content). When that happens the plugin/sheet scans (which glob the
+# submodule dirs) silently match nothing, so tools vanish from the catalog with
+# NO error — these helpers turn that silent failure into a loud, pasteable one.
+_SUBMODULE_SENTINELS = (
+    {
+        "id": "labeling",
+        "name": "影像標註 (Labeling)",
+        "submodule": "plugins/labeling",
+        "repo": "ANnoTation",
+        "sentinel": ROOT_DIR / "plugins" / "labeling" / "plugin.manifest.yaml",
+    },
+    {
+        "id": "ai4bi",
+        "name": "AI Report (AI4BI)",
+        "submodule": "vendor/AI4BI",
+        "repo": "AI4BI",
+        "sentinel": ROOT_DIR / "vendor" / "AI4BI" / "ai4bi" / "ui" / "app.py",
+    },
+)
+
+
+def check_submodules() -> list[dict]:
+    """Return descriptors for git submodules whose content is missing.
+
+    Empty list == all good. Each entry names the broken feature, where it should
+    live and how to fix it, so the result is useful both for logging and for the
+    /diagnostics endpoint (portal banner). Skipped in frozen/packaged builds,
+    where submodule content is bundled differently and these paths don't apply.
+    """
+    if getattr(sys, "frozen", False):
+        return []
+    missing: list[dict] = []
+    for sm in _SUBMODULE_SENTINELS:
+        if not sm["sentinel"].exists():
+            missing.append({
+                "id": sm["id"],
+                "name": sm["name"],
+                "submodule": sm["submodule"],
+                "repo": sm["repo"],
+                "fix": "git submodule update --init --recursive",
+            })
+    return missing
+
+
+def preflight_submodules() -> list[dict]:
+    """Log a loud, greppable, actionable error when submodule content is missing.
+
+    Deliberately does NOT exit: the engine runs as an Electron-managed sidecar, so
+    a hard exit would trigger main.js's crash→auto-restart loop. Instead we keep
+    the engine alive (the app still partially works) and leave a clear trail in
+    engine.log + /diagnostics. Grep [CIM-PREFLIGHT] to find / paste it to an AI.
+    """
+    missing = check_submodules()
+    if not missing:
+        return missing
+    names = ", ".join(m["name"] for m in missing)
+    logging.error("[CIM-PREFLIGHT] git submodule 未初始化，缺少：%s", names)
+    logging.error("[CIM-PREFLIGHT] 症狀：工作流程清單會缺少這些項目，或點了無法啟動。")
+    logging.error("[CIM-PREFLIGHT] 最可能原因：用 GitHub「Download ZIP」下載，或 clone 沒加 "
+                  "--recurse-submodules（ZIP 不含 submodule 內容）。")
+    for m in missing:
+        logging.error("[CIM-PREFLIGHT]   - %s ← submodule %s（repo: %s）",
+                      m["name"], m["submodule"], m["repo"])
+    logging.error("[CIM-PREFLIGHT] 解法：在專案根目錄執行 → git submodule update --init --recursive")
+    logging.error("[CIM-PREFLIGHT] 若用 ZIP 下載請改用 → "
+                  "git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git")
+    return missing
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     tool_id: str
@@ -1062,6 +1135,8 @@ class ToolProcessManager:
             "log_dir": str(self._log_dir),
             "active_tool": status,
             "runtime": self.runtime_status(),
+            # Non-empty => git submodules not checked out; portal can show a banner.
+            "missing_submodules": check_submodules(),
         }
 
     def _start_external(self, tool: ToolDefinition) -> ToolStartResponse:
@@ -2106,6 +2181,9 @@ def main() -> None:
         raise SystemExit("--control-port is required")
 
     configure_logging(args.log_dir)
+    # Early submodule guard: if labeling/AI4BI submodules weren't checked out,
+    # log a loud, pasteable [CIM-PREFLIGHT] error (does not exit — see docstring).
+    preflight_submodules()
     os.environ["CIM_CONTROL_PORT"] = str(args.control_port)
     db_path = resolve_tools_db_path(args.log_dir)
     os.environ["CIM_TOOLS_DB"] = str(db_path)

@@ -62,6 +62,9 @@ def test_diagnostics_endpoint_reports_active_tool_shape(client: TestClient) -> N
     assert body["ok"] is True
     assert body["active_tool"] == {"active": False}
     assert "runtime" in body
+    # Submodule guard surfaces here so the portal can show a banner; empty list
+    # in this checked-out repo, list-of-descriptors when submodules are missing.
+    assert isinstance(body["missing_submodules"], list)
 
 
 # ---------------------------------------------------------------------------

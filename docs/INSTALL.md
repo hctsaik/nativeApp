@@ -20,12 +20,15 @@
 
 ## 1. 下載（一次取得三個 repo）
 
-labeling submodule 的接線目前在 **`feat/platform-restructure`** 分支（尚未併入 `main`），
-clone 時要指定該分支並**遞迴拉 submodule**（這一步就把 AI4BI 與 labeling 一起帶下來）：
+> ⚠️ **不要用 GitHub「Download ZIP」。** 三 repo 以 submodule 掛載，ZIP / 淺 clone **不含**
+> submodule 內容，會導致工具清單缺項且無法啟動（start-*.bat 與 engine 啟動時會偵測並印出
+> `[CIM-PREFLIGHT]` 錯誤）。務必用下方的 `git clone --recurse-submodules`。
+
+submodule 接線已併入 **`main`**（預設分支），clone 時**遞迴拉 submodule** 就會一次把
+AI4BI 與 labeling 一起帶下來：
 
 ```bash
-git clone --branch feat/platform-restructure --recurse-submodules \
-  https://github.com/hctsaik/nativeApp.git nativeApp
+git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git nativeApp
 cd nativeApp
 ```
 
@@ -91,7 +94,7 @@ cd sidecar/python-engine/plugins/labeling && git pull
   因此 `tests/test_mcp_config.py` 的 2 個測試在 fresh clone 會 FileNotFoundError —— **這是預期、非整合問題**。
   需要 MCP（GUI 測試工具）時再各自設定；不影響 app 本身執行。
 - **測試相依不在 runtime requirements**：要跑 `npm run test:python` 需另裝 `pip install pytest respx`。
-- **分支**：待 `feat/platform-restructure` 併入 `main` 後，§1 可改 clone `main`（屆時更新本文）。
+- **分支**：`feat/platform-restructure` 已併入 `main`（預設分支）；§1 直接 clone `main` 即可。
 - **打包 release**（PyInstaller `engine.exe`）需把 AI4BI 套件納入打包；見 `docs/AI4BI_INTEGRATION.md`。
 
 ## 9. 實測結果（2026-05-31 clean-room）
