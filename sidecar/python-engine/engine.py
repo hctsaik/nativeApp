@@ -50,6 +50,38 @@ def resolve_tools_db_path(log_dir: Path | None = None) -> Path:
     return (ROOT_DIR / "config" / "tools.sqlite").resolve()
 
 
+_BOOT_ID = uuid.uuid4().hex[:12]
+_BOOTED_AT = datetime.now(timezone.utc).isoformat()
+_GIT_COMMIT_CACHE: Optional[str] = None
+
+
+def engine_commit() -> str:
+    """Short git commit of the running engine code, so "am I running the fixed
+    code, or a stale sidecar?" is answerable at a glance (the #1 reason a fix
+    looked 'not working': the engine was never restarted on the new code).
+    Cached per process. Falls back to a packaged BUILD_COMMIT file, then
+    'unknown' (frozen build / source zip without git)."""
+    global _GIT_COMMIT_CACHE
+    if _GIT_COMMIT_CACHE is not None:
+        return _GIT_COMMIT_CACHE
+    commit = "unknown"
+    try:
+        build_file = ROOT_DIR / "BUILD_COMMIT"
+        if build_file.exists():
+            commit = build_file.read_text(encoding="utf-8").strip() or "unknown"
+        else:
+            out = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=5,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                commit = out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    _GIT_COMMIT_CACHE = commit
+    return commit
+
+
 # Sentinel files that only exist once each git submodule has been checked out.
 # Kept in sync with scripts/win/verify-setup.ps1 and preflight-submodules.bat.
 # A missing sentinel almost always means the project was obtained via GitHub
@@ -225,6 +257,9 @@ class SQLiteToolAdapter(ToolAdapter):
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Sheet tools auto-disabled by the orphan converge (see
+        # _reconcile_sheets_from_yaml); surfaced via /diagnostics + boot log.
+        self.orphan_sheets_disabled: list[str] = []
         SQLiteManagementSchema(self._db_path).ensure_current()
         self._store = SQLiteManagementStore(self._db_path)
         self._initialize()
@@ -389,13 +424,11 @@ class SQLiteToolAdapter(ToolAdapter):
             ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
              "sheet-annotation_workflow", "sheet-iwsc-annotation"),
         )
-        # Remove the orphaned garbage sheet seed: a Chinese tool_id auto-derived
-        # from a test sheet name ("共用標註功能 - 套件") that never had a backing
-        # sheet definition (no YAML, no sheet_tabs). It appeared in the catalog
-        # but failed on launch with the cryptic "Missing CIM_SHEET_ID or
-        # CIM_PLUGIN_ID" (orphan sheet -> _start_regular without a plugin_id).
-        # Idempotent cleanup so existing installs lose it too.
-        connection.execute("DELETE FROM tools WHERE tool_id = 'sheet-共用標註功能_-_套件'")
+        # NOTE: orphaned "sheet-*" tools (no wired tabs -- e.g. the old garbage
+        # seed "共用標註功能 - 套件") are NOT blacklisted here by id. They are
+        # caught generically by the orphan auto-converge at the end of
+        # _reconcile_sheets_from_yaml, which disables ANY enabled sheet tool with
+        # no tabs. That replaces per-id whack-a-mole and self-heals existing DBs.
         # Ensure all static-seed active tools are prod-enabled
         connection.execute(
             "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?)",
@@ -527,6 +560,36 @@ class SQLiteToolAdapter(ToolAdapter):
                 " VALUES (?, ?, ?, ?)",
                 [(sheet_id, order, mid, label) for order, mid, label in desired_tabs],
             )
+
+        # ── Orphan auto-convergence (general invariant; SQLite-centric) ──────────
+        # An enabled "sheet-*" tool with NO wired tabs can never launch: it would
+        # spawn sheet_runner.py without a CIM_PLUGIN_ID and fail with the cryptic
+        # "Missing CIM_SHEET_ID or CIM_PLUGIN_ID". Instead of blacklisting such ids
+        # one-by-one (whack-a-mole, hard-coded), enforce the invariant generally:
+        # disable ANY enabled sheet tool that has no tabs, so it can NEVER reach the
+        # portal dropdown. This runs on every _initialize AND every /reload (both
+        # call this), so existing DBs self-heal on restart/reload. Each disable is
+        # logged with the greppable [CIM-PREFLIGHT] marker for engine.log diagnosis.
+        self.orphan_sheets_disabled = []
+        for row in connection.execute(
+            "SELECT tool_id FROM tools WHERE tool_id LIKE 'sheet-%' AND enabled = 1"
+        ).fetchall():
+            tool_id = row["tool_id"]
+            sid = tool_id[len("sheet-"):]
+            has_tab = connection.execute(
+                "SELECT 1 FROM sheet_tabs WHERE sheet_id = ? LIMIT 1", (sid,)
+            ).fetchone()
+            if not has_tab:
+                connection.execute(
+                    "UPDATE tools SET enabled = 0 WHERE tool_id = ?", (tool_id,)
+                )
+                self.orphan_sheets_disabled.append(tool_id)
+                logging.error(
+                    "[CIM-PREFLIGHT] auto-disabled orphan sheet tool %r: no wired "
+                    "tabs (missing sheet definition or its modules aren't "
+                    "registered). Hidden from the catalog so it cannot fail with "
+                    "'Missing CIM_SHEET_ID or CIM_PLUGIN_ID'.", tool_id,
+                )
         return missing_report
 
     def _scan_and_register_plugins(self, connection) -> None:
@@ -1142,6 +1205,10 @@ class ToolProcessManager:
             "runtime": self.runtime_status(),
             # Non-empty => git submodules not checked out; portal can show a banner.
             "missing_submodules": check_submodules(),
+            # Running engine identity — confirm a fix is actually live (not a
+            # stale sidecar). boot_id changes on every restart.
+            "commit": engine_commit(),
+            "boot_id": _BOOT_ID,
         }
 
     def _start_external(self, tool: ToolDefinition) -> ToolStartResponse:
@@ -1690,6 +1757,10 @@ def create_app(
         return {
             "name": "CIM Python Sidecar",
             "version": app.version,
+            "commit": engine_commit(),
+            "booted_at": _BOOTED_AT,
+            "boot_id": _BOOT_ID,
+            "db_path": str(db_path),
             "root_dir": str(ROOT_DIR),
             "pid": os.getpid(),
         }
@@ -2206,6 +2277,11 @@ def main() -> None:
     preflight_submodules()
     os.environ["CIM_CONTROL_PORT"] = str(args.control_port)
     db_path = resolve_tools_db_path(args.log_dir)
+    # Boot banner: makes "which code/DB is this engine actually running?" visible
+    # at a glance (grep [CIM-BOOT]). boot_id changes every restart, so you can
+    # confirm a fresh process picked up your fix.
+    logging.info("[CIM-BOOT] engine commit=%s boot_id=%s db=%s",
+                 engine_commit(), _BOOT_ID, db_path)
     os.environ["CIM_TOOLS_DB"] = str(db_path)
     selected_paths = SelectedPathStore(args.log_dir / "selected_paths.json")
     registry = ToolRegistry(SQLiteToolAdapter(db_path))
