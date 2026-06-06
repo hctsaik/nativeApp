@@ -103,3 +103,62 @@ def test_garbage_chinese_sheet_seed_is_not_in_source():
 def test_engine_commit_is_reported():
     commit = engine.engine_commit()
     assert isinstance(commit, str) and commit  # non-empty (a hash or 'unknown')
+
+
+# ── tools.sqlite as a derived cache (catalog source-of-truth = declarative) ──
+
+def _catalog_snapshot(db_path: Path) -> set[tuple]:
+    """Stable snapshot of the catalog's *definition* state (not runtime logs)."""
+    con = sqlite3.connect(db_path); con.row_factory = sqlite3.Row
+    tools = {
+        (r["tool_id"], r["name"], r["enabled"], r["enabled_prod"])
+        for r in con.execute(
+            "SELECT tool_id, name, enabled, enabled_prod FROM tools"
+        )
+    }
+    con.close()
+    return tools
+
+
+def test_catalog_rebuilds_identically_after_db_deleted(tmp_path):
+    """Deleting tools.sqlite and re-initialising must reproduce the same catalog
+    from the declarative sources (plugin.yaml + sheet YAML + config/seed.yaml).
+    This is the CI guarantee behind '--rebuild-catalog' and 'DB is a per-device
+    derived cache, safe to delete'."""
+    adapter = _fresh_adapter(tmp_path)
+    db_path = adapter._db_path
+    before = _catalog_snapshot(db_path)
+    assert before, "expected a populated catalog on first init"
+
+    # Release the adapter's open SQLite handle so Windows lets us delete the
+    # file (mirrors the real --rebuild-catalog flow, which deletes before any
+    # adapter is created).
+    del adapter
+    import gc
+    gc.collect()
+    db_path.unlink()
+    assert not db_path.exists()
+
+    engine.SQLiteToolAdapter(db_path)  # re-init from declarative sources only
+    after = _catalog_snapshot(db_path)
+
+    assert after == before, "catalog drifted when rebuilt from declarative sources"
+
+
+def test_static_seed_comes_from_seed_yaml(tmp_path):
+    """The no-plugin.yaml tools (management-center, labelme-dino) must be seeded
+    from config/seed.yaml, and that data must NOT be hardcoded in engine.py."""
+    seed = engine._load_static_seed()
+    seeded_ids = {t["tool_id"] for t in seed.get("static_tools", [])}
+    assert {"management-center", "labelme-dino"} <= seeded_ids
+
+    adapter = _fresh_adapter(tmp_path)
+    con = sqlite3.connect(adapter._db_path); con.row_factory = sqlite3.Row
+    db_ids = {r["tool_id"] for r in con.execute("SELECT tool_id FROM tools")}
+    con.close()
+    assert {"management-center", "labelme-dino"} <= db_ids
+
+    # Guard against regressing back to inline tuples in engine.py.
+    src = (ENGINE_DIR / "engine.py").read_text(encoding="utf-8")
+    assert "管理中心" not in src, "management-center name should live in config/seed.yaml, not engine.py"
+    assert (ENGINE_DIR / "config" / "seed.yaml").exists()

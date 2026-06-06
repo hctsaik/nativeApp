@@ -50,6 +50,31 @@ def resolve_tools_db_path(log_dir: Path | None = None) -> Path:
     return (ROOT_DIR / "config" / "tools.sqlite").resolve()
 
 
+_SEED_PATH = ROOT_DIR / "config" / "seed.yaml"
+
+
+def _load_static_seed() -> dict:
+    """Load the declarative static-catalog seed (config/seed.yaml).
+
+    Holds tools that have no plugin.yaml (sheet runners / management / external)
+    plus one-time migrations — the authoritative source replacing engine.py's
+    old hardcoded INSERT tuples. Returns {} if the file or PyYAML is missing
+    (engine still boots; plugin.yaml + sheet YAML remain the primary sources)."""
+    try:
+        import yaml
+    except ImportError:
+        logging.warning("PyYAML not available; skipping static seed (config/seed.yaml)")
+        return {}
+    if not _SEED_PATH.exists():
+        logging.warning("config/seed.yaml not found at %s; no static seed applied", _SEED_PATH)
+        return {}
+    try:
+        return yaml.safe_load(_SEED_PATH.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        logging.error("Failed to parse config/seed.yaml: %s", exc)
+        return {}
+
+
 _BOOT_ID = uuid.uuid4().hex[:12]
 _BOOTED_AT = datetime.now(timezone.utc).isoformat()
 _GIT_COMMIT_CACHE: Optional[str] = None
@@ -394,62 +419,68 @@ class SQLiteToolAdapter(ToolAdapter):
 
     def _seed_static_tools(self, connection) -> None:
         """Seed tools that have no plugin.yaml (sheet runners / management /
-        external), then apply product-state fixups. Idempotent."""
+        external), then apply product-state fixups. Idempotent.
+
+        The data lives in config/seed.yaml (declarative authority) — editing
+        that file is enough to add/adjust a no-plugin.yaml tool; no engine.py
+        change and the change is reviewable as a git diff.
+        """
+        seed = _load_static_seed()
+
         # ── Static seeds: sheet tools + management + external (no plugin.yaml) ─
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO tools (
-                tool_id, name, script_relative_path, version,
-                signature, source_commit, author, approved_at, enabled
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                ("sheet-edge-analysis", "邊緣品質分析（套件）", "sheet_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
-                ("sheet-annotation_workflow", "本地標注作業", "sheet_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
-                ("sheet-iwsc-annotation", "工業標注整合", "sheet_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
-                ("sheet-annotation", "🐜 影像標註", "sheet_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
-                ("management-center", "管理中心", "management_runner.py",
-                 "1.0.0", None, "seed", "system", None, 1),
-                ("labelme-dino", "LabelMe Dino", "external_labelme_dino",
-                 "0.1.0", None, "seed", "system", None, 1),
-            ],
-        )
+        rows = [
+            (t["tool_id"], t["name"], t.get("script", "sheet_runner.py"),
+             str(t.get("version", "1.0.0")), None, "seed", "system", None, 1)
+            for t in seed.get("static_tools", [])
+        ]
+        if rows:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO tools (
+                    tool_id, name, script_relative_path, version,
+                    signature, source_commit, author, approved_at, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
         # Disable legacy tools no longer in the product
-        connection.execute(
-            "UPDATE tools SET enabled = 0 WHERE tool_id IN (?, ?, ?, ?, ?, ?)",
-            ("sample-csv", "workflow-edge-analysis", "module_007", "placeholder",
-             "sheet-annotation_workflow", "sheet-iwsc-annotation"),
-        )
+        disable_ids = seed.get("disable_tools", [])
+        if disable_ids:
+            connection.execute(
+                "UPDATE tools SET enabled = 0 WHERE tool_id IN (%s)"
+                % ",".join("?" for _ in disable_ids),
+                disable_ids,
+            )
         # NOTE: orphaned "sheet-*" tools (no wired tabs -- e.g. the old garbage
         # seed "共用標註功能 - 套件") are NOT blacklisted here by id. They are
         # caught generically by the orphan auto-converge at the end of
         # _reconcile_sheets_from_yaml, which disables ANY enabled sheet tool with
         # no tabs. That replaces per-id whack-a-mole and self-heals existing DBs.
         # Ensure all static-seed active tools are prod-enabled
-        connection.execute(
-            "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (?, ?, ?, ?, ?)",
-            ("sheet-edge-analysis", "sheet-annotation",
-             "management-center", "labelme-dino", "sheet-annotation"),
-        )
-        # Rename display name for existing installs
-        connection.execute(
-            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
-            ("本地標注作業", "sheet-annotation_workflow", "標注工作流"),
-        )
-        connection.execute(
-            "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
-            ("🐜 影像標註", "sheet-annotation", "Annotation"),
-        )
-        # one-time migration: remove iWISC modules from the local annotation sheet
-        connection.execute(
-            "DELETE FROM sheet_tabs WHERE sheet_id='annotation_workflow'"
-            " AND plugin_id IN (?,?,?,?)",
-            ("module_022", "module_023", "module_024", "module_025"),
-        )
+        prod_ids = seed.get("prod_enable_tools", [])
+        if prod_ids:
+            connection.execute(
+                "UPDATE tools SET enabled_prod = 1 WHERE tool_id IN (%s)"
+                % ",".join("?" for _ in prod_ids),
+                prod_ids,
+            )
+        # Rename display name for existing installs (only if old name matches)
+        for r in seed.get("renames", []):
+            connection.execute(
+                "UPDATE tools SET name=? WHERE tool_id=? AND name=?",
+                (r["new_name"], r["tool_id"], r["old_name"]),
+            )
+        # one-time sheet-tab cleanup migrations (e.g. remove iWISC modules from
+        # the local annotation sheet)
+        for d in seed.get("sheet_tab_deletions", []):
+            pids = d.get("plugin_ids", [])
+            if not pids:
+                continue
+            connection.execute(
+                "DELETE FROM sheet_tabs WHERE sheet_id=? AND plugin_id IN (%s)"
+                % ",".join("?" for _ in pids),
+                [d["sheet_id"], *pids],
+            )
 
     def _reconcile_sheets_from_yaml(self, connection) -> list[dict]:
         """Read sheets/*.yaml and reconcile sheet rows + tabs for each definition.
@@ -2184,6 +2215,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-dir", type=Path, default=ROOT_DIR / "logs")
     parser.add_argument("--run-streamlit-script")
     parser.add_argument("--tool-port", type=int)
+    parser.add_argument(
+        "--rebuild-catalog",
+        action="store_true",
+        help="Delete the per-device tools.sqlite before boot so the catalog is "
+             "rebuilt from scratch (plugin.yaml + sheet YAML + config/seed.yaml). "
+             "Use after a git pull for a guaranteed-clean catalog.",
+    )
     return parser.parse_args()
 
 
@@ -2277,6 +2315,16 @@ def main() -> None:
     preflight_submodules()
     os.environ["CIM_CONTROL_PORT"] = str(args.control_port)
     db_path = resolve_tools_db_path(args.log_dir)
+    # --rebuild-catalog: drop the per-device derived cache so the catalog is
+    # rebuilt cleanly from the declarative sources on this boot. Safe because
+    # tools.sqlite holds no authoritative state (runtime logs aside, which a
+    # fresh rebuild simply omits). Handy right after a git pull.
+    if getattr(args, "rebuild_catalog", False) and db_path.exists():
+        try:
+            db_path.unlink()
+            logging.info("[CIM-BOOT] --rebuild-catalog: removed %s (will rebuild)", db_path)
+        except OSError as exc:
+            logging.error("[CIM-BOOT] --rebuild-catalog: failed to remove %s: %s", db_path, exc)
     # Boot banner: makes "which code/DB is this engine actually running?" visible
     # at a glance (grep [CIM-BOOT]). boot_id changes every restart, so you can
     # confirm a fresh process picked up your fix.

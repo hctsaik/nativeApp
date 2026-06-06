@@ -29,7 +29,7 @@ a = Analysis(
         ('scripts',      'scripts'),
         ('plugins',      'plugins'),        # Labeling plugin home (annotation domain at plugins/labeling/domain)
         ('core',         'core'),
-        ('config',       'config'),         # declarative policy samples (permissions / external_systems / sandbox)
+        ('config',       'config'),         # declarative seed + policy samples (seed.yaml / permissions / external_systems / sandbox)
         ('sheets',       'sheets'),
     ],
     hiddenimports=[
@@ -103,6 +103,11 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# tools.sqlite is a per-device derived cache rebuilt at first boot from the
+# declarative sources (plugin.yaml + sheet YAML + config/seed.yaml). Never ship
+# one inside the exe — a dev build machine may have left a stale config/*.sqlite.
+a.datas = [d for d in a.datas if not d[0].lower().endswith('.sqlite')]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

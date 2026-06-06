@@ -39,6 +39,18 @@ start-dev.bat
 
 目前只有一個 annotation sheet：`plugins/labeling/sheets/annotation.yaml`（🐜 影像標註，4 tabs）— 已隨架構重構移入 Labeling plugin。
 
+### Catalog 事實來源 = 宣告式 YAML，tools.sqlite 是衍生快取
+工具/sheet 清單的**唯一定義權威**是宣告式文字檔：各 `plugin.yaml`、sheet 的 `*.yaml`、
+以及「無 plugin.yaml 工具」的 `config/seed.yaml`（static_tools / disable_tools /
+prod_enable_tools / renames / sheet_tab_deletions；由 `engine._load_static_seed()` 讀取）。
+
+`tools.sqlite` 是 **per-device 衍生快取**（`<log_dir>/data/tools.sqlite`，gitignored），
+engine 每次啟動 `_initialize()` 都從上述 YAML 冪等重建——**檔案不存在會自動新建並填好**。
+所以：**不要把 `tools.sqlite` 進版控、不要手動編輯它**。新增「無 plugin.yaml 的工具」改 `config/seed.yaml`。
+
+想砍掉重練（pull 後保證乾淨）：`engine --rebuild-catalog`（boot 前先刪 DB 再重建）。
+背景與決議見 [`docs/platform/catalog-source-of-truth-discussion.md`](docs/platform/catalog-source-of-truth-discussion.md)。
+
 ### 環境變數由 engine 注入，不可手動設定
 `CIM_SHEET_ID`、`CIM_PLUGIN_ID`、`CIM_TOOL_ID`、`CIM_LOG_DIR` 等變數由
 `ToolProcessManager._make_env()`（engine.py ~line 596）在 spawn Streamlit 子程序時自動注入。
@@ -72,7 +84,7 @@ start-dev.bat
 
 | 錯誤 | 原因 | 解法 |
 |------|------|------|
-| `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`，或 source zip 未含 `tools.sqlite` | 改用 `start-dev.bat` 啟動整個 app；或確認打包時有帶 `--include-file` |
+| `Missing CIM_SHEET_ID or CIM_PLUGIN_ID` | 直接執行 `sheet_runner.py`（env 由 engine spawn 時注入，單跑沒有） | 改用 `start-dev.bat` 啟動整個 app。catalog 會由宣告式來源首啟自動重建，不需手動帶 DB；懷疑快取髒掉用 `engine --rebuild-catalog` |
 | Electron app 啟動後印出 Node.js 版本就退出 | `ELECTRON_RUN_AS_NODE=1` 殘留在環境 | 移除該環境變數，或用 `apps/host-electron/launch-electron.js` workaround |
 | `xanylabeling.exe` 被 WDAC 封鎖 | Windows Application Control 政策封鎖 uv trampoline | `012_output.py` 必須維持 `py -3.11 -c "import sys; sys.path.insert(...); from anylabeling.app import main; main()"`，不要改回直接執行 `xanylabeling.exe` |
 | iWISC 任務列表空白 | 外部 iWISC server 未啟動，或尚未註冊外部系統連線 | 啟動 iwsc-sample-server（port 8765）；**註冊外部系統有 no-code GUI 表單**：管理中心 Tools → External（`management_runner._render_external_system_register`，寫入 `config/external_systems.yaml`，token 走環境變數）；亦可用 `AnnotationService.register_tenant` / annotation MCP `register_tenant`。非-REST 協定用 `python tools/scaffold.py connector <name>` 產 connector 骨架（放 `core/integrations/connectors/`，啟動時 `core.integrations.registry.autodiscover()` 自動註冊）|

@@ -51,7 +51,7 @@ _RULES: list[tuple[re.Pattern, dict]] = [
      {"title": "工具被直接執行（環境變數未由 engine 注入）",
       "hint": "CIM_SHEET_ID / CIM_PLUGIN_ID 由 engine spawn 子程序時注入；單獨跑 runner 不會有。",
       "steps": ["不要直接執行 sheet_runner.py / *_input.py，改用 start-dev.bat 啟動整個 app",
-                "若是打包後，確認有帶 tools.sqlite（--include-file）"]}),
+                "catalog（tools.sqlite）會由 plugin.yaml + sheet YAML + config/seed.yaml 首啟自動重建；如懷疑快取髒掉可用 engine --rebuild-catalog 重建"]}),
     (re.compile(r"no folder found for plugin_id|layer file not found|no module folder|"
                 r"找不到.*模組|module.*not found", re.I),
      {"title": "找不到模組（尚未註冊或檔名不符）",

@@ -1,0 +1,74 @@
+# config/seed.yaml — 平台靜態 catalog 種子（宣告式權威）
+#
+# 這裡只放「沒有 plugin.yaml / 不是 sheet YAML」的工具與一次性遷移資料，
+# 取代過去 engine.py `_seed_static_tools` 裡寫死的 Python tuple。
+#
+# 事實來源分工：
+#   - 一般工具：各自的 plugin.yaml（engine 啟動自動掃描註冊）
+#   - workflow sheet：sheets/*.yaml 或 plugins/*/sheets/*.yaml（自動 reconcile）
+#   - 其餘無 plugin.yaml 的工具 / 遷移：本檔
+#
+# tools.sqlite 是 per-device 衍生快取，每次 boot / --rebuild-catalog 由上述三來源重建，
+# 不進版控。詳見 docs/platform/catalog-source-of-truth-discussion.md。
+#
+# 改這個檔即可新增/調整「無 plugin.yaml 的工具」，不必動 engine.py，且 git diff 可 review。
+
+# ── 靜態工具（沒有 plugin.yaml：sheet runner / 管理中心 / 外部工具）──────────
+# INSERT OR IGNORE：已存在則不覆蓋（沿用既有冪等行為）。
+# 註：sheet-edge-analysis / sheet-annotation 也會由對應 sheet YAML 自動註冊，
+#     這裡列出是為了在 sheet YAML 尚未 reconcile 前先建立、並設定產品狀態。
+static_tools:
+  - tool_id: sheet-edge-analysis
+    name: 邊緣品質分析（套件）
+    script: sheet_runner.py
+    version: "1.0.0"
+  - tool_id: sheet-annotation_workflow
+    name: 本地標注作業
+    script: sheet_runner.py
+    version: "1.0.0"
+  - tool_id: sheet-iwsc-annotation
+    name: 工業標注整合
+    script: sheet_runner.py
+    version: "1.0.0"
+  - tool_id: sheet-annotation
+    name: 🐜 影像標註
+    script: sheet_runner.py
+    version: "1.0.0"
+  - tool_id: management-center
+    name: 管理中心
+    script: management_runner.py
+    version: "1.0.0"
+  - tool_id: labelme-dino
+    name: LabelMe Dino
+    script: external_labelme_dino
+    version: "0.1.0"
+
+# ── 停用：已不在產品內的舊工具（enabled=0）──────────────────────────────────
+disable_tools:
+  - sample-csv
+  - workflow-edge-analysis
+  - module_007
+  - placeholder
+  - sheet-annotation_workflow
+  - sheet-iwsc-annotation
+
+# ── 產品啟用（enabled_prod=1）──────────────────────────────────────────────
+prod_enable_tools:
+  - sheet-edge-analysis
+  - sheet-annotation
+  - management-center
+  - labelme-dino
+
+# ── 一次性顯示名稱遷移（既有安裝：只有舊名相符才改）────────────────────────
+renames:
+  - tool_id: sheet-annotation_workflow
+    new_name: 本地標注作業
+    old_name: 標注工作流
+  - tool_id: sheet-annotation
+    new_name: 🐜 影像標註
+    old_name: Annotation
+
+# ── 一次性 sheet tab 清理遷移（從本地標注 sheet 移除 iWISC 模組）────────────
+sheet_tab_deletions:
+  - sheet_id: annotation_workflow
+    plugin_ids: [module_022, module_023, module_024, module_025]
