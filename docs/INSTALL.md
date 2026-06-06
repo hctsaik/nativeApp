@@ -15,7 +15,7 @@
 ## 0. 前置需求
 
 - **Git**、**Node.js（LTS）**
-- **Python 3.11**（必須與 engine host 直譯器一致；目前 dev 預設 `pythoncore-3.11-64`）
+- **Python 3.11**（必須與 engine host 直譯器一致；`start-dev.bat` 會自動以 `py -3.11` 偵測）
 - 對三個 repo 的存取權（私有 repo 需登入 / token）
 
 ## 1. 下載（一次取得三個 repo）
@@ -47,11 +47,11 @@ npm install
 clean-room 測試用隔離 venv（`python -m venv` 後用 venv 的 python），正式機器可直接用系統 3.11。
 
 ```powershell
-# (a) 平台核心
+# (a) 平台核心（瘦核心，plugin-agnostic：不含 torch/plotly 等 plugin 相依）
 & $PY -m pip install -r sidecar/python-engine/requirements.txt
-# (b) AI4BI（editable，submodule 原始碼即時生效）
+# (b) AI4BI plugin（editable，submodule 原始碼即時生效；plotly/duckdb 隨它裝）
 & $PY -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
-# (c) 影像標註專屬相依（AI 預標 torch/transformers 等；部分與 (a) 重疊，pip 會自動略過）
+# (c) 影像標註 plugin 專屬相依（AI 預標 torch/ultralytics/transformers、annotation UI）
 & $PY -m pip install -r sidecar/python-engine/plugins/labeling/requirements-labeling.txt
 ```
 
@@ -68,10 +68,10 @@ powershell -ExecutionPolicy Bypass -File scripts\win\verify-setup.ps1
 
 ## 5. ⚠️ 最關鍵：對齊 engine 的 Python
 
-dev 模式下 engine 由 `start-dev.bat` 的 `set PYTHON=...` 那行啟動（傳給 Electron，見
-`apps/host-electron/src/main.js` 的 `process.env.PYTHON`）。**該行硬編了特定使用者路徑** ——
-新機器務必改成本機 3.11 的 `python.exe` 絕對路徑，且 §3 要裝進**同一支**，否則 engine 啟動或
-`import ai4bi` 會失敗。
+dev 模式下 engine 由 `start-dev.bat` 解析出的 Python 啟動（傳給 Electron，見
+`apps/host-electron/src/main.js` 的 `process.env.PYTHON`）。**`start-dev.bat` 會自動以
+`py -3.11` 偵測**，一般不必改檔；只要確認 §3 的 (a)(b)(c) 都裝進那一支 3.11 即可。
+若有多支 3.11 或想指定特定直譯器，啟動前設 `$env:PYTHON = "<該 python.exe>"` 覆蓋。
 
 ## 6. 啟動
 

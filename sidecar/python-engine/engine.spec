@@ -10,6 +10,11 @@ from PyInstaller.utils.hooks import collect_submodules
 # falls out of the bundle ("dev-green / package-dead"). Previously only the
 # Labeling plugin was collected, which broke the "add a plugin without touching
 # core/packaging" promise (R1 gap). The explicit list below is a safety net.
+#
+# NOTE (lean platform): this spec deliberately does NOT bundle plugin-specific
+# heavy deps (torch for labeling, plotly/duckdb for AI4BI). The platform stays
+# pure; each plugin (a separate git submodule) owns its deps and they are
+# installed into per-tool isolated venvs at runtime (see core/tool_deps.py, #7).
 _auto_hidden = collect_submodules('core')
 try:
     _spec_dir = _Path(SPECPATH)  # injected by PyInstaller in spec files

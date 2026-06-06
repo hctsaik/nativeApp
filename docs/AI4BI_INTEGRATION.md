@@ -71,7 +71,16 @@ git submodule update --init --recursive
   等附加套件,不影響 labeling 模組。
 - AI4BI 的 `matplotlib`、`scipy` 已正式宣告為相依(先前在乾淨環境會缺)。
 
-## 待辦(release 打包)
+## Release 打包(瘦平台模型)
 
-目前為 **dev 掛載**。frozen `engine.exe`(PyInstaller,`engine.spec` 會打包 `tools/`)在正式
-release 時,需把 AI4BI 套件納入打包(或在目標機安裝),`bi_runner.py` 才能 `import ai4bi`。
+平台(本 repo)的 frozen `engine.exe` **刻意不把 AI4BI(plotly/duckdb)打進核心**——
+AI4BI 是獨立 git submodule,屬於 plugin,平台保持瘦、plugin 自帶相依。
+靜態守門:`tests/test_packaging_guards.py::test_engine_spec_does_not_bundle_plugin_heavy_deps`
+(禁止有人把 `collect_all('ai4bi'/'plotly'/…)` 加回核心 spec)。
+
+frozen 下要讓 AI Report 能 `import ai4bi`,走平台的「每工具自帶相依」機制(per-tool venv,
+`core/tool_deps.py`,#7):在目標機用外部 Python 3.11 為該工具建隔離 venv 安裝 ai4bi 及其相依。
+需設 `CIM_PYTHON` 指向真實 python.exe(frozen 的 engine.exe 無法自己 `-m venv`),離線用 `CIM_WHEELHOUSE`。
+
+> 完整 frozen 端到端驗證(build engine.exe + 啟動 AI Report)請跑 `/package-build`,
+> 並確認目標機具備 per-tool venv 所需的外部 Python 3.11。

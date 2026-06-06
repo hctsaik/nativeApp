@@ -1,3 +1,13 @@
+# CIM platform — CORE engine dependencies only.
+#
+# Keep this LEAN and plugin-agnostic. Plugin-specific heavy deps live with the
+# plugin (a separate git submodule) and install on top of this:
+#   - Labeling:  plugins/labeling/requirements-labeling.txt  (torch / ultralytics
+#                / streamlit-image-annotation / streamlit-autorefresh / …)
+#   - AI4BI:     pip install -e vendor/AI4BI[llm]             (plotly / duckdb / …)
+# At runtime the engine also builds per-tool isolated venvs from each tool's
+# plugin.yaml `requires:` (core/tool_deps.py, #7), so a tool's deps never need to
+# be added here.
 fastapi
 uvicorn
 streamlit
@@ -10,10 +20,7 @@ matplotlib
 scikit-learn
 opencv-python-headless
 pyinstaller
-streamlit-image-annotation
-streamlit-autorefresh
 pyyaml
 psutil
 sqlalchemy
-ultralytics
 

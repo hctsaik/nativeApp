@@ -54,6 +54,22 @@ def test_engine_spec_hiddenimports_are_importable():
     )
 
 
+# ─── Test A2: the platform spec stays lean (no plugin heavy deps baked in) ────
+
+def test_engine_spec_does_not_bundle_plugin_heavy_deps():
+    """The platform stays pure: plugin-specific heavy deps (torch for labeling,
+    plotly/duckdb/ai4bi for AI4BI) must NOT be baked into the core engine.exe.
+    Each plugin (a separate git submodule) owns its deps; they install into
+    per-tool venvs at runtime (core/tool_deps.py, #7). If someone re-adds a
+    collect_all('ai4bi'/'torch'/…) to couple the platform to a plugin, this fails."""
+    spec_text = SPEC_FILE.read_text(encoding="utf-8")
+    for pkg in ("ai4bi", "torch", "plotly", "duckdb", "ultralytics"):
+        assert f"collect_all('{pkg}'" not in spec_text and f'collect_all("{pkg}"' not in spec_text, (
+            f"engine.spec bundles plugin dep {pkg!r} into the core platform — "
+            "keep the platform lean; let the plugin own it (per-tool venv)."
+        )
+
+
 # ─── Test B: spec_from_file_location string-path targets exist ────────────────
 
 _PY_FILES = [

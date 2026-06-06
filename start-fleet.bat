@@ -9,7 +9,17 @@ call "%~dp0scripts\win\preflight-submodules.bat"
 if errorlevel 1 exit /b 1
 
 setlocal
-set PYTHON=C:\Users\hctsa\AppData\Local\Python\pythoncore-3.11-64\python.exe
+rem Resolve Python 3.11 (override by setting PYTHON before running); prefer py -3.11.
+if not defined PYTHON (
+  for /f "delims=" %%p in ('py -3.11 -c "import sys;print(sys.executable)" 2^>nul') do set "PYTHON=%%p"
+)
+if not defined PYTHON (
+  for /f "delims=" %%p in ('python -c "import sys;print(sys.executable) if sys.version_info[:2]==(3,11) else ''" 2^>nul') do set "PYTHON=%%p"
+)
+if not defined PYTHON (
+  echo [FLEET][ERROR] Could not find Python 3.11. Install it ^(py -3.11^) or set PYTHON to its python.exe path.
+  exit /b 1
+)
 set ENGINE_DIR=%~dp0sidecar\python-engine
 set FLEET_ROOT=%~dp0tmp\fleet
 set REGISTRY_URL=http://127.0.0.1:9000

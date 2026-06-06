@@ -68,7 +68,7 @@ AI4BI（📊 AI Report）以 git submodule 置於 `sidecar/python-engine/vendor/
 ### 前置需求
 
 - Git、Node.js（LTS）
-- **Python 3.11**（需與 engine host 直譯器一致；目前 dev 預設 `pythoncore-3.11-64`）
+- **Python 3.11**（需與 engine host 直譯器一致；`start-dev.bat` 會自動以 `py -3.11` 偵測）
 - AI4BI submodule 來源是私有 repo（`github.com/hctsaik/AI4BI`），新機器需有存取權
 
 ### 步驟
@@ -81,19 +81,17 @@ git submodule update --init --recursive
 # 2) Node 依賴（Electron + portal + workspaces）
 npm install
 
-# 3) engine 的 Python 依賴（用那支 3.11）
-& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
-    -m pip install -r sidecar/python-engine/requirements.txt
+# 3) 平台核心 Python 依賴（瘦核心，plugin-agnostic）
+#    py -3.11 = start-dev.bat 自動偵測的同一支；多支時改用其絕對路徑
+py -3.11 -m pip install -r sidecar/python-engine/requirements.txt
 
-# 4) AI4BI（editable，務必裝進同一支 3.11）
-& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
-    -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
+# 4) AI4BI plugin（editable，裝進同一支 3.11；plotly/duckdb 等隨它一起裝）
+py -3.11 -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
 
-# 5) 影像標註（labeling 為 submodule，步驟 1 已拉下；裝它的專屬相依）
-& "C:\Users\<你>\AppData\Local\Python\pythoncore-3.11-64\python.exe" `
-    -m pip install -r "sidecar/python-engine/plugins/labeling/requirements-labeling.txt"
+# 5) 影像標註 plugin（submodule，步驟 1 已拉下；torch/ultralytics 等專屬相依）
+py -3.11 -m pip install -r "sidecar/python-engine/plugins/labeling/requirements-labeling.txt"
 
-# 6) 啟動整個 app
+# 6) 啟動整個 app（會自動偵測 Python 3.11）
 start-dev.bat
 ```
 
@@ -102,10 +100,11 @@ start-dev.bat
 
 ### ⚠️ 最關鍵的一步：對齊 engine 的 Python
 
-dev 模式下 engine 由 `start-dev.bat` 的 `set PYTHON=...` 那一行啟動
+dev 模式下 engine 由 `start-dev.bat` 解析出的 Python 啟動
 （傳給 Electron，見 `apps/host-electron/src/main.js` 的 `process.env.PYTHON`）。
-**該行目前硬編了特定使用者路徑**，新電腦務必改成你機器上 3.11 的 `python.exe` 絕對路徑，
-且步驟 3、4 要裝進**同一支**——否則 engine 啟動或 `import ai4bi` 會失敗。
+**`start-dev.bat` 會自動偵測 Python 3.11**（優先用 `py -3.11`，找不到才退回 PATH 上的 3.11），
+所以一般不必改檔；只要確認你機器上有 Python 3.11、且步驟 3、4 都裝進**同一支**即可。
+若你有多支 3.11 或想指定特定直譯器，啟動前設環境變數覆蓋：`$env:PYTHON = "C:\...\python.exe"`。
 
 ### 確保安裝成功：跑驗證腳本
 
@@ -124,7 +123,7 @@ engine 依賴（fastapi/streamlit/pandas）、AI4BI 依賴（ai4bi/duckdb/plotly
 
 | 症狀 | 原因 | 解法 |
 |------|------|------|
-| engine 啟動後立刻退出 / 找不到 python | `start-dev.bat` 的 `set PYTHON=` 指向不存在的路徑 | 改成本機 3.11 的 `python.exe` 絕對路徑 |
+| engine 啟動後立刻退出 / 找不到 python | 機器上沒有 Python 3.11（`py -3.11` 不可用） | 安裝 Python 3.11；或啟動前設 `$env:PYTHON` 指向本機 3.11 的 `python.exe` |
 | 啟動 AI Report 報 `ModuleNotFoundError: ai4bi` | AI4BI 裝到了別支 Python（非 engine 用的那支） | 用步驟 4 同一支 python 重裝 |
 | 清單缺「影像標註」、或啟動印出 `[CIM-PREFLIGHT]` | submodule 未初始化（多半用了 ZIP 下載或 clone 沒帶 submodule） | 在專案根目錄 `git submodule update --init --recursive`；start-*.bat 啟動前會自動檢查並擋下 |
 | `vendor/AI4BI` 是空資料夾、AI Report 點了壞 | clone 時沒帶 submodule | `git submodule update --init --recursive` |

@@ -6,9 +6,9 @@
 
 .DESCRIPTION
   頭號地雷：AI4BI 必須裝進「start-dev.bat 啟動 engine 時實際使用的那一支
-  Python 3.11」（engine 在該直譯器裡 import ai4bi）。本腳本會解析 start-dev.bat
-  的 set PYTHON= 設定，用同一支直譯器驗證 ai4bi 是否可 import，直接擋掉
-  「裝到別支 Python」這個最常見的失敗。
+  Python 3.11」（engine 在該直譯器裡 import ai4bi）。本腳本沿用 start-dev.bat
+  的解析邏輯（$env:PYTHON > 舊版 set PYTHON= > 自動偵測 py -3.11），用同一支
+  直譯器驗證 ai4bi 是否可 import，直接擋掉「裝到別支 Python」這個最常見的失敗。
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\win\verify-setup.ps1
@@ -42,10 +42,17 @@ $startDev = Join-Path $repoRoot 'start-dev.bat'
 $py = $null
 if ($env:PYTHON) {
     $py = $env:PYTHON
-    Warn "目前 shell 已設 `$env:PYTHON=$py（執行時會覆蓋 start-dev.bat 的設定）"
+    Warn "目前 shell 已設 `$env:PYTHON=$py（執行時會覆蓋 start-dev.bat 的自動偵測）"
 } elseif (Test-Path $startDev) {
+    # start-dev.bat 可能仍硬編 set PYTHON=（舊版），或改為自動偵測（新版）。
     $line = Select-String -Path $startDev -Pattern '^\s*set\s+PYTHON=(.+)$' | Select-Object -First 1
-    if ($line) { $py = $line.Matches[0].Groups[1].Value.Trim() }
+    if ($line -and $line.Matches[0].Groups[1].Value.Trim()) {
+        $py = $line.Matches[0].Groups[1].Value.Trim()
+    } else {
+        # 鏡像 start-dev.bat 的自動偵測：優先 py -3.11。
+        $detected = (& py -3.11 -c "import sys;print(sys.executable)" 2>$null)
+        if ($detected) { $py = $detected.Trim() }
+    }
 }
 if (-not $py) { $py = 'python' }
 
@@ -60,7 +67,7 @@ if (Test-Path $py) {
 
 if (-not $pyExe) {
     Fail "找不到 Python：'$py' 既不是有效路徑、也不在 PATH 上。"
-    Write-Host "         → 把 start-dev.bat 的 'set PYTHON=' 改成本機 3.11 的 python.exe 絕對路徑。" -ForegroundColor DarkGray
+    Write-Host "         → 安裝 Python 3.11（讓 'py -3.11' 可用），或在執行前設 `$env:PYTHON 指向其 python.exe。" -ForegroundColor DarkGray
 } else {
     Pass "Engine 將使用：$pyExe"
     $ver = (& $pyExe -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null)
