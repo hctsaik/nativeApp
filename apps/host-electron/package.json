@@ -58,6 +58,15 @@
         ]
       },
       {
+        "from": "python-runtime/python",
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
         "from": "../../sidecar/python-engine",
         "to": "sidecar-source",
         "filter": [

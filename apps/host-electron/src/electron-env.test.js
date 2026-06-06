@@ -139,3 +139,31 @@ describe("LabelMe_Dino external launcher wiring", () => {
     );
   });
 });
+
+describe("bundled standalone Python wiring (per-tool venv base in frozen)", () => {
+  const mainPath = path.join(APP_ROOT, "src", "main.js");
+  const mainSource = fs.readFileSync(mainPath, "utf8");
+  const buildResources = PACKAGE_JSON.build.extraResources;
+
+  it("injects CIM_PYTHON into the sidecar environment", () => {
+    expect(mainSource).toContain("CIM_PYTHON");
+    expect(mainSource).toContain("bundledPythonEnv()");
+  });
+
+  it("resolves the bundled python from resources/python/python.exe", () => {
+    expect(mainSource).toContain("bundledPython()");
+    expect(mainSource).toMatch(/resourcesPath,\s*["']python["']/);
+  });
+
+  it("lets an explicit CIM_PYTHON in the environment win", () => {
+    expect(mainSource).toContain("if (process.env.CIM_PYTHON) return {}");
+  });
+
+  it("packages the standalone Python as an extra resource outside asar", () => {
+    expect(buildResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: "python-runtime/python", to: "python" }),
+      ]),
+    );
+  });
+});

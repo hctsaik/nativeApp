@@ -195,6 +195,19 @@ async function startSidecar() {
   }
 }
 
+// Path to the standalone Python bundled with a packaged release (see
+// scripts/win/fetch-standalone-python.ps1 + package.json extraResources).
+// Used as the base interpreter for per-tool venvs: the frozen engine.exe has a
+// read-only embedded Python and cannot `-m venv` itself, so a tool that declares
+// `requires:` needs a real external Python. Bundling one means a clean factory
+// machine needs no separately-installed Python. Returns null if not present
+// (e.g. dev, or a build that skipped the fetch step).
+function bundledPython() {
+  if (!app.isPackaged) return null;
+  const py = path.join(process.resourcesPath, "python", "python.exe");
+  return fs.existsSync(py) ? py : null;
+}
+
 function sidecarCandidates() {
   if (app.isPackaged) {
     const engineExe = path.join(process.resourcesPath, "engine", "engine.exe");
@@ -206,7 +219,9 @@ function sidecarCandidates() {
         cwd: path.dirname(engineExe)
       },
       {
-        command: process.env.PYTHON ?? "python",
+        // Source-engine fallback: prefer the bundled Python so it also works on
+        // a machine without a system Python; then PYTHON env, then PATH.
+        command: process.env.PYTHON ?? bundledPython() ?? "python",
         args: [sourceEngine, "--control-port", String(sidecarControlPort), "--log-dir", logDir],
         cwd: path.dirname(sourceEngine)
       }
@@ -240,11 +255,22 @@ function labelMeDinoEnv() {
   return env;
 }
 
+// Inject CIM_PYTHON for packaged builds so the frozen engine's per-tool
+// dependency resolver (core/tool_deps.base_python) uses the bundled Python to
+// build venvs. Skipped when no bundled Python is present (resolver then falls
+// back to py -3.11 / python on PATH, as before). An explicit CIM_PYTHON in the
+// environment always wins.
+function bundledPythonEnv() {
+  if (process.env.CIM_PYTHON) return {};
+  const py = bundledPython();
+  return py ? { CIM_PYTHON: py } : {};
+}
+
 function spawnSidecar(candidate) {
   return spawn(candidate.command, candidate.args, {
     cwd: candidate.cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...labelMeDinoEnv(), PYTHONUTF8: "1" },
+    env: { ...process.env, ...labelMeDinoEnv(), ...bundledPythonEnv(), PYTHONUTF8: "1" },
     windowsHide: true
   });
 }

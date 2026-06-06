@@ -16,7 +16,7 @@ set "SIDECAR=%ROOT%sidecar\python-engine"
 set "ELECTRON=%ROOT%apps\host-electron"
 
 echo.
-echo [1/4] 建置 Python engine (PyInstaller)...
+echo [1/5] 建置 Python engine (PyInstaller)...
 cd /d "%SIDECAR%"
 pyinstaller engine.spec --clean --noconfirm
 if errorlevel 1 (
@@ -26,7 +26,7 @@ if errorlevel 1 (
 echo       完成 -^> dist\engine.exe
 
 echo.
-echo [2/4] 建置 React Portal...
+echo [2/5] 建置 React Portal...
 cd /d "%ROOT%apps\portal-react"
 call npm run build
 if errorlevel 1 (
@@ -36,7 +36,16 @@ if errorlevel 1 (
 echo       完成 -^> dist\
 
 echo.
-echo [3/4] 打包 Electron (portable)...
+echo [3/5] 取得自帶 Python (standalone 3.11, per-tool venv 用)...
+powershell -ExecutionPolicy Bypass -File "%ROOT%scripts\win\fetch-standalone-python.ps1"
+if errorlevel 1 (
+    echo ERROR: fetch-standalone-python 失敗
+    exit /b 1
+)
+echo       完成 -^> apps\host-electron\python-runtime\python\
+
+echo.
+echo [4/5] 打包 Electron (portable)...
 cd /d "%ELECTRON%"
 call npm run package:portable:x64
 if errorlevel 1 (
@@ -46,7 +55,7 @@ if errorlevel 1 (
 echo       完成
 
 echo.
-echo [4/4] 輸出清單:
+echo [5/5] 輸出清單:
 dir /b "%ROOT%release\*.exe" 2>nul || dir /b "%ROOT%release\" 2>nul
 echo.
 echo =========================================

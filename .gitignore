@@ -31,6 +31,9 @@ sidecar/python-engine/build/
 sidecar/python-engine/*.spec.bak
 sidecar/python-engine/config/*.bak
 
+# Bundled standalone Python for release (fetched at build time, ~150MB; never committed)
+apps/host-electron/python-runtime/
+
 # tools.sqlite 是 per-device 衍生快取（每次 boot / --rebuild-catalog 從
 # plugin.yaml + sheet YAML + config/seed.yaml 重建），不進版控。
 # 詳見 docs/platform/catalog-source-of-truth-discussion.md

@@ -132,12 +132,21 @@ venv 存在? ──否──▶ base_python -m venv <tool_venv_dir>
 - [x] `tests/test_tool_deps.py`（26 passed）
 - [x] engine `_make_env` 注入（[engine.py](../../sidecar/python-engine/engine.py) `_read_tool_requires` + `_make_env`；sheet tab 以實際 `plugin_id` 為鍵）
 - [x] scaffold `--requires`（CLI 旗標 + 三種 plugin.yaml 範本的 `requires:` 區塊；`tests/test_scaffold.py` 兩個新測試）
-- [ ] **frozen-exe 實機驗證（待辦）**：需用 `/package-build` 產 `engine.exe`，跑一個 `requires:` 含未打包套件的工具，確認 `base_python()` 經 `CIM_PYTHON` 正確建 venv。單元測試已涵蓋 frozen 分支邏輯，但端到端打包驗證尚未在本機跑過。
+- [x] **frozen 自帶 Python（base_python 來源）**：release 透過 `scripts/win/fetch-standalone-python.ps1`
+  取得可重定位的 **python-build-standalone 3.11**（內含 venv+pip，非 embeddable），electron-builder 以
+  `package.json` 的 `extraResources`（`python-runtime/python` → `resources/python`）打進安裝包；
+  `apps/host-electron/src/main.js` 啟動 engine 時注入 `CIM_PYTHON=<resources>/python/python.exe`
+  →`base_python()` 第一順位即用它建 per-tool venv。**這讓乾淨工廠機（沒裝 Python）也能用自帶相依的工具。**
+  版本鎖 3.11 與 frozen engine.exe 對齊（注入回 PYTHONPATH 的 site-packages 須 ABI 相容）。
+  接線守門：`apps/host-electron/src/electron-env.test.js`。
+- [ ] **frozen-exe 端到端實機驗證（待辦）**：需用 `/package-build`（或 `build-release.bat`，已含取 Python 步驟）
+  產安裝包，跑一個 `requires:` 含未打包套件的工具，確認自帶 Python 經 `CIM_PYTHON` 正確建 venv 並可 import。
+  單元測試已涵蓋 frozen 分支邏輯與接線，但完整打包後的端到端尚未在本機跑過。
 
 ## 9. 風險與緩解
 | 風險 | 緩解 |
 |------|------|
-| frozen 下找不到 real Python | 明確錯誤訊息 + `CIM_PYTHON` 覆寫；doctor 腳本可加檢查 |
+| frozen 下找不到 real Python | release 自帶 standalone Python 3.11 並注入 `CIM_PYTHON`（見 §8）；仍找不到時回明確錯誤訊息 + 可手動 `CIM_PYTHON` 覆寫 |
 | 每次啟動都跑 pip 拖慢 | `.cim-deps.json` 指紋快取，相同 requires 秒過 |
 | 兩子程序同時建 venv | venv 父目錄 file lock / atomic rename |
 | 工廠離線裝不到套件 | `CIM_WHEELHOUSE` + `--no-index`，部署前 `pip download` 備好 wheel |
