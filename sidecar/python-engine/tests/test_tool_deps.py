@@ -41,6 +41,47 @@ def test_pythonpath_for_tool_none_when_no_requires():
     assert td.pythonpath_for_tool("module_x", []) is None
 
 
+# ─── ToolProcessManager: 啟動前預建 venv + 就緒 timeout（修首次啟動 500）──────────
+
+def _make_manager(tmp_path):
+    import engine  # noqa: PLC0415
+    return engine.ToolProcessManager(
+        tmp_path / "logs", tmp_path / "sp.json", tmp_path / "data" / "tools.sqlite"
+    )
+
+
+def test_prewarm_no_requires_default_timeout_and_no_install(tmp_path, monkeypatch):
+    import engine  # noqa: PLC0415
+    monkeypatch.setattr(engine, "_read_tool_requires", lambda m: [])
+    calls = []
+    monkeypatch.setattr(td, "ensure_tool_deps", lambda *a, **k: calls.append(a))
+    mgr = _make_manager(tmp_path)
+    assert mgr._prewarm_deps_and_timeout("module_x") == engine._TOOL_READY_TIMEOUT_DEFAULT
+    assert calls == []  # no requires → never touches pip/venv
+
+
+def test_prewarm_with_requires_builds_and_uses_longer_timeout(tmp_path, monkeypatch):
+    import engine  # noqa: PLC0415
+    monkeypatch.setattr(engine, "_read_tool_requires", lambda m: ["cowsay"])
+    calls = []
+    monkeypatch.setattr(td, "ensure_tool_deps",
+                        lambda module, reqs, **k: calls.append((module, reqs)))
+    mgr = _make_manager(tmp_path)
+    assert mgr._prewarm_deps_and_timeout("module_y") == engine._TOOL_READY_TIMEOUT_WITH_DEPS
+    assert calls == [("module_y", ["cowsay"])]  # venv pre-built off the readiness budget
+
+
+def test_prewarm_never_raises_on_install_failure(tmp_path, monkeypatch):
+    import engine  # noqa: PLC0415
+    monkeypatch.setattr(engine, "_read_tool_requires", lambda m: ["cowsay"])
+    def _boom(*a, **k):
+        raise RuntimeError("pip exploded")
+    monkeypatch.setattr(td, "ensure_tool_deps", _boom)
+    mgr = _make_manager(tmp_path)
+    # Dep failure must not block launch: still returns the (longer) timeout.
+    assert mgr._prewarm_deps_and_timeout("module_z") == engine._TOOL_READY_TIMEOUT_WITH_DEPS
+
+
 # ─── 路徑形狀 ───────────────────────────────────────────────────────────────────
 
 def test_venvs_root_default(monkeypatch):

@@ -838,6 +838,15 @@ def _read_tool_requires(module_id: str) -> list[str]:
         return []
 
 
+# Streamlit readiness budget for a tool launch. A frozen engine.exe re-launches
+# itself to host each Streamlit subprocess, whose first boot is slow; when the
+# tool also declares `requires:`, the (one-time) pip install + disk churn pushes
+# the first launch past the default → the start 500s. Give requires: tools a
+# longer first-launch budget (after pre-warming the venv off this budget).
+_TOOL_READY_TIMEOUT_DEFAULT = 30.0
+_TOOL_READY_TIMEOUT_WITH_DEPS = 120.0
+
+
 class ToolProcessManager:
     def __init__(self, log_dir: Path, selected_paths_file: Path, db_path: Path) -> None:
         self._log_dir = log_dir.resolve()
@@ -913,6 +922,30 @@ class ToolProcessManager:
             logging.warning("Per-tool dependency handling skipped for %s: %s",
                             deps_module, exc)
         return env
+
+    def _prewarm_deps_and_timeout(self, deps_module: str) -> float:
+        """Build the per-tool venv up-front (idempotent) and pick the readiness
+        timeout for the upcoming Streamlit launch.
+
+        Resolving deps here — before any process is spawned and before the
+        wait_for_port clock starts — keeps a slow first-run `pip install` off the
+        readiness budget, and returns a longer budget so the first launch of a
+        `requires:` tool doesn't 500 while the frozen Streamlit subprocess boots.
+        No requires → instant, default budget. Never raises (logged)."""
+        try:
+            requires = _read_tool_requires(deps_module)
+        except Exception:
+            requires = []
+        if not requires:
+            return _TOOL_READY_TIMEOUT_DEFAULT
+        try:
+            from core.tool_deps import ensure_tool_deps  # noqa: PLC0415
+            logging.info("Resolving per-tool dependencies for %s before launch "
+                         "(first run may install %s)…", deps_module, requires)
+            ensure_tool_deps(deps_module, requires)
+        except Exception as exc:  # never block launch on dep handling
+            logging.warning("Per-tool dep prewarm skipped for %s: %s", deps_module, exc)
+        return _TOOL_READY_TIMEOUT_WITH_DEPS
 
     def _spawn(self, script: Path, tool: ToolDefinition, port: int, label: str,
                plugin_id: str = "") -> subprocess.Popen:
@@ -1307,6 +1340,9 @@ class ToolProcessManager:
         if not output_script.exists():
             raise FileNotFoundError(output_script)
 
+        # Pre-warm per-tool deps off the readiness budget; longer budget if any.
+        ready_timeout = self._prewarm_deps_and_timeout(tool.tool_id)
+
         input_port = find_free_port()
         output_port = find_free_port(exclude={input_port})
 
@@ -1314,10 +1350,10 @@ class ToolProcessManager:
         self._output_process = self._spawn(output_script, tool, output_port, "output")
         self._tool_id = tool.tool_id
 
-        if not wait_for_port(input_port):
+        if not wait_for_port(input_port, timeout=ready_timeout):
             self.stop()
             raise RuntimeError(f"Streamlit input for {tool.tool_id} did not become ready in time")
-        if not wait_for_port(output_port):
+        if not wait_for_port(output_port, timeout=ready_timeout):
             self.stop()
             raise RuntimeError(f"Streamlit output for {tool.tool_id} did not become ready in time")
 
@@ -1361,11 +1397,12 @@ class ToolProcessManager:
         if not script.exists():
             raise FileNotFoundError(script)
 
+        ready_timeout = self._prewarm_deps_and_timeout(tool.tool_id)
         port = find_free_port()
         self._input_process = self._spawn(script, tool, port, "app")
         self._tool_id = tool.tool_id
 
-        if not wait_for_port(port):
+        if not wait_for_port(port, timeout=ready_timeout):
             self.stop()
             raise RuntimeError(f"Streamlit app for {tool.tool_id} did not become ready in time")
 
@@ -1411,9 +1448,14 @@ class ToolProcessManager:
                 output_process = self._spawn(self._sheet_output_script, self._sheet_tool_def, output_port, "output", plugin_id)
                 self._sheet_processes[plugin_id] = (input_process, output_process)
 
-        if not wait_for_port(input_port):
+        # Longer readiness budget when this tab's module declares `requires:`
+        # (first-run pip install + frozen Streamlit boot). Deps were built during
+        # the spawn above (_make_env).
+        ready_timeout = (_TOOL_READY_TIMEOUT_WITH_DEPS
+                         if _read_tool_requires(plugin_id) else _TOOL_READY_TIMEOUT_DEFAULT)
+        if not wait_for_port(input_port, timeout=ready_timeout):
             raise RuntimeError(f"Sheet tab {plugin_id} input did not become ready in time")
-        if not wait_for_port(output_port):
+        if not wait_for_port(output_port, timeout=ready_timeout):
             raise RuntimeError(f"Sheet tab {plugin_id} output did not become ready in time")
 
         with self._lock:
@@ -1650,6 +1692,12 @@ def streamlit_command_for_script(script: Path, port: int, log_dir: Path) -> list
 
 
 def run_streamlit_script(script_path: str, port: int) -> None:
+    # In the frozen exe, streamlit defaults global.developmentMode=true, which
+    # forbids setting server.port ("server.port does not work when
+    # global.developmentMode is true") and crashes every tool subprocess. Force
+    # the normal production setting so our explicit --server.port is accepted.
+    # Harmless in dev (already false). setdefault respects an explicit override.
+    os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
     import streamlit.web.cli as streamlit_cli
 
     sys.argv = [

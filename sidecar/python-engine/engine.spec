@@ -3,7 +3,15 @@
 import os as _os
 from pathlib import Path as _Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+
+# streamlit reads its own version via importlib.metadata at import time
+# (streamlit/version.py), so its .dist-info MUST be bundled or every Streamlit
+# tool subprocess crashes in the frozen exe with
+# "No package metadata was found for streamlit". recursive=True also covers
+# streamlit's deps that do the same. (This was the real reason frozen tools had
+# never actually launched end-to-end.)
+_metadata_datas = copy_metadata('streamlit', recursive=True)
 
 # Auto-collect every submodule of the platform core AND every plugin's domain,
 # so a newly-added plugin (or new submodules in an existing one) never silently
@@ -36,7 +44,7 @@ a = Analysis(
         ('core',         'core'),
         ('config',       'config'),         # declarative seed + policy samples (seed.yaml / permissions / external_systems / sandbox)
         ('sheets',       'sheets'),
-    ],
+    ] + _metadata_datas,
     hiddenimports=[
         # management modules (static-seed, not auto-detected by PyInstaller)
         'management_insights',

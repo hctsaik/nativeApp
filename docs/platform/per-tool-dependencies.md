@@ -139,13 +139,25 @@ venv 存在? ──否──▶ base_python -m venv <tool_venv_dir>
   →`base_python()` 第一順位即用它建 per-tool venv。**這讓乾淨工廠機（沒裝 Python）也能用自帶相依的工具。**
   版本鎖 3.11 與 frozen engine.exe 對齊（注入回 PYTHONPATH 的 site-packages 須 ABI 相容）。
   接線守門：`apps/host-electron/src/electron-env.test.js`。
-- [x] **frozen-exe 端到端實機驗證（2026-06-07 完成）**：`build-release.bat` 產打包，臨時建一個
-  `requires: cowsay` 的工具，用**打包後的 `engine.exe` + 自帶 Python**（`CIM_PYTHON` 注入）經 HTTP 啟動，
-  engine.log 出現 `Per-tool deps ready for module_099: ['cowsay']`、`(cached)`，且 venv 內確有 cowsay
-  → `RESULT: VENV_BUILT_WITH_COWSAY`。確認乾淨機免裝 Python 也能用自帶相依工具。
-- [ ] **首次啟動慢 → 可能 500（已知 UX 邊緣案例）**：宣告 `requires:` 的工具**第一次**啟動會即時
-  `pip install`（cowsay ~9s），阻塞 spawn 超過 `manager.start` 的就緒等待 → `POST /tools/<id>/start`
-  回 500；第二次（指紋快取）正常。緩解方向：上架時預建 venv、或首次啟動拉長就緒 timeout / 非同步裝相依。
+- [x] **frozen-exe 端到端實機驗證（2026-06-07 完成，start 200）**：臨時建一個 `requires: cowsay`
+  的 cv_framework 工具，用**打包後的 `engine.exe` + 自帶 Python**（`CIM_PYTHON` 注入）經 HTTP 啟動，
+  `POST /tools/<id>/start` 回 **200**（10s 內），engine.log `Per-tool deps ready ... ['cowsay']`→`(cached)`，
+  venv 內確有 cowsay。確認乾淨機免裝 Python 也能用自帶相依工具，且 frozen streamlit 工具能真正啟動。
+
+### frozen 端到端驗證揭露的兩個真正阻斷（已修；先前 frozen 從未真的跑起 streamlit）
+原本誤判為「首次 pip 太久 → 就緒逾時 500」，實機驗證後發現**真因是 frozen 打包缺陷**，與 timeout 無關：
+1. **streamlit metadata 未打包**：`streamlit/version.py` 在 import 時呼叫 `importlib.metadata.version("streamlit")`，
+   frozen 找不到 `.dist-info` → `PackageNotFoundError` → **每個 streamlit 子程序 import 即崩**。
+   修：`engine.spec` 加 `copy_metadata('streamlit', recursive=True)`（含 45 個相依 metadata）。
+2. **developmentMode 衝突**：frozen 下 streamlit 預設 `global.developmentMode=true`，禁止設 `server.port`
+   →`RuntimeError: server.port does not work when global.developmentMode is true`。
+   修：`run_streamlit_script` 設 `STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false`（dev 本就 false，無影響）。
+
+> 附帶防禦改善（非 500 主因，但保留）：啟動前 `_prewarm_deps_and_timeout()` 先建 per-tool venv（把首次 pip
+> 移出就緒等待預算），且 `requires:` 工具的就緒 timeout 由 30s→120s。見 engine.py `_start_regular/_start_app/sheet`。
+
+> ⚠️ 尚未驗：frozen 下 streamlit **前端 static 是否完整算繪**（start 200 只證明 server 起、port 綁定）。
+> 需啟動打包後 Electron app 以 GUI/MCP 截圖確認 iframe 內容；本輪未做。
 
 ## 9. 風險與緩解
 | 風險 | 緩解 |
