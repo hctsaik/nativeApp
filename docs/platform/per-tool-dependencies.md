@@ -139,9 +139,13 @@ venv 存在? ──否──▶ base_python -m venv <tool_venv_dir>
   →`base_python()` 第一順位即用它建 per-tool venv。**這讓乾淨工廠機（沒裝 Python）也能用自帶相依的工具。**
   版本鎖 3.11 與 frozen engine.exe 對齊（注入回 PYTHONPATH 的 site-packages 須 ABI 相容）。
   接線守門：`apps/host-electron/src/electron-env.test.js`。
-- [ ] **frozen-exe 端到端實機驗證（待辦）**：需用 `/package-build`（或 `build-release.bat`，已含取 Python 步驟）
-  產安裝包，跑一個 `requires:` 含未打包套件的工具，確認自帶 Python 經 `CIM_PYTHON` 正確建 venv 並可 import。
-  單元測試已涵蓋 frozen 分支邏輯與接線，但完整打包後的端到端尚未在本機跑過。
+- [x] **frozen-exe 端到端實機驗證（2026-06-07 完成）**：`build-release.bat` 產打包，臨時建一個
+  `requires: cowsay` 的工具，用**打包後的 `engine.exe` + 自帶 Python**（`CIM_PYTHON` 注入）經 HTTP 啟動，
+  engine.log 出現 `Per-tool deps ready for module_099: ['cowsay']`、`(cached)`，且 venv 內確有 cowsay
+  → `RESULT: VENV_BUILT_WITH_COWSAY`。確認乾淨機免裝 Python 也能用自帶相依工具。
+- [ ] **首次啟動慢 → 可能 500（已知 UX 邊緣案例）**：宣告 `requires:` 的工具**第一次**啟動會即時
+  `pip install`（cowsay ~9s），阻塞 spawn 超過 `manager.start` 的就緒等待 → `POST /tools/<id>/start`
+  回 500；第二次（指紋快取）正常。緩解方向：上架時預建 venv、或首次啟動拉長就緒 timeout / 非同步裝相依。
 
 ## 9. 風險與緩解
 | 風險 | 緩解 |

@@ -1,4 +1,7 @@
 @echo off
+REM This .bat is UTF-8 with Chinese; force UTF-8 codepage so cmd parses/echoes
+REM it correctly regardless of the console's default (cp950 etc.).
+chcp 65001 >nul
 REM =========================================================================
 REM  build-release.bat — 一鍵打包 CIM Hybrid Edge Platform
 REM
