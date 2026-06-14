@@ -15,8 +15,10 @@ import logging
 import engine
 
 
-def _sentinel(id_, name, sub, repo, path):
-    return {"id": id_, "name": name, "submodule": sub, "repo": repo, "sentinel": path}
+def _sentinel(id_, name, sub, repo, path, kind="submodule",
+              fix="git submodule update --init --recursive"):
+    return {"id": id_, "name": name, "kind": kind, "submodule": sub, "repo": repo,
+            "sentinel": path, "fix": fix}
 
 
 def test_check_submodules_clean_when_sentinels_present():
@@ -30,7 +32,8 @@ def test_check_submodules_detects_only_the_missing_one(monkeypatch, tmp_path):
     present.write_text("ok", encoding="utf-8")
     fake = (
         _sentinel("labeling", "影像標註 (Labeling)", "plugins/labeling",
-                  "ANnoTation", tmp_path / "absent" / "plugin.manifest.yaml"),
+                  "ANnoTation", tmp_path / "absent" / "plugin.manifest.yaml",
+                  kind="external", fix="scripts\\win\\link-labeling.bat"),
         _sentinel("ai4bi", "AI Report (AI4BI)", "vendor/AI4BI", "AI4BI", present),
     )
     monkeypatch.setattr(engine, "_SUBMODULE_SENTINELS", fake)
@@ -40,7 +43,28 @@ def test_check_submodules_detects_only_the_missing_one(monkeypatch, tmp_path):
     entry = missing[0]
     assert entry["submodule"] == "plugins/labeling"
     assert entry["repo"] == "ANnoTation"
-    assert entry["fix"] == "git submodule update --init --recursive"
+    # Labeling is now an external plugin (junction), not a git submodule — its fix
+    # is the junction setup script, NOT `git submodule update`.
+    assert entry["kind"] == "external"
+    assert "link-labeling" in entry["fix"]
+
+
+def test_ai4bi_missing_reports_git_submodule_fix(monkeypatch, tmp_path):
+    present = tmp_path / "present.yaml"
+    present.write_text("ok", encoding="utf-8")
+    fake = (
+        _sentinel("labeling", "影像標註 (Labeling)", "plugins/labeling",
+                  "ANnoTation", present, kind="external",
+                  fix="scripts\\win\\link-labeling.bat"),
+        _sentinel("ai4bi", "AI Report (AI4BI)", "vendor/AI4BI", "AI4BI",
+                  tmp_path / "absent" / "app.py"),
+    )
+    monkeypatch.setattr(engine, "_SUBMODULE_SENTINELS", fake)
+
+    missing = engine.check_submodules()
+    assert {m["id"] for m in missing} == {"ai4bi"}
+    assert missing[0]["kind"] == "submodule"
+    assert missing[0]["fix"] == "git submodule update --init --recursive"
 
 
 def test_check_submodules_skipped_in_frozen_build(monkeypatch, tmp_path):
@@ -54,7 +78,8 @@ def test_check_submodules_skipped_in_frozen_build(monkeypatch, tmp_path):
 
 def test_preflight_logs_greppable_actionable_error(monkeypatch, tmp_path, caplog):
     fake = (_sentinel("labeling", "影像標註 (Labeling)", "plugins/labeling",
-                      "ANnoTation", tmp_path / "nope.yaml"),)
+                      "ANnoTation", tmp_path / "nope.yaml",
+                      kind="external", fix="scripts\\win\\link-labeling.bat"),)
     monkeypatch.setattr(engine, "_SUBMODULE_SENTINELS", fake)
 
     with caplog.at_level(logging.ERROR):
@@ -64,8 +89,8 @@ def test_preflight_logs_greppable_actionable_error(monkeypatch, tmp_path, caplog
     messages = [r.getMessage() for r in caplog.records]
     # The marker must be greppable so the user can paste it to an AI assistant.
     assert any("[CIM-PREFLIGHT]" in m for m in messages)
-    # The exact fix command must appear verbatim.
-    assert any("git submodule update --init --recursive" in m for m in messages)
+    # The per-entry fix must appear verbatim so the user can act on it.
+    assert any("link-labeling" in m for m in messages)
 
 
 def test_preflight_silent_when_all_present(caplog):

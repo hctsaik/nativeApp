@@ -120,6 +120,27 @@ npm run test:python                                                     # 契約
 > 注意：`.gitmodules` 會多一筆 labeling 條目（與既有 AI4BI 並列）。釘 submodule commit = 釘 labeling
 > 對應的 `core` 契約版本，達成「可重現的 release」。
 
+### P4 — 改為外部資料夾掛載（2026-06-14）✅ 已完成（取代 P3 的 submodule 掛法）
+
+labeling 不再以 git submodule 巢狀於 nativeApp，而是改為**外部外掛**：原始碼放在 nativeApp
+旁的獨立 clone（`ANnoTation`，repo 同為 `github.com/hctsaik/ANnoTation`），透過 **目錄
+junction** 掛回 `sidecar/python-engine/plugins/labeling`。平台契約完全不變（仍靠
+`plugins/*/modules` glob 探索、`import plugins.labeling.*`、`parents[3]` 取 host `core`），
+因此**零執行碼改動**即可運作；探索／契約／打包 hiddenimports 等測試在 junction 下全綠。
+
+> 動機：讓「平台（nativeApp）」與「外掛（labeling）」連實體目錄都分離——nativeApp 樹內不再有
+> labeling 原始碼。代價：junction 不進 git，每次 clone／換機需跑一次
+> `scripts\win\link-labeling.bat` 重建（已納入 README 安裝步驟、preflight 與 doctor 的修法提示）。
+
+落地細節：
+- `.gitmodules` 移除 labeling 條目（僅留 AI4BI）；`.gitignore` 忽略 `plugins/labeling/`。
+- `engine.py` 的 submodule preflight 把 labeling 標為 `kind=external`，缺失時提示跑
+  `link-labeling.bat`（AI4BI 仍提示 `git submodule update`）；`preflight-submodules.bat`／
+  `verify-setup.ps1` 同步。
+- 新增 `scripts\win\link-labeling.bat` 建立 junction（預設指向 nativeApp 旁的 `..\ANnoTation`，
+  可用環境變數 `LABELING_SRC` 覆蓋）。
+- 日後更新 labeling：在外部 `ANnoTation` 資料夾 `git pull` 即可（junction 即時反映）。
+
 ## 4. 風險與防護（如何「不改壞功能」）
 
 | 風險 | 防護 |
@@ -138,3 +159,6 @@ npm run test:python                                                     # 契約
   （契約已由 P0 鎖住）。詳見 §3 P1 結論。
 - **P3 ✅**：labeling 已是 git submodule（`github.com/hctsaik/ANnoTation`），歷史保留、測試全綠、
   MCP golden path 驗證 OK。**目標達成：labeling 現與 AI4BI 同樣可獨立維護（submodule `git pull`）。**
+- **P4 ✅（2026-06-14，取代 P3 掛法）**：labeling 改為**外部資料夾 + 目錄 junction** 掛載，原始碼
+  移出 nativeApp 樹（獨立 clone `ANnoTation`）。零執行碼改動、測試全綠；新增
+  `scripts\win\link-labeling.bat`，preflight／doctor／README 同步。詳見 §3 P4。

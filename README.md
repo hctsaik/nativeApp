@@ -21,16 +21,27 @@ packages/
 
 ## Development
 
-> ⚠️ **不要用 GitHub「Download ZIP」取得本專案。** 影像標註（Labeling）與 AI Report
-> (AI4BI) 以 git **submodule** 掛載；ZIP / 淺 clone **不含** submodule 內容，會讓這些工具
-> 從清單消失、且 app 無法正常啟動。務必用 `git clone --recurse-submodules`。
+> ⚠️ **不要用 GitHub「Download ZIP」取得本專案。** AI Report (AI4BI) 以 git
+> **submodule** 掛載；ZIP / 淺 clone **不含** submodule 內容。影像標註（Labeling）則是
+> **外部外掛**：獨立 repo（ANnoTation），用目錄 junction 掛進 `plugins/labeling`。
+> 兩者缺任一都會讓對應工具從清單消失、app 無法正常啟動。
 
-Clone **with submodules** (Labeling + AI4BI live in git submodules):
+Clone the platform **with submodules** (AI4BI lives in a git submodule):
 
 ```bash
 git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git
 # already cloned without submodules? run this at the repo root:
 git submodule update --init --recursive
+```
+
+Mount the **Labeling** plugin — it lives in its own repo (ANnoTation) and is
+developed independently; the platform loads it from `plugins/labeling` via a
+directory junction:
+
+```bash
+# clone ANnoTation next to the nativeApp repo, then create the junction
+git clone https://github.com/hctsaik/ANnoTation.git ../ANnoTation
+scripts\win\link-labeling.bat
 ```
 
 Install JavaScript dependencies:
@@ -88,15 +99,19 @@ py -3.11 -m pip install -r sidecar/python-engine/requirements.txt
 # 4) AI4BI plugin（editable，裝進同一支 3.11；plotly/duckdb 等隨它一起裝）
 py -3.11 -m pip install -e "sidecar/python-engine/vendor/AI4BI[llm]"
 
-# 5) 影像標註 plugin（submodule，步驟 1 已拉下；torch/ultralytics 等專屬相依）
+# 5) 影像標註 plugin（外部 repo ANnoTation；clone 到 nativeApp 旁，再用 junction 掛載）
+git clone https://github.com/hctsaik/ANnoTation.git ..\ANnoTation
+scripts\win\link-labeling.bat
+#    專屬相依（torch/ultralytics 等）
 py -3.11 -m pip install -r "sidecar/python-engine/plugins/labeling/requirements-labeling.txt"
 
 # 6) 啟動整個 app（會自動偵測 Python 3.11）
 start-dev.bat
 ```
 
-> 影像標註（labeling）與 AI4BI 一樣是 git submodule（`github.com/hctsaik/ANnoTation`）；
-> 日後更新只需在 `sidecar/python-engine/plugins/labeling` 內 `git pull`。
+> 影像標註（labeling）是**外部外掛**：原始碼在獨立 repo（`github.com/hctsaik/ANnoTation`），
+> 透過目錄 junction 掛進 `sidecar/python-engine/plugins/labeling`。日後更新只需在那個外部
+> ANnoTation 資料夾內 `git pull`（junction 會即時反映）。
 
 ### ⚠️ 最關鍵的一步：對齊 engine 的 Python
 
@@ -125,7 +140,7 @@ engine 依賴（fastapi/streamlit/pandas）、AI4BI 依賴（ai4bi/duckdb/plotly
 |------|------|------|
 | engine 啟動後立刻退出 / 找不到 python | 機器上沒有 Python 3.11（`py -3.11` 不可用） | 安裝 Python 3.11；或啟動前設 `$env:PYTHON` 指向本機 3.11 的 `python.exe` |
 | 啟動 AI Report 報 `ModuleNotFoundError: ai4bi` | AI4BI 裝到了別支 Python（非 engine 用的那支） | 用步驟 4 同一支 python 重裝 |
-| 清單缺「影像標註」、或啟動印出 `[CIM-PREFLIGHT]` | submodule 未初始化（多半用了 ZIP 下載或 clone 沒帶 submodule） | 在專案根目錄 `git submodule update --init --recursive`；start-*.bat 啟動前會自動檢查並擋下 |
+| 清單缺「影像標註」、或啟動印出 `[CIM-PREFLIGHT]` | labeling 外掛未掛載（ANnoTation 未 clone 或 junction 未建立） | clone ANnoTation 到 nativeApp 旁，執行 `scripts\win\link-labeling.bat`；start-*.bat 啟動前會自動檢查並擋下 |
 | `vendor/AI4BI` 是空資料夾、AI Report 點了壞 | clone 時沒帶 submodule | `git submodule update --init --recursive` |
 | AI Report 的自然語言/LLM 功能無反應 | 未設 `ANTHROPIC_API_KEY` | 設環境變數後重啟（不設則走非-LLM 模式） |
 | 更新 AI4BI 後沒生效 | — | 進 `vendor/AI4BI` 做 `git pull`（editable 即時生效）；新增相依套件時才需再跑步驟 4 |

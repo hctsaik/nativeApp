@@ -107,38 +107,57 @@ def engine_commit() -> str:
     return commit
 
 
-# Sentinel files that only exist once each git submodule has been checked out.
-# Kept in sync with scripts/win/verify-setup.ps1 and preflight-submodules.bat.
-# A missing sentinel almost always means the project was obtained via GitHub
-# "Download ZIP" or cloned without --recurse-submodules (neither contains
-# submodule content). When that happens the plugin/sheet scans (which glob the
-# submodule dirs) silently match nothing, so tools vanish from the catalog with
-# NO error — these helpers turn that silent failure into a loud, pasteable one.
+# Sentinel files that only exist once each external dependency's content is in
+# place. Kept in sync with scripts/win/verify-setup.ps1 and preflight-submodules.bat.
+# Two delivery modes (each entry's "kind"):
+#   - "submodule" (AI4BI): content arrives via `git submodule update --init`.
+#   - "external"  (Labeling): developed in its own repo (ANnoTation) and mounted
+#     into plugins/labeling via a directory junction (scripts\win\link-labeling.bat).
+# A missing sentinel means that content isn't there (GitHub "Download ZIP", a clone
+# without --recurse-submodules, or the labeling junction not yet created). The
+# plugin/sheet scans (which glob these dirs) then silently match nothing, so tools
+# vanish from the catalog with NO error — these helpers turn that silent failure
+# into a loud, pasteable [CIM-PREFLIGHT] signal.
 _SUBMODULE_SENTINELS = (
     {
         "id": "labeling",
         "name": "影像標註 (Labeling)",
-        "submodule": "plugins/labeling",
+        "kind": "external",
+        "submodule": "plugins/labeling",  # mount point (junction → repo: ANnoTation)
         "repo": "ANnoTation",
         "sentinel": ROOT_DIR / "plugins" / "labeling" / "plugin.manifest.yaml",
+        "fix": "scripts\\win\\link-labeling.bat（先把 ANnoTation clone 到 nativeApp 旁）",
     },
     {
         "id": "ai4bi",
         "name": "AI Report (AI4BI)",
+        "kind": "submodule",
         "submodule": "vendor/AI4BI",
         "repo": "AI4BI",
         "sentinel": ROOT_DIR / "vendor" / "AI4BI" / "ai4bi" / "ui" / "app.py",
+        "fix": "git submodule update --init --recursive",
+    },
+    {
+        "id": "lv",
+        "name": "VisualLatent (LV)",
+        "kind": "submodule",
+        "submodule": "vendor/LV",
+        "repo": "LV",
+        "sentinel": ROOT_DIR / "vendor" / "LV" / "scripts" / "app.py",
+        "fix": "git submodule update --init --recursive",
     },
 )
 
 
 def check_submodules() -> list[dict]:
-    """Return descriptors for git submodules whose content is missing.
+    """Return descriptors for external deps whose content is missing.
 
     Empty list == all good. Each entry names the broken feature, where it should
-    live and how to fix it, so the result is useful both for logging and for the
-    /diagnostics endpoint (portal banner). Skipped in frozen/packaged builds,
-    where submodule content is bundled differently and these paths don't apply.
+    live and how to fix it (the fix differs by ``kind``: a git submodule update for
+    AI4BI, the junction setup script for the external Labeling plugin), so the
+    result is useful both for logging and for the /diagnostics endpoint (portal
+    banner). Skipped in frozen/packaged builds, where this content is bundled
+    differently and these paths don't apply.
     """
     if getattr(sys, "frozen", False):
         return []
@@ -148,9 +167,10 @@ def check_submodules() -> list[dict]:
             missing.append({
                 "id": sm["id"],
                 "name": sm["name"],
+                "kind": sm.get("kind", "submodule"),
                 "submodule": sm["submodule"],
                 "repo": sm["repo"],
-                "fix": "git submodule update --init --recursive",
+                "fix": sm.get("fix", "git submodule update --init --recursive"),
             })
     return missing
 
@@ -167,15 +187,15 @@ def preflight_submodules() -> list[dict]:
     if not missing:
         return missing
     names = ", ".join(m["name"] for m in missing)
-    logging.error("[CIM-PREFLIGHT] git submodule 未初始化，缺少：%s", names)
+    logging.error("[CIM-PREFLIGHT] 缺少外掛內容：%s", names)
     logging.error("[CIM-PREFLIGHT] 症狀：工作流程清單會缺少這些項目，或點了無法啟動。")
-    logging.error("[CIM-PREFLIGHT] 最可能原因：用 GitHub「Download ZIP」下載，或 clone 沒加 "
-                  "--recurse-submodules（ZIP 不含 submodule 內容）。")
+    logging.error("[CIM-PREFLIGHT] 常見原因：用 GitHub「Download ZIP」、clone 沒加 "
+                  "--recurse-submodules（AI4BI），或 labeling 的目錄 junction 尚未建立。")
     for m in missing:
-        logging.error("[CIM-PREFLIGHT]   - %s ← submodule %s（repo: %s）",
-                      m["name"], m["submodule"], m["repo"])
-    logging.error("[CIM-PREFLIGHT] 解法：在專案根目錄執行 → git submodule update --init --recursive")
-    logging.error("[CIM-PREFLIGHT] 若用 ZIP 下載請改用 → "
+        source = "外部外掛" if m.get("kind") == "external" else "submodule"
+        logging.error("[CIM-PREFLIGHT]   - %s ← %s %s（repo: %s）→ 解法：%s",
+                      m["name"], source, m["submodule"], m["repo"], m["fix"])
+    logging.error("[CIM-PREFLIGHT] AI4BI 若用 ZIP 下載請改用 → "
                   "git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git")
     return missing
 

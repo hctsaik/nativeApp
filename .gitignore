@@ -20,6 +20,11 @@ venv/
 .mcp.json
 .claude/
 
+# Labeling 外掛以外部資料夾（repo: ANnoTation）提供，透過目錄 junction 掛載到
+# plugins/labeling（見 scripts/win/link-labeling.bat）。junction 內容由 ANnoTation
+# 自己的 git 版控，不在本 repo 追蹤。
+sidecar/python-engine/plugins/labeling/
+
 # 大型二進位 / 測試資料
 external_exe/
 testData/

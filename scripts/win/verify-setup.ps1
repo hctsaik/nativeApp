@@ -131,9 +131,10 @@ if ($pyExe) {
 Section "Labeling 影像標註"
 $labelingDir = Join-Path $repoRoot 'sidecar\python-engine\plugins\labeling'
 if (Test-Path (Join-Path $labelingDir 'plugin.manifest.yaml')) {
-    Pass "labeling plugin 存在（plugin.manifest.yaml）"
+    Pass "labeling 外掛已掛載（plugins/labeling，外部 repo: ANnoTation）"
 } else {
-    Fail "找不到 plugins/labeling/plugin.manifest.yaml"
+    Fail "找不到 plugins/labeling/plugin.manifest.yaml（外部外掛未掛載）"
+    Write-Host "         → 先把 ANnoTation clone 到 nativeApp 旁，再執行 scripts\win\link-labeling.bat" -ForegroundColor DarkGray
 }
 # 平台契約檔：labeling 依賴的 host 共用碼（見 docs/platform/labeling-independence-plan.md §2）
 $contractFiles = @(

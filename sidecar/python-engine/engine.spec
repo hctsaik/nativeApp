@@ -21,7 +21,8 @@ _metadata_datas = copy_metadata('streamlit', recursive=True)
 #
 # NOTE (lean platform): this spec deliberately does NOT bundle plugin-specific
 # heavy deps (torch for labeling, plotly/duckdb for AI4BI). The platform stays
-# pure; each plugin (a separate git submodule) owns its deps and they are
+# pure; each plugin lives in its own repo (AI4BI as a git submodule, Labeling as
+# an external folder mounted at plugins/labeling) and owns its deps, which are
 # installed into per-tool isolated venvs at runtime (see core/tool_deps.py, #7).
 _auto_hidden = collect_submodules('core')
 try:

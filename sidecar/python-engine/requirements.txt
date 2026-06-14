@@ -1,7 +1,8 @@
 # CIM platform — CORE engine dependencies only.
 #
 # Keep this LEAN and plugin-agnostic. Plugin-specific heavy deps live with the
-# plugin (a separate git submodule) and install on top of this:
+# plugin (each in its own repo — AI4BI a git submodule, Labeling an external
+# folder mounted at plugins/labeling) and install on top of this:
 #   - Labeling:  plugins/labeling/requirements-labeling.txt  (torch / ultralytics
 #                / streamlit-image-annotation / streamlit-autorefresh / …)
 #   - AI4BI:     pip install -e vendor/AI4BI[llm]             (plotly / duckdb / …)
