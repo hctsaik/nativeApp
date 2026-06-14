@@ -1,0 +1,15 @@
+# LV / VisualLatent plugin — dataset curation & embedding analysis.
+#
+# Mirrors the bi (AI4BI) plugin: a single embedded full Streamlit app
+# (category: app). Source lives in its own repo, vendored as a git submodule at
+# sidecar/python-engine/vendor/LV; updates are a `git pull` in the submodule.
+# Depends one-way on core (never core -> lv).
+id: lv
+vendor: cimcore
+domain: data-quality
+version: 1.0.0
+depends_on:
+  - core
+provides:
+  modules:
+    current_path: plugins/lv/modules/

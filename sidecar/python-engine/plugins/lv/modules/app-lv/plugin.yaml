@@ -1,0 +1,36 @@
+id: app-lv
+name: 🔬 VisualLatent (LV)
+version: 1.0.0
+runner: lv
+category: app
+vendor: cimcore
+domain: data-quality
+enabled: true
+slug: lv
+author: system
+description: >
+  VisualLatent (LV) 資料策展 / 嵌入分析 — 視覺化 embedding（框選看圖、標籤分歧、
+  離群）、比較兩堆分布、完整度熱力圖（屬性棋盤 / 嵌入覆蓋圖 / 物件級 / 參照分佈）、
+  組考卷一致性、灰帶覆核、跨工具策展購物車。以「單一畫面內嵌的完整 Streamlit 應用」
+  方式啟動（id 以 app- 開頭 → category app；runner: lv → tools/lv_runner.py，
+  見 ToolProcessManager._start_app）。原始碼以 git submodule 置於
+  sidecar/python-engine/vendor/LV，可獨立持續開發；更新只需在 submodule 內 git pull，
+  平台端不需改動。模型權重不入 submodule，由 LV_MODELS_DIR / LV_INCEPTION_DIR 指向
+  平台 model-house。
+# 自帶相依（per-tool venv，#7）。鏡像 vendor/LV requirements.txt（單一真相在 LV repo；
+# 此處供框架在隔離 venv 安裝）。刻意不含 streamlit —— 用平台核心的 streamlit（LV 需 >=1.32）。
+requires:
+  - torch==2.6.0
+  - torchvision>=0.17.0
+  - transformers==4.49.0
+  - numpy==2.2.3
+  - pillow==11.1.0
+  - tqdm==4.67.1
+  - scikit-learn>=1.3.0
+  - scikit-image>=0.21.0
+  - umap-learn>=0.5.0
+  - plotly>=5.18.0
+  - chroma-hnswlib
+  - clean-fid>=0.1.35
+  - lpips>=0.1.4
+  - opencc-python-reimplemented
