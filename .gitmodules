@@ -1,3 +1,7 @@
 [submodule "sidecar/python-engine/vendor/AI4BI"]
 	path = sidecar/python-engine/vendor/AI4BI
 	url = https://github.com/hctsaik/AI4BI.git
+[submodule "sidecar/python-engine/vendor/LV"]
+	path = sidecar/python-engine/vendor/LV
+	url = https://github.com/hctsaik/LV.git
+	branch = uihuang_dev

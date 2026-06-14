@@ -568,6 +568,11 @@ function App() {
   // Track active tool so EXECUTE_COMPLETE closure can log sheet context
   const selectedToolIdRef = useRef("");
   useEffect(() => { selectedToolIdRef.current = selectedToolId; }, [selectedToolId]);
+  // Latest handleStart, callable from the (config-scoped) message listener without
+  // staleness. handleStart is a hoisted function declaration, so it's the current
+  // render's instance here; this assignment runs every render.
+  const handleStartRef = useRef(null);
+  handleStartRef.current = handleStart;
 
 
   // Fetch the current RBAC role once the sidecar URL is known (proves RBAC live).
@@ -826,6 +831,17 @@ function App() {
           cimLog("info", `OPEN_PREVIEW url=${payload.url} toolName=${payload.toolName}`);
           setPreviewModal({ url: payload.url, toolName: payload.toolName });
           break;
+        case MessageTypes.OPEN_TOOL: {
+          // A tool iframe (e.g. VisualLatent) asks to switch the active tool —
+          // same as picking it from the 工作流程 dropdown and pressing 啟動.
+          cimLog("info", `OPEN_TOOL toolId=${payload.toolId}`);
+          if (payload.toolId) {
+            suppressPollerNavUntilRef.current = Date.now() + 12000;
+            setSelectedToolId(payload.toolId);
+            handleStartRef.current?.(payload.toolId);
+          }
+          break;
+        }
       }
     }
     window.addEventListener("message", onMessage);

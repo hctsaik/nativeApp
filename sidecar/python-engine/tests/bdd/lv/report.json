@@ -1,0 +1,670 @@
+{
+  "engine_base": "http://127.0.0.1:8765",
+  "mcp_server_tools": [
+    "sidecar_health",
+    "sidecar_list_tools",
+    "sidecar_start_tool",
+    "sidecar_stop_tool",
+    "browser_screenshot",
+    "browser_click",
+    "browser_fill",
+    "browser_get_text",
+    "browser_wait_for",
+    "browser_close",
+    "assert_visible",
+    "assert_text",
+    "assert_no_error"
+  ],
+  "summary": {
+    "passed": 20,
+    "total": 20
+  },
+  "scenarios": [
+    {
+      "id": "S01",
+      "title": "LV launches via the literal cim-gui MCP server (stdio)",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "MCP stdio session ran end-to-end",
+          "ok": true,
+          "detail": "None"
+        },
+        {
+          "label": "called real MCP tool sidecar_start_tool",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "called real MCP tool browser_get_text",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "engine returned a live Streamlit URL",
+          "ok": true,
+          "detail": "http://127.0.0.1:56501"
+        },
+        {
+          "label": "page shows heading \"Dataset Analysis Tools\"",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "cim-gui MCP server advertises its 13 tools over stdio",
+          "ok": true,
+          "detail": "13"
+        }
+      ],
+      "evidence": [
+        "evidence/S01_mcp_stdio.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S02",
+      "title": "Feature-map popover documents the 5 tools + data contract",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "feature-map names the contract \"manifest.jsonl\"",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "feature-map states the five-tool relationship (先探索、再行動)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no traceback after opening popover",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S02_featuremap.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S03",
+      "title": "No-folder run shows a clear guard + onboarding",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "onboarding ① 資料 section visible (exact)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "onboarding ② 模型 section visible (exact)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no-folder Run shows the exact guard \"請先選擇至少一個資料夾\"",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no traceback on the guard path",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S03_no_folder_guard.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S04",
+      "title": "Missing-model and bad-path are distinct, non-crashing guards",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "bad path shows the path guard \"資料夾不存在\" (not the model banner)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "bad-path guard has no traceback",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "missing model shows the distinct banner \"models/ 內找不到模型檔\"",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "missing-model state has no traceback",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S04_bad_path_guard.png",
+        "evidence\\S04_no_model.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S05",
+      "title": "Navigation across all five LV tools keeps the shell intact",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "all five tools render distinct content without a traceback",
+          "ok": true,
+          "detail": "Compare Distributions, 完整度熱力圖, 組考卷, 灰帶覆核, Visualize Embeddings"
+        },
+        {
+          "label": "returned to Visualize keeps the shell",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S05_nav_back.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S06",
+      "title": "One-click coco8 demo extracts embeddings + writes manifest",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "extraction completed (完成)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "19 images across 2 splits reported",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "2-D scatter rendered",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "scatter legend shows per-class × split groups",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "manifest.jsonl written into train folder",
+          "ok": true,
+          "detail": "manifest.jsonl"
+        },
+        {
+          "label": "manifest entries carry the contract keys",
+          "ok": true,
+          "detail": "embedding_refs,labels,path,phash,sha256,split"
+        }
+      ],
+      "evidence": [
+        "evidence\\S06_demo_scatter.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S07",
+      "title": "Selection surfaces member images; selection→indices contract",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "右側 選取 / 匯出清單 panels present",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "default unselected view ranks by 離群度",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "selection_points_to_indices de-dups & preserves order",
+          "ok": true,
+          "detail": "[3, 5]"
+        },
+        {
+          "label": "selection → records_to_csv surfaces exactly the selected images",
+          "ok": true,
+          "detail": "['bird_00.jpg', 'bird_02.jpg']"
+        }
+      ],
+      "evidence": [
+        "evidence\\S07_selection_panel.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S08",
+      "title": "Label-disagreement recolour; compute_label_disagreement contract",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "著色依據 offers 標籤分歧",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "agreeing neighbourhood scores 0",
+          "ok": true,
+          "detail": "[0.0, 0.0, 0.0, 0.0]"
+        },
+        {
+          "label": "disagreeing neighbourhood scores >0",
+          "ok": true,
+          "detail": "[1.0, 1.0, 1.0, 1.0]"
+        },
+        {
+          "label": "partial-disagreement neighbourhood scores 0.5",
+          "ok": true,
+          "detail": "0.5"
+        }
+      ],
+      "evidence": [
+        "evidence\\S08_label_disagreement.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S09",
+      "title": "Outlier sort surfaces isolated images; compute_outlier_scores contract",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "outlier view carries 非品質判定 disclaimer",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "the distinct-direction point ranks most outlying",
+          "ok": true,
+          "detail": "[0.001, 0.003, 0.003, 0.975]"
+        },
+        {
+          "label": "candidates_in_reference drops each point's self-neighbour (no 0 from self-match)",
+          "ok": true,
+          "detail": "[0.001, 0.001, 0.001, 0.95]"
+        }
+      ],
+      "evidence": [
+        "evidence\\S09_outlier_sort.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S10",
+      "title": "NN query chain; find_similar_indices contract",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "相似 panel available for query chains",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "query itself excluded",
+          "ok": true,
+          "detail": "[1, 2]"
+        },
+        {
+          "label": "neighbours ascending by distance",
+          "ok": true,
+          "detail": "[1.0, 1.0]"
+        },
+        {
+          "label": "k clamped to N-1",
+          "ok": true,
+          "detail": "3"
+        }
+      ],
+      "evidence": [
+        "evidence\\S10_nn_chain.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S11",
+      "title": "phash near-dup scan finds the planted leakage pair",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "重複 panel present for duplicate scans",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "cross-split duplicate(s) detected",
+          "ok": true,
+          "detail": "1 pair(s)"
+        },
+        {
+          "label": "every reported pair spans different splits",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "pairs returned with i<j, closest-first",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [],
+      "error": ""
+    },
+    {
+      "id": "S12",
+      "title": "Compare Distributions projects two folders",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "Compare tool renders its Folder A / Folder B inputs",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "Compare tool has no traceback",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "joint projection builds two colour-coded traces",
+          "ok": true,
+          "detail": "2"
+        },
+        {
+          "label": "PCA/t-SNE/UMAP projection toggles present",
+          "ok": true,
+          "detail": "3"
+        }
+      ],
+      "evidence": [
+        "evidence\\S12_compare.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S13",
+      "title": "Completeness coverage health + fake-complete guard",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "completeness tool renders its Coverage Gap Analysis UI",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "completeness tool renders without traceback",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "high-count low-diversity cell → 假完整",
+          "ok": true,
+          "detail": "假完整"
+        },
+        {
+          "label": "high-count high-diversity cell → 過多",
+          "ok": true,
+          "detail": "過多"
+        },
+        {
+          "label": "empty cell → 空",
+          "ok": true,
+          "detail": "空"
+        },
+        {
+          "label": "Coverage Health in [0,100]",
+          "ok": true,
+          "detail": "100.0"
+        },
+        {
+          "label": "STATE_NA excluded from scoring (1 healthy + 1 NA → health 100)",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S13_completeness.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S14",
+      "title": "Curation cart exports an auditable sha256 CSV",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "cart / 匯出清單 controls present on the loaded page",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "cart CSV header exact",
+          "ok": true,
+          "detail": "index,filename,path,label,split,sha256,source,score,reason"
+        },
+        {
+          "label": "every exported row carries a manifest sha256 (content-addressed)",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence/S14_cart.csv"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S15",
+      "title": "Curation log persists & replays by sha256",
+      "tier": "C",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "curation_log CSV header exact",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "on-disk curation log reloads newest-first (survives restart)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "match_shas_to_indices maps known sha, skips unknown, de-dups",
+          "ok": true,
+          "detail": "[7]"
+        }
+      ],
+      "evidence": [
+        "evidence/_curlog/curation_log.jsonl"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S16",
+      "title": "LV and a labeling module both start in one engine session",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "engine lists both app-lv and module_026",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "app-lv serves /_stcore/health == ok",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "distinct run_ids per tool",
+          "ok": true,
+          "detail": "d86b8c99bbc7 vs 420df411b5ab"
+        },
+        {
+          "label": "module_026 renders its 資料來源 input pane",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [
+        "evidence\\S16_module_026.png"
+      ],
+      "error": ""
+    },
+    {
+      "id": "S17",
+      "title": "RBAC gates LV launch by role",
+      "tier": "A",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "operator is DENIED execute on app-lv (scoped role)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "operator is ALLOWED execute on module_026 (positive control)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "admin (all:true) is ALLOWED execute on app-lv",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [],
+      "error": ""
+    },
+    {
+      "id": "S18",
+      "title": "Curated subset CSV is a true subset of the manifest",
+      "tier": "B",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "train manifest available for reconciliation",
+          "ok": true,
+          "detail": "12 entries"
+        },
+        {
+          "label": "every cart sha256 resolves to a manifest entry (⊆)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "labeling scan_folder ingests the curated folder",
+          "ok": true,
+          "detail": "12 items"
+        },
+        {
+          "label": "curated images present in labeling's ingested set",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "module_026 (資料來源) is live to ingest the curated folder",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [],
+      "error": ""
+    },
+    {
+      "id": "S19",
+      "title": "Manifest schema validates across the boundary",
+      "tier": "C",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "manifest loaded",
+          "ok": true,
+          "detail": "12 entries"
+        },
+        {
+          "label": "all 11 contract keys present",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "label": "labels is list, embedding_refs is dict",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "sha256 is 64 hex",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "phash is 16 hex or null",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "corrupt/blank lines skipped, valid entry survives",
+          "ok": true,
+          "detail": "['a.jpg']"
+        }
+      ],
+      "evidence": [],
+      "error": ""
+    },
+    {
+      "id": "S20",
+      "title": "Cart→quiz guard + incremental manifest round-trip",
+      "tier": "C",
+      "status": "PASS",
+      "checks": [
+        {
+          "label": "cart→quiz guard (購物車至少要 4 張) is wired in app.py",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "select_gray_zone ranks most-ambiguous first, clamps k",
+          "ok": true,
+          "detail": "[1, 2]"
+        },
+        {
+          "label": "exactly the edited file was re-hashed",
+          "ok": true,
+          "detail": "['images/img_1.jpg']"
+        },
+        {
+          "label": "unchanged files kept their sha256 (size+mtime fast-path)",
+          "ok": true,
+          "detail": ""
+        }
+      ],
+      "evidence": [],
+      "error": ""
+    }
+  ]
+}

@@ -44,6 +44,9 @@ apps/host-electron/python-runtime/
 # 詳見 docs/platform/catalog-source-of-truth-discussion.md
 sidecar/python-engine/config/*.sqlite
 
+# per-tool venvs（core/tool_deps.py 依 plugin.yaml requires: 自動重建的隔離快取），不進版控
+sidecar/python-engine/.tool-venvs/
+
 # pytest cache
 .pytest_cache/
 

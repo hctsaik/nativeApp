@@ -1,0 +1,4 @@
+index,filename,path,label,split,sha256,source,score,reason
+0,bird_00.jpg,images/bird_00.jpg,bird,train,7ca1f7380d0cd97054383fe513e8efdd097dc2529f9f2b970228794d3018e3b5,disagreement,0.42,bdd
+1,bird_01.jpg,images/bird_01.jpg,bird,train,c7cd40f3039ca0268a7723617884ebab82b9101e23769af215ef48dbc478f5e5,disagreement,0.42,bdd
+2,bird_02.jpg,images/bird_02.jpg,bird,train,d29075adb08f2f29fe4f9868df0c74eb0e0a2b685a42833c1a864ed9cb01cbf0,disagreement,0.42,bdd

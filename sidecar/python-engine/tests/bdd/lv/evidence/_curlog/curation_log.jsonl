@@ -1,0 +1,2 @@
+{"ts": "2026-06-14T09:00:00", "reason": "older", "items": [{"sha256": "aa"}]}
+{"ts": "2026-06-14T10:00:00", "reason": "newer", "items": [{"sha256": "bb"}]}

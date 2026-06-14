@@ -9,6 +9,9 @@ export const MessageTypes = Object.freeze({
   DISPLAY_UPDATE: "DISPLAY_UPDATE",
   SWITCH_TAB: "SWITCH_TAB",
   OPEN_PREVIEW: "OPEN_PREVIEW",
+  // A tool iframe asks the host to switch the active tool to payload.toolId
+  // (e.g. VisualLatent hands a batch to Labeling and wants module_026 opened).
+  OPEN_TOOL: "OPEN_TOOL",
 });
 
 export function createMessage(type, payload = {}) {
