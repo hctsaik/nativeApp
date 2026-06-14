@@ -12,10 +12,27 @@ cd apps/host-electron && npm run dev
 
 ### 首次設定（解壓 source zip 或全新 clone 後）
 ```powershell
+# 1) 平台 + submodule 外掛（AI4BI / LV）。clone 時帶 --recurse-submodules，
+#    或事後補：
+git submodule update --init --recursive
+
+# 2) Labeling 外掛是「外部 junction」（不在 git 樹內，每次 clone 要重掛一次）：
+git clone https://github.com/hctsaik/ANnoTation.git ..\ANnoTation
+scripts\win\link-labeling.bat            # 建 plugins\labeling -> ..\ANnoTation junction
+
+# 3) 相依
 npm install
-pip install -r sidecar/python-engine/requirements.txt
+pip install -r sidecar/python-engine/requirements.txt                       # engine 核心（lean）
+py -3.11 -m pip install -r sidecar/python-engine/plugins/labeling/requirements-labeling.txt  # Labeling 專屬
+
+# 4) 啟動
 start-dev.bat
 ```
+> 完整拓樸（submodule vs junction、約束）見 [`docs/platform/repo-topology.md`](docs/platform/repo-topology.md)。
+> 各工具的重量級相依（LV 的 torch/umap、Labeling 的 ultralytics 等）**不在上面**，
+> engine 首次啟動該工具時才依 `plugin.yaml requires:` 建隔離 per-tool venv 自動安裝。
+> 已用全新資料夾驗證過上述步驟可 E2E 跑通（clone×3→junction→pip/npm→engine 啟動，
+> catalog 正確註冊 app-lv + sheet-annotation + labeling 模組）。
 
 ## 協作規則
 
