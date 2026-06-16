@@ -123,6 +123,20 @@ class AnnotationService:
             return _task_to_dict(existing)
 
         connector = self._get_connector(tenant)
+
+        # 通知外部系統認領（best-effort：連線失敗不阻斷流程）
+        try:
+            connector.mark_task_claimed(ant_id)
+        except RuntimeError as exc:
+            if "已被他人認領" in str(exc):
+                raise ConflictError(f"此任務已被他人認領（ant_id={ant_id}）") from exc
+            raise
+        except ConnectionRefusedError:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "mark_task_claimed 連線失敗，跳過回寫（ant_id=%s）", ant_id
+            )
+
         detail = connector.get_ant_task_detail(ant_id, tenant.target_format)
         download_url = detail.download_url
 

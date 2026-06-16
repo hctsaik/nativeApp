@@ -73,6 +73,10 @@ class ExternalSystemConnector(ABC):
         """
         ...
 
+    def mark_task_claimed(self, ant_id: str) -> None:
+        """通知外部系統任務已被認領（ant_active=1）。如不支援可 pass。"""
+        pass
+
     @abstractmethod
     def health_check(self) -> ConnectorHealth:
         """檢查與外部系統的連線狀態。"""

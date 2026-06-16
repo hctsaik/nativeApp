@@ -103,6 +103,28 @@ class RestConnector(ExternalSystemConnector):
         data: dict = resp.json()
         return TaskDetailResponse(download_url=data["download_url"])
 
+    def mark_task_claimed(self, ant_id: str) -> None:
+        """
+        PATCH {base}/tasks/{ant_id}/claim
+        成功 (200) → 靜默 return
+        409        → raise RuntimeError（任務已被他人認領）
+        連線失敗   → raise ConnectionRefusedError
+        """
+        url = f"{self._base}/tasks/{ant_id}/claim"
+        try:
+            resp = httpx.patch(url, headers=self._headers, timeout=self._timeout)
+        except httpx.ConnectError as exc:
+            raise ConnectionRefusedError(f"無法連線至外部系統：{url}") from exc
+
+        if resp.status_code == 409:
+            raise RuntimeError("任務已被他人認領")
+        if resp.status_code == 404:
+            raise RuntimeError(f"外部系統找不到任務 {ant_id!r}（404）")
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"PATCH {url} 回傳非預期狀態碼 {resp.status_code}：{resp.text[:200]}"
+            )
+
     def health_check(self) -> ConnectorHealth:
         """
         GET {base}/getAntList，只測連線狀態，不解析回應內容。
