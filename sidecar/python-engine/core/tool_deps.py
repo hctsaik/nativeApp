@@ -152,10 +152,18 @@ def _frozen_python_candidates() -> list[list[str]]:
 
 # ─── 指紋（冪等） ────────────────────────────────────────────────────────────────
 
-def _requires_fingerprint(requires: list[str]) -> str:
-    """以 sorted(requires) 的 JSON 算 sha256，作為冪等指紋。"""
+def requires_fingerprint(requires: list[str]) -> str:
+    """以 sorted(requires) 的 JSON 算 sha256，作為冪等指紋。
+
+    公開函式：per-tool venv 指紋與 dep-pack manifest 共用同一演算法（core.deppack
+    依賴本函式），確保「裝置端的 dep-pack 是給這組 requires 的」可被比對。
+    """
     payload = json.dumps(sorted(requires)).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+#: 既有內部呼叫與測試相容的別名。
+_requires_fingerprint = requires_fingerprint
 
 
 def _read_fingerprint(venv_dir: Path) -> str | None:
@@ -270,7 +278,14 @@ def ensure_tool_deps(
                          message="無宣告相依，不建 venv。")
 
     target_venv = Path(venv_dir) if venv_dir is not None else tool_venv_dir(tool_id)
-    wheelhouse = Path(wheelhouse) if wheelhouse is not None else _wheelhouse_from_env()
+    if wheelhouse is not None:
+        wheelhouse = Path(wheelhouse)
+    else:
+        try:
+            wheelhouse = _resolve_wheelhouse(tool_id, requires)
+        except Exception as exc:  # dep-pack 存在但驗證失敗 → fail-closed,不退回連 PyPI
+            return DepResult(ok=False, venv_dir=target_venv,
+                             message=f"dep-pack 驗證失敗，拒絕安裝（避免裝到被竄改的相依）：{exc}")
 
     lock_path = venvs_root() / f"{tool_id}.lock"
     try:
@@ -284,6 +299,28 @@ def ensure_tool_deps(
 def _wheelhouse_from_env() -> Path | None:
     val = os.environ.get(ENV_WHEELHOUSE)
     return Path(val) if val else None
+
+
+def _resolve_wheelhouse(tool_id: str, requires: list[str]) -> Path | None:
+    """決定離線安裝來源（wheelhouse）。優先序：
+
+      1. 裝置端 **per-tool dep-pack 快取**（`core.deppack`,驗章後才用;驗證失敗會
+         拋 DepPackError 讓 ensure_tool_deps fail-closed）。
+      2. 全域 `CIM_WHEELHOUSE`（手動/legacy,不驗章）。
+      3. 皆無 → None（連 PyPI 線上裝,沿用既有行為）。
+
+    deppack 採 **lazy import**：deppack 在載入期 `from core.tool_deps import ...`,若這裡
+    在模組頂層 import deppack 會形成載入期循環;改在執行期 import 即無此問題。
+    """
+    try:
+        from core import deppack  # noqa: PLC0415  (lazy：避免載入期循環)
+    except Exception:
+        deppack = None
+    if deppack is not None:
+        wh = deppack.prepare_tool_wheelhouse(tool_id, requires)  # 驗證失敗 → 拋 DepPackError
+        if wh is not None:
+            return wh
+    return _wheelhouse_from_env()
 
 
 def _ensure_locked(

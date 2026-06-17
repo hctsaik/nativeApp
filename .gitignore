@@ -47,6 +47,9 @@ sidecar/python-engine/config/*.sqlite
 # per-tool venvs（core/tool_deps.py 依 plugin.yaml requires: 自動重建的隔離快取），不進版控
 sidecar/python-engine/.tool-venvs/
 
+# dep-pack 裝置端快取（core/deppack.py：agent/商店 copy 來的 wheelhouse），衍生物不進版控
+sidecar/python-engine/.deppack-cache/
+
 # pytest cache
 .pytest_cache/
 

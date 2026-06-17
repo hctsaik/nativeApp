@@ -165,4 +165,4 @@ venv 存在? ──否──▶ base_python -m venv <tool_venv_dir>
 | frozen 下找不到 real Python | release 自帶 standalone Python 3.11 並注入 `CIM_PYTHON`（見 §8）；仍找不到時回明確錯誤訊息 + 可手動 `CIM_PYTHON` 覆寫 |
 | 每次啟動都跑 pip 拖慢 | `.cim-deps.json` 指紋快取，相同 requires 秒過 |
 | 兩子程序同時建 venv | venv 父目錄 file lock / atomic rename |
-| 工廠離線裝不到套件 | `CIM_WHEELHOUSE` + `--no-index`，部署前 `pip download` 備好 wheel |
+| 工廠離線裝不到套件 | `CIM_WHEELHOUSE` + `--no-index`，部署前 `pip download` 備好 wheel。**進階：dep-pack**（`core/deppack.py` + `tools/build_deppack.py`）把某工具的 `requires:` 預先打成簽記 sha256 的 wheelhouse 包,copy 到裝置 `CIM_DEPPACK_CACHE` 後,`ensure_tool_deps` 自動驗章 + `pip --no-index` 離線裝（驗章失敗 fail-closed）。見 [`modules-independence-and-store-plan.md`](modules-independence-and-store-plan.md) §6/§11。 |

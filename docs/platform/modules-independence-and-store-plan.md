@@ -232,8 +232,18 @@ deppack:<tool_id>@<dep-fingerprint>
   push 後平台 submodule（pin 同一 SHA）即可對接 GitHub；fresh clone 用 `git clone --recurse-submodules` 一次到位。
 - 平台變更在分支 `feat/extract-cim-modules`（未動 main，待 review 合併）。
 
+### P3 dep-pack 核心鏈 — ✅ 已完成（2026-06-18，「產 wheelhouse 包 + 離線裝進 per-tool venv」）
+> 這是 §6 的最關鍵一段：讓「沒 Python/沒環境」的機器,agent/商店把 wheelhouse copy 來後能**離線**裝起重相依。registry blob 端點/續傳/商店 UI 仍屬後續。
+- [x] `core/deppack.py`：`build_wheelhouse()`（`pip download`→wheelhouse）、`compute_manifest`/`verify_wheelhouse`（**逐檔 sha256**）、`DepPackManifest`（含 `requires_fingerprint`/`python_tag`/`platform_tag`）、裝置端快取路徑（`CIM_DEPPACK_CACHE`，預設 `.deppack-cache/`，不綁 log-dir）、`prepare_tool_wheelhouse()`（驗章通過才回 wheelhouse；壞掉拋 `DepPackError`）。
+- [x] `core/tool_deps.py`：`_resolve_wheelhouse(tool_id, requires)` 優先用「per-tool dep-pack 快取（驗章後 `pip --no-index --find-links`）」→ 退 `CIM_WHEELHOUSE` → 退線上 PyPI；**驗章失敗 fail-closed（不退回連 PyPI）**。`requires_fingerprint` 提為公開,與 dep-pack 共用。**引擎零改**（`_make_env`/`_prewarm` 兩呼叫點自動受惠）。
+- [x] `tools/build_deppack.py`：CLI（讀 plugin.yaml `requires:` / `--requires`；跨平台 `--platform/--python-version/--abi`；`--dry-run` 預覽）。
+- [x] `tests/test_deppack.py`（20 測試：產包/manifest round-trip/逐檔驗證/竄改·缺·多檔偵測/跨平台指令組裝/`prepare` 三態/與 tool_deps 離線裝 + fail-closed + 無包退線上）。
+- [x] `.gitignore` 加 `.deppack-cache/`。**測試全綠**：`npm run test:python` 711 passed。
+- 端到端用法：管理機 `py -3.11 tools/build_deppack.py plugins/lv/modules/app-lv --platform win_amd64 --python-version 3.11 --abi cp311` → 把 `release/deppacks/app-lv/` copy 到裝置 `CIM_DEPPACK_CACHE` → 首次啟動 LV 自動驗章 + 離線裝進 per-tool venv。
+- ⚠️ 尚未做（P3 其餘）：registry 的 dep-pack **binary blob 端點 + Range 續傳 + 串流落地**（目前靠 agent/商店把 `release/deppacks/<id>/` copy 過去）、dep-pack 簽章（目前靠逐檔 sha256 manifest；簽章升級隨 P0-SEC/Ed25519）、商店「下載中/暫停/重試」UI。
+
 ### 其餘階段
-- [ ] P0-SEC　- [ ] P1　- [ ] P2 商店　- [ ] P3 dep-pack　- [ ] P4 auto-update　- [ ] P5
+- [ ] P0-SEC　- [ ] P1　- [ ] P2 商店　- [x] **P3 dep-pack 核心鏈（產包+離線裝,已完成）** / 其餘 P3（blob 端點·續傳·簽章·UI 未做）　- [ ] P4 auto-update　- [ ] P5
 
 ---
 
