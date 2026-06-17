@@ -18,10 +18,12 @@ rem ============================================================================
 set "REPO_ROOT=%~dp0..\.."
 set "LABELING_SENTINEL=%REPO_ROOT%\sidecar\python-engine\plugins\labeling\plugin.manifest.yaml"
 set "AI4BI_SENTINEL=%REPO_ROOT%\sidecar\python-engine\vendor\AI4BI\ai4bi\ui\app.py"
+set "CIMMODULES_SENTINEL=%REPO_ROOT%\sidecar\python-engine\plugins\cim-modules\modules\module_001\plugin.yaml"
 
 set "MISSING="
-if not exist "%LABELING_SENTINEL%" set "MISSING=1"
-if not exist "%AI4BI_SENTINEL%"   set "MISSING=1"
+if not exist "%LABELING_SENTINEL%"   set "MISSING=1"
+if not exist "%AI4BI_SENTINEL%"      set "MISSING=1"
+if not exist "%CIMMODULES_SENTINEL%" set "MISSING=1"
 
 if not defined MISSING exit /b 0
 
@@ -38,6 +40,8 @@ if not exist "%LABELING_SENTINEL%" echo            - Labeling   external plugin:
 if not exist "%LABELING_SENTINEL%" echo                         FIX: clone ANnoTation next to nativeApp, then run scripts\win\link-labeling.bat
 if not exist "%AI4BI_SENTINEL%"   echo            - AI Report  submodule: vendor\AI4BI       repo: AI4BI
 if not exist "%AI4BI_SENTINEL%"   echo                         FIX at repo root: git submodule update --init --recursive
+if not exist "%CIMMODULES_SENTINEL%" echo            - CV Modules submodule: plugins\cim-modules  repo: nativeApp_modules
+if not exist "%CIMMODULES_SENTINEL%" echo                         FIX at repo root: git submodule update --init --recursive
 echo.
 echo  If AI Report was obtained via ZIP download, clone with submodules instead:
 echo            git clone --recurse-submodules https://github.com/hctsaik/nativeApp.git

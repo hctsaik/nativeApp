@@ -12,7 +12,7 @@ cd apps/host-electron && npm run dev
 
 ### 首次設定（解壓 source zip 或全新 clone 後）
 ```powershell
-# 1) 平台 + submodule 外掛（AI4BI / LV）。clone 時帶 --recurse-submodules，
+# 1) 平台 + submodule 外掛（AI4BI / LV / cim-modules）。clone 時帶 --recurse-submodules，
 #    或事後補：
 git submodule update --init --recursive
 
@@ -116,7 +116,7 @@ engine 每次啟動 `_initialize()` 都從上述 YAML 冪等重建——**檔案
 ## 工具開發規則
 
 - **建工具骨架用 scaffold CLI（首選，免 AI agent）**：`python tools/scaffold.py module <NNN|省略=自動配下一個空號> [--name ..] [--external-gui]` / `sheet <id> --tabs a,b --create-stubs` / `plugin <name>` / `connector <name>`。form-first 預設零 Streamlit code。
-- **No-code input（宣告式表單）**：簡單工具可**不寫 `*_input.py`**，改在 `plugin.yaml` 用 `form:` 宣告輸入欄位（type: text/number/integer/select/multiselect/checkbox/slider/textarea/file/date/time），框架（`cv_framework_runner`）自動渲染並把值傳給 `execute_logic(params)`。範例 `scripts/module_007/`（零 input 程式碼）；引擎 `core/forms.py`。
+- **No-code input（宣告式表單）**：簡單工具可**不寫 `*_input.py`**，改在 `plugin.yaml` 用 `form:` 宣告輸入欄位（type: text/number/integer/select/multiselect/checkbox/slider/textarea/file/date/time），框架（`cv_framework_runner`）自動渲染並把值傳給 `execute_logic(params)`。範例 `plugins/cim-modules/modules/module_007/`（零 input 程式碼）；引擎 `core/forms.py`。
 - **No-code output**：`plugin.yaml` 用 `output:` 宣告呈現區塊（`core/output.py`），免寫 `*_output.py`。
 - **No-code 外部 GUI 工具（Label tool 模式）**：`plugin.yaml` 宣告 `external_gui:`（exe 來源 / args / collect.parse），框架渲染啟動鈕、自動回收輸出、且**啟動前檢查 RBAC**；零 input/process/output code。引擎 `core/external_gui.py`。
 - **工具自帶 Python 相依（per-tool deps）**：工具需要額外套件時，在 `plugin.yaml` 加 `requires: [pkg>=x, ...]`（或 `scaffold module --requires a,b`）。engine 啟動該工具時自動建**隔離 per-tool venv** 安裝並注入子程序 PYTHONPATH，不汙染全域、不必改 `requirements.txt`。無 `requires:` 的工具零成本。frozen 打包需 `CIM_PYTHON` 指向真 Python；離線工廠用 `CIM_WHEELHOUSE`（`pip --no-index`）。引擎 `core/tool_deps.py`，詳見 [`docs/platform/per-tool-dependencies.md`](docs/platform/per-tool-dependencies.md)。
@@ -124,6 +124,7 @@ engine 每次啟動 `_initialize()` 都從上述 YAML 冪等重建——**檔案
 - 每個工具由兩個 Streamlit 程序組成（split-tool 架構）：`*_input.py`（或宣告式 `form:`）+ `*_output.py`（或宣告式 `output:`）
 - Output page **禁止** `time.sleep + st.rerun()` polling loop；portal 收到 `EXECUTE_COMPLETE` 後會自動 reload
 - **新工具免改 engine.py**：`engine._scan_and_register_plugins` 啟動時掃 `scripts/*/plugin.yaml` + `plugins/*/modules/*/plugin.yaml` 自動註冊；`engine.py` 的 seed 區塊**只剩** sheet/management/external 等無 plugin.yaml 的工具。
+- **第一方 CV 模組住 `plugins/cim-modules/`（git submodule → `nativeApp_modules`）**：`scaffold module` 預設就產到這裡。改完模組要**先在 submodule 內 `git add/commit/push`，再回平台 `git add plugins/cim-modules` 釘新指標**（同 LV/AI4BI 流程）。本機開發改完直接 `POST /reload` 即生效，不需 commit。模組反向找 host 共用碼用 `plugins/*/modules/` 深度（比 scripts/ 深 2 層）；契約由 `tests/test_modules_platform_contract.py` 鎖死（只允許 `core.*` + `scripts/shared/{_config_base,_help}`）。設計見 [`docs/platform/modules-independence-and-store-plan.md`](docs/platform/modules-independence-and-store-plan.md)。
 - **熱載（免重啟整個 app）**：新增/改 plugin.yaml 或 sheet YAML 後，呼叫 `POST /reload`（engine 端點，可由 MCP 或 `curl` 觸發；portal 上的「重新載入工具」鈕已移除）即重掃並出現（執行中的工具會自動重啟套用改動）。connector 同樣經 `/reload` 的 `autodiscover()` 生效。
 - 新增 Sheet Tab：在 `sidecar/python-engine/sheets/` 或 `plugins/<plugin>/sheets/` 建立或修改 YAML，而非修改 engine.py（drop YAML 即自動註冊 `sheet-<id>` 可啟動工具）。
 - 廢棄模組（010、019、022-025）：已標記 `enabled: false`，程式碼保留不刪除
@@ -138,7 +139,7 @@ engine 每次啟動 `_initialize()` 都從上述 YAML 冪等重建——**檔案
 2. **大型列表必須分頁（PAGE_SIZE = 50）**：列表超過 50 項時每次 rerun widget 樹線性爆炸，禁止一次 render 所有項目。
 3. **禁止 loop 內 `list.index()`（O(N²)）**：loop 前建 `{item_id: idx}` dict，改為 O(1) 查表。
 
-參考實作：`sidecar/python-engine/scripts/module_012/012_output.py`（`_scan_items` / `_incremental_refresh` / `_get_items`）
+參考實作：`sidecar/python-engine/plugins/labeling/modules/module_012/012_output.py`（`_scan_items` / `_incremental_refresh` / `_get_items`）
 
 完整說明與程式碼範例見 `docs/patterns/streamlit_output_perf.md`
 
@@ -185,7 +186,7 @@ npm test                # JavaScript shared-protocol 單元測試
 ```powershell
 start-fleet.bat
 # 在「管理機」發布一個工具到整個 fleet：
-py -3.11 sidecar\python-engine\tools\fleet_publish.py sidecar\python-engine\scripts\module_007 --registry http://127.0.0.1:9000 --channel prod
+py -3.11 sidecar\python-engine\tools\fleet_publish.py sidecar\python-engine\plugins\cim-modules\modules\module_007 --registry http://127.0.0.1:9000 --channel prod
 # 各裝置拉取（免重啟）：POST http://127.0.0.1:8100/reload、8101/reload
 ```
 

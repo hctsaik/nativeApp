@@ -56,9 +56,13 @@ def test_edge_analysis_sheet_yaml_is_restored_and_wireable():
     assert module_ids == ["module_003", "module_004", "module_005"]
 
     # Each referenced module must exist as a real plugin so reconcile wires the
-    # tabs on a fresh install (otherwise the sheet would re-orphan).
+    # tabs on a fresh install (otherwise the sheet would re-orphan). Resolve via
+    # the dual-root loader — these CV modules now live under the cim-modules
+    # submodule (plugins/cim-modules/modules/), not scripts/.
+    import plugin_loader
+
     for mid in module_ids:
-        assert (ENGINE_DIR / "scripts" / mid / "plugin.yaml").exists(), f"{mid} plugin.yaml missing"
+        assert (plugin_loader.find_module_folder(mid) / "plugin.yaml").exists(), f"{mid} plugin.yaml missing"
 
 
 def test_garbage_sheet_seed_is_gone_from_engine_source():

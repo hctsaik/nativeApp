@@ -1,10 +1,14 @@
 """Guard: module resolution works across scripts/ AND plugins/*/modules/.
 
-The platform restructure (P6e) moved the Labeling GUI modules from scripts/ to
-plugins/labeling/modules/. Several runtime paths hard-coded scripts/ and broke
-silently (pytest/pyinstaller did not catch them because they are Streamlit/
-admin-invoked). This test pins the dual-root resolution so a relocated module
-stays discoverable + loadable + manageable.
+The platform restructure moved modules out of scripts/ into git-tracked plugins:
+- Labeling GUI modules -> plugins/labeling/modules/ (junction, P6e).
+- First-party CV modules -> plugins/cim-modules/modules/ (submodule; modules
+  independence, see docs/platform/modules-independence-and-store-plan.md).
+
+Several runtime paths used to hard-code scripts/ and broke silently (pytest/
+pyinstaller did not catch them because they are Streamlit/admin-invoked). This
+test pins the dual-root resolution so a relocated module stays discoverable +
+loadable + manageable regardless of which plugin root it lives under.
 """
 
 from __future__ import annotations
@@ -16,27 +20,29 @@ import pytest
 ENGINE_DIR = Path(__file__).resolve().parents[1]
 # A Labeling GUI module that physically lives under plugins/labeling/modules/.
 RELOCATED = "module_012"
-# A module that stays under scripts/.
-IN_SCRIPTS = "module_001"
+# A first-party CV module that now lives under plugins/cim-modules/modules/.
+CIM_MODULE = "module_001"
 
 
-def test_relocated_module_is_under_plugins():
+def test_modules_live_under_plugins_roots():
     assert (ENGINE_DIR / "plugins" / "labeling" / "modules" / RELOCATED).is_dir()
-    assert (ENGINE_DIR / "scripts" / IN_SCRIPTS).is_dir()
+    assert (ENGINE_DIR / "plugins" / "cim-modules" / "modules" / CIM_MODULE).is_dir()
 
 
 def test_plugin_loader_resolves_both_roots():
     import plugin_loader
 
     relocated = plugin_loader.find_module_folder(RELOCATED)
-    in_scripts = plugin_loader.find_module_folder(IN_SCRIPTS)
+    cim = plugin_loader.find_module_folder(CIM_MODULE)
     assert relocated.is_dir() and relocated.name == RELOCATED
     assert "plugins" in relocated.parts and "modules" in relocated.parts
-    assert in_scripts.is_dir() and in_scripts.parent.name == "scripts"
+    assert cim.is_dir() and cim.name == CIM_MODULE
+    assert "plugins" in cim.parts and "modules" in cim.parts
+    assert cim.parent.parent.name == "cim-modules"
 
     yaml_ids = {p.parent.name for p in plugin_loader.module_yaml_paths()}
     assert RELOCATED in yaml_ids, "relocated module missing from module_yaml_paths()"
-    assert IN_SCRIPTS in yaml_ids, "scripts module missing from module_yaml_paths()"
+    assert CIM_MODULE in yaml_ids, "cim-modules module missing from module_yaml_paths()"
 
 
 def test_cv_framework_runner_discovers_relocated_module():
@@ -46,6 +52,7 @@ def test_cv_framework_runner_discovers_relocated_module():
 
     ids = set(cv_framework_runner.discover_modules().values())
     assert RELOCATED in ids, "cv_framework_runner.discover_modules() lost the relocated module"
+    assert CIM_MODULE in ids, "cv_framework_runner.discover_modules() lost the cim-modules module"
 
 
 def test_management_preflight_and_snapshot_resolve_relocated_module():

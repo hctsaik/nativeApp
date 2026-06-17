@@ -5,3 +5,6 @@
 	path = sidecar/python-engine/vendor/LV
 	url = https://github.com/hctsaik/LV.git
 	branch = uihuang_dev
+[submodule "sidecar/python-engine/plugins/cim-modules"]
+	path = sidecar/python-engine/plugins/cim-modules
+	url = https://github.com/hctsaik/nativeApp_modules.git

@@ -12,7 +12,8 @@ nativeApp/                                    平台（本 repo，github.com/hct
    ├─ core/  scripts/  ...                    平台共用層（host 提供給外掛）
    └─ plugins/
       ├─ bi/                                  （in-tree plugin）
-      └─ labeling/  ──junction──►  ../../../../../ANnoTation
+      ├─ cim-modules/  ── git submodule ──►  github.com/hctsaik/nativeApp_modules
+      └─ labeling/     ──junction──►  ../../../../../ANnoTation
    └─ vendor/
       ├─ AI4BI/     ── git submodule ──►  github.com/hctsaik/AI4BI
       └─ LV/        ── git submodule ──►  github.com/hctsaik/LV  (branch: uihuang_dev)
@@ -27,6 +28,12 @@ c:\code\claude\ANnoTation                     labeling 外掛原始碼（獨立 
 | Labeling（影像標註） | `ANnoTation` | `sidecar/python-engine/plugins/labeling` | **外部資料夾 + 目錄 junction** | ❌ gitignored |
 | AI Report | `AI4BI` | `sidecar/python-engine/vendor/AI4BI` | git submodule | ✅ 釘 commit |
 | VisualLatent (LV) | `LV` | `sidecar/python-engine/vendor/LV` | git submodule (`uihuang_dev`) | ✅ 釘 commit |
+| CV 模組包（第一方 CV 模組） | `nativeApp_modules` | `sidecar/python-engine/plugins/cim-modules` | git submodule | ✅ 釘 commit |
+
+> cim-modules 內部結構 `modules/module_xxx/`，命中既有掃描 glob `plugins/*/modules/*/plugin.yaml`，
+> 故 engine.py / plugin_loader.py 無需改動。模組反向找 host 共用碼用 `plugins/*/modules/` 深度
+> （與 labeling 同深度，比 scripts/ 深 2 層）。設計見
+> [`modules-independence-and-store-plan.md`](modules-independence-and-store-plan.md)。
 
 > 為什麼 labeling 用 junction 而非 submodule：讓「平台」與「labeling 外掛」連**實體目錄都分離**——
 > labeling 原始碼放在 nativeApp 旁的獨立 clone，nativeApp 樹內不再有它的原始碼，也不釘版本。

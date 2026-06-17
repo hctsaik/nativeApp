@@ -146,6 +146,15 @@ _SUBMODULE_SENTINELS = (
         "sentinel": ROOT_DIR / "vendor" / "LV" / "scripts" / "app.py",
         "fix": "git submodule update --init --recursive",
     },
+    {
+        "id": "cim-modules",
+        "name": "CV 模組包 (cim-modules)",
+        "kind": "submodule",
+        "submodule": "plugins/cim-modules",
+        "repo": "nativeApp_modules",
+        "sentinel": ROOT_DIR / "plugins" / "cim-modules" / "modules" / "module_001" / "plugin.yaml",
+        "fix": "git submodule update --init --recursive",
+    },
 )
 
 

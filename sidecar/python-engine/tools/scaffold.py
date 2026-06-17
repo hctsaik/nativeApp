@@ -26,6 +26,18 @@ from pathlib import Path
 
 ENGINE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _default_module_dest() -> Path:
+    """Where `scaffold module` writes by default.
+
+    First-party CV modules now live in the cim-modules submodule
+    (plugins/cim-modules/modules/, see docs/platform/modules-independence-and-store-plan.md).
+    Target it when present so a new module lands in the right repo; fall back to
+    the legacy scripts/ root when the submodule is not checked out.
+    """
+    cim = ENGINE_DIR / "plugins" / "cim-modules" / "modules"
+    return cim if cim.is_dir() else ENGINE_DIR / "scripts"
+
 _FORM_PLUGIN_YAML = """\
 id: module_{mid}
 name: {name}
@@ -443,7 +455,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="external-GUI launcher tool (Label-tool pattern; no code)")
     pm.add_argument("--requires", default="",
                     help="comma-separated Python deps for a per-tool venv, e.g. 'shapely>=2.0,scikit-image'")
-    pm.add_argument("--dest", default=str(ENGINE_DIR / "scripts"))
+    pm.add_argument("--dest", default=str(_default_module_dest()))
 
     psh = sub.add_parser("sheet", help="generate a multi-tab workflow sheet YAML")
     psh.add_argument("id", help="sheet id, e.g. defect-review")
@@ -475,6 +487,9 @@ def main(argv: list[str] | None = None) -> int:
                 else "full split-tool" if args.full else "no-code form-first")
         print(f"✅ 已建立 {kind} 模組：{folder}")
         print(_reload_hint)
+        if "cim-modules" in folder.parts:
+            print("   ⚠️ 此模組在 cim-modules submodule 內：請先到 plugins/cim-modules/ "
+                  "git add/commit/push，再回平台 `git add plugins/cim-modules` 釘 submodule 指標。")
     elif args.cmd == "sheet":
         tabs = [t.strip() for t in args.tabs.split(",") if t.strip()]
         path = scaffold_sheet(args.id, args.name, tabs, Path(args.dest),
