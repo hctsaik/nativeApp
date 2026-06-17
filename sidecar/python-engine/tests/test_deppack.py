@@ -173,6 +173,47 @@ def test_build_wheelhouse_pip_failure_raises(monkeypatch, tmp_path):
         deppack.build_wheelhouse("t", ["nope"], tmp_path)
 
 
+# ─── verify_deppack_dir（指著資料夾判斷完不完整）────────────────────────────────
+
+def _make_pack_dir(pack_dir: Path, tool_id: str, requires: list[str], wheels: dict[str, bytes]):
+    wd = pack_dir / deppack.WHEELS_DIRNAME
+    for name, data in wheels.items():
+        _write_wheel(wd, name, data)
+    m = deppack.compute_manifest(tool_id, requires, wd, python_tag="cp311", platform_tag="win_amd64")
+    deppack.write_manifest(m, pack_dir / deppack.MANIFEST_FILENAME)
+    return m
+
+
+def test_verify_dir_complete(tmp_path):
+    pack = tmp_path / "app-lv"
+    _make_pack_dir(pack, "app-lv", ["torch"], {"torch-2.6.0.whl": b"data"})
+    ok, errors = deppack.verify_deppack_dir(pack)
+    assert ok and errors == []
+
+
+def test_verify_dir_tampered(tmp_path):
+    pack = tmp_path / "app-lv"
+    _make_pack_dir(pack, "app-lv", ["torch"], {"torch-2.6.0.whl": b"data"})
+    (pack / deppack.WHEELS_DIRNAME / "torch-2.6.0.whl").write_bytes(b"corrupt")
+    ok, errors = deppack.verify_deppack_dir(pack)
+    assert not ok and any("sha256" in e for e in errors)
+
+
+def test_verify_dir_missing_wheel(tmp_path):
+    pack = tmp_path / "app-lv"
+    _make_pack_dir(pack, "app-lv", ["torch"], {"torch-2.6.0.whl": b"data"})
+    (pack / deppack.WHEELS_DIRNAME / "torch-2.6.0.whl").unlink()
+    ok, errors = deppack.verify_deppack_dir(pack)
+    assert not ok and any("缺少" in e for e in errors)
+
+
+def test_verify_dir_no_manifest(tmp_path):
+    pack = tmp_path / "not-a-pack"
+    pack.mkdir()
+    ok, errors = deppack.verify_deppack_dir(pack)
+    assert not ok and any("deppack.json" in e for e in errors)
+
+
 # ─── prepare_tool_wheelhouse（裝置端解析 + 驗證）────────────────────────────────
 
 def _install_pack(monkeypatch, tmp_path, tool_id, requires, wheels: dict[str, bytes]):

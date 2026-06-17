@@ -229,6 +229,26 @@ def verify_wheelhouse(wheels_dir: Path, manifest: DepPackManifest) -> tuple[bool
     return (not errors, errors)
 
 
+def verify_deppack_dir(pack_dir: Path) -> tuple[bool, list[str]]:
+    """指著一個 dep-pack 資料夾,判斷檔案完不完整。
+
+    這是最簡單的「資料夾完整性檢查」入口（供 tools/verify_deppack.py / agent copy 後自檢）：
+    讀 ``<pack_dir>/deppack.json`` 當「應有清單」,逐一比對 ``<pack_dir>/wheels/`` 的
+    每個 wheel 是否存在且 sha256/大小相符,並抓出 manifest 未列的多餘檔。
+
+    回 (ok, errors)。資料夾連 manifest 都沒有 → ok=False（無從判斷完整性）。
+    """
+    pack_dir = Path(pack_dir)
+    manifest_path = pack_dir / MANIFEST_FILENAME
+    if not manifest_path.exists():
+        return False, [f"找不到 {MANIFEST_FILENAME}（這不是一個 dep-pack 資料夾，無從判斷完整性）"]
+    try:
+        manifest = load_manifest(manifest_path)
+    except (OSError, ValueError, KeyError) as exc:
+        return False, [f"{MANIFEST_FILENAME} 無法解析：{exc}"]
+    return verify_wheelhouse(pack_dir / WHEELS_DIRNAME, manifest)
+
+
 def prepare_tool_wheelhouse(tool_id: str, requires: list[str] | None = None) -> Path | None:
     """裝置端：解析 + 驗證某工具的 dep-pack 快取,回可用的 wheelhouse 目錄。
 

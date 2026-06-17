@@ -31,6 +31,13 @@ if str(ENGINE_DIR) not in sys.path:
 
 from core import deppack  # noqa: E402
 
+# 可能在 CP950 繁中 console 跑：避免 emoji 等非 CP950 字元讓 print 崩潰。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+    except Exception:
+        pass
+
 
 def _read_plugin_yaml(tool_folder: Path) -> tuple[str | None, list[str]]:
     """從工具資料夾的 plugin.yaml 讀 (id, requires)。讀不到回 (None, [])。"""
@@ -109,7 +116,7 @@ def main(argv: list[str]) -> int:
 
     total_mb = sum(w.size for w in manifest.wheels) / (1024 * 1024)
     pack_dir = Path(args.dest) / tool_id
-    print(f"[deppack] ✅ 完成：{len(manifest.wheels)} 個 wheel，共 {total_mb:.1f} MB")
+    print(f"[deppack] [完成] {len(manifest.wheels)} 個 wheel，共 {total_mb:.1f} MB")
     print(f"[deppack]    python_tag={manifest.python_tag} platform_tag={manifest.platform_tag}")
     print(f"[deppack]    輸出：{pack_dir}")
     print(f"[deppack] 裝置端安裝：把整個 {tool_id}/ 資料夾 copy 到該機 CIM_DEPPACK_CACHE 下，")
