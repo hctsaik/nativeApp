@@ -73,11 +73,14 @@ dev 模式下 engine 由 `start-dev.bat` 解析出的 Python 啟動（傳給 Ele
 `py -3.11` 偵測**，一般不必改檔；只要確認 §3 的 (a)(b)(c) 都裝進那一支 3.11 即可。
 若有多支 3.11 或想指定特定直譯器，啟動前設 `$env:PYTHON = "<該 python.exe>"` 覆蓋。
 
-## 6. 啟動
+## 6. 啟動（新架構：Tauri 殼）
 
 ```powershell
-start-dev.bat
+start-dev.bat        # 已自動轉導到 start-dev-tauri.bat（Tauri 殼）
 ```
+> 啟動一律走 **Tauri 殼**（`nativeApp_Light`）；portal / engine / 模組與 Electron 共用、不變。
+> 首次需在 `..\nativeApp_Light\5_PG_Develop` 跑 `npm install`，並安裝 Rust toolchain。
+> 舊 Electron DEV 殼為備援（`start-dev-electron.bat`）。完整說明見 [`platform/startup-tauri.md`](platform/startup-tauri.md)。
 
 ## 7. 日後更新（與 AI4BI / labeling 各自獨立）
 

@@ -2,13 +2,20 @@
 
 ## 啟動方式
 
-### 開發模式
+### 開發模式（新架構：**Tauri 殼**，正式主線）
 ```powershell
-# 根目錄執行（會開 Electron + React portal + Python engine）
-start-dev.bat
-# 或
-cd apps/host-electron && npm run dev
+# 啟動一律走 Tauri 殼（nativeApp_Light）；portal / Python engine / cim-modules / 外部工具
+# 完全共用、不變——只有「殼」從 Electron 換成 Tauri。根目錄任一支都會自動轉導到 Tauri：
+start-dev.bat          # = 轉導 → start-dev-tauri.bat
+start-dev-nowdac.bat   # = 轉導 → start-dev-tauri.bat
+# 或直接：
+start-dev-tauri.bat
 ```
+> **務必用 Tauri 啟動**：Tauri dev 直接載「預建 portal dist」(不跑 Vite/esbuild → 天生避開本機
+> WDAC 對 esbuild 的封鎖)，由 Rust 端自動 spawn 原始碼 engine。
+> **舊 Electron DEV 殼已退為備援**：`start-dev-electron.bat` / `start-dev-nowdac-electron.bat`（僅在 Tauri 真的起不來時暫用）。
+> Tauri 殼專案在 **sibling repo `..\nativeApp_Light\5_PG_Develop`**（首次需 `npm install` + Rust toolchain/rustup）。
+> 完整啟動清單、各 .bat 處置、前置需求與 WDAC 說明見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 
 ### 首次設定（解壓 source zip 或全新 clone 後）
 ```powershell
@@ -25,7 +32,13 @@ npm install
 pip install -r sidecar/python-engine/requirements.txt                       # engine 核心（lean）
 py -3.11 -m pip install -r sidecar/python-engine/plugins/labeling/requirements-labeling.txt  # Labeling 專屬
 
-# 4) 啟動
+# 4) Tauri 殼（新架構，正式主線）— 與 nativeApp 同層的 sibling repo `..\nativeApp_Light`
+#    （若尚未取得，先把 nativeApp_Light clone 到 nativeApp 的同一層）
+cd ..\nativeApp_Light\5_PG_Develop
+npm install          # Tauri 前端相依（另需 Rust toolchain：rustup）
+cd ..\..\nativeApp
+
+# 5) 啟動（一律 Tauri；start-dev.bat 會自動轉導到 start-dev-tauri.bat）
 start-dev.bat
 ```
 > 完整拓樸（submodule vs junction、約束）見 [`docs/platform/repo-topology.md`](docs/platform/repo-topology.md)。
@@ -42,13 +55,18 @@ start-dev.bat
 
 ## 架構關鍵點
 
-### 啟動鏈
+### 啟動鏈（新架構：Tauri）
 ```
-start-dev.bat
-  → Electron (apps/host-electron)
-    → Python FastAPI engine (sidecar/python-engine/engine.py)
-      → Streamlit 子程序（按需啟動，含注入環境變數）
+start-dev.bat ( → start-dev-tauri.bat )
+  → Tauri 殼 (nativeApp_Light/5_PG_Develop;Rust + 系統 WebView2)
+    → 載入預建 portal dist (apps/portal-react/dist) + 由 Rust spawn Python FastAPI engine
+      → Python engine (sidecar/python-engine/engine.py)
+        → Streamlit 子程序（按需啟動，含注入環境變數）
 ```
+> 殼以外完全不變：engine、cim-modules、portal、Streamlit 工具與 Electron 版**共用同一份**。
+> 舊 Electron 鏈（備援）：`start-dev-electron.bat → Electron (apps/host-electron) → 同一 engine`。
+> ⚠️ 註：dev-log server `127.0.0.1:19222`（cim-gui MCP / 舊 E2E 探測 sidecar 埠用）是 **Electron 殼專屬**；
+> Tauri 殼改由 portal 經 `window.cimHost.getAppConfig()` 取得控制埠，沒有 19222。
 
 ### Sheet 驅動機制
 新 workflow sheet 由 YAML 定義，engine 啟動時自動載入（掃 `sidecar/python-engine/sheets/*.yaml` **與** `plugins/*/sheets/*.yaml`）。

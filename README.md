@@ -56,13 +56,18 @@ Install Python sidecar dependencies in your preferred virtual environment:
 pip install -r sidecar/python-engine/requirements.txt
 ```
 
-Run the Electron host and React portal:
+> **新架構（啟動一律用 Tauri）**：殼已從 Electron 換成 **Tauri**（`nativeApp_Light`），
+> portal / engine / 模組完全共用、不變。請用根目錄 `start-dev.bat`（已自動轉導到 `start-dev-tauri.bat`）
+> 或直接 `start-dev-tauri.bat`。完整說明見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
+> 以下 `npm run dev`（Electron 殼）已退為**備援**（對應 `start-dev-electron.bat`）。
+
+Run the host + React portal — **Tauri (preferred)**:
 
 ```bash
-npm run dev
+start-dev.bat            # → start-dev-tauri.bat（Tauri 殼）
 ```
 
-The Electron main process starts the FastAPI sidecar, allocates dynamic local
+The host (Tauri shell; Electron shell as fallback) starts the FastAPI sidecar, allocates dynamic local
 ports, and opens the React portal. The sample Streamlit tool starts on demand.
 The sidecar waits for Streamlit to be fully ready before returning the tool URL,
 so the portal iframe loads only after the tool server is accepting connections.

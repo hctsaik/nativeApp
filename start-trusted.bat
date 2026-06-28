@@ -1,5 +1,8 @@
 @echo off
 setlocal
+echo [TRUSTED] 註：新架構正式主線為 Tauri（簽章 runtime 取代 trusted-Electron 流程）。
+echo [TRUSTED]      本 Electron trusted 流程暫為過渡備援；見 docs\platform\startup-tauri.md
+echo.
 
 rem Preflight: abort with an actionable message if git submodules are missing (see scripts\win\preflight-submodules.bat)
 call "%~dp0scripts\win\preflight-submodules.bat"
