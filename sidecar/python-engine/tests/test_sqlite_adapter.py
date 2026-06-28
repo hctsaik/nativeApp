@@ -74,8 +74,8 @@ def test_module_001_metadata(adapter: SQLiteToolAdapter) -> None:
 def test_module_006_metadata(adapter: SQLiteToolAdapter) -> None:
     tool = adapter.get_tool("module_006")
     assert tool.tool_id == "module_006"
-    assert tool.name == "動物影像標記"
-    assert tool.version == "1.0.0"
+    assert tool.name == "YOLO 偵測檢視"
+    assert tool.version == "2.0.0"
     assert tool.script_path.name == "cv_framework_runner.py"
 
 

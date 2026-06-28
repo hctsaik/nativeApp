@@ -1,0 +1,9 @@
+sheet_id: yolo-detection
+name: YOLO 偵測檢視
+description: 上傳影像 + YOLO 標註（.txt / .json），畫出類別色框與「類別·信心」標籤、列出偵測清單與各類別框數；可選第二個 model 標註做 IoU 框級覆蓋比對。
+enabled_dev: true
+enabled_prod: true
+tabs:
+  - order: 0
+    module_id: module_006
+    label: "YOLO 偵測檢視"
