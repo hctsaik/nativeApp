@@ -4,13 +4,30 @@
 > 殼以外**完全不變**：Python engine、portal（React dist）、cim-modules、Streamlit 工具、外部 GUI
 > 與 Electron 版**共用同一份**——只有「殼」從 Electron 換成 Tauri（Rust + 系統 WebView2）。
 
-## 為什麼換 Tauri
-- **WDAC 友善**：Electron 要跑 `electron.exe` + 多個未簽章 helper + 打包整個 Chromium；Tauri 是
-  **單一可簽章的 Rust exe + 系統 WebView2（微軟簽章、WDAC 信任）**。release `tauri build` 產**簽章 nsis**
-  （`tauri.conf.json` 已設 `certificateThumbprint`）。
-- **dev 不跑 esbuild**：`tauri.conf.json` 的 `frontendDist` 直接指向**預建** `apps/portal-react/dist`，
-  沒有 `devUrl`/`beforeDevCommand` → `tauri dev` **不啟動 Vite**，天生避開本機 WDAC 對 `esbuild.exe` 的封鎖。
+## 為什麼換 Tauri（以及 WDAC 的真相）
+- **部署/runtime 對 WDAC 友善（真正的勝場）**：Electron 要跑 `electron.exe` + 多個未簽章 helper +
+  打包整個 Chromium；Tauri 是 **單一可簽章的 Rust exe + 系統 WebView2（微軟簽章、WDAC 信任）**。
+  release `npm run tauri:build` 產**簽章 nsis**（`tauri.conf.json` 已設 `certificateThumbprint`）→
+  裝到 WDAC 機器上，簽章 runtime 直接放行。
 - **輕量**：不打包 Chromium，體積/記憶體小很多。
+
+### ⚠️ WDAC 實測結論（2026-06-28，務必看）
+> **`tauri dev` 在『強制模式 WDAC』機器上 build 不起來** —— cargo 在編譯階段會產出並執行
+> **未簽章的 build-script / debug exe**，被 WDAC 直接封鎖：
+> ```
+> error: failed to run custom build command for `cim-light`
+>   could not execute process `...\src-tauri\target\debug\build\...\build-script-build`
+>   應用程式控制原則已封鎖此檔案。 (os error 4551)
+> ```
+> 也就是說：**dev 期 Tauri 並沒有「天生避開 WDAC」**——它只是把問題從「esbuild.exe」換成
+> 「cargo build-script / debug exe」，**同一類（未簽章執行檔被擋）**。Tauri 的 WDAC 好處在
+> **「簽章的 release build」**，不在 dev。
+>
+> **本機（無法自行加 WDAC 規則）的現實**：
+> - `start-dev-tauri.bat` 會「**先試 Tauri、被擋就自動轉 `start-dev-nowdac-electron.bat`**」
+>   （Electron no-WDAC：靜態服務預建 dist + dev Electron，`electron.exe` 本機可放行）—— 目前唯一能跑的 LOCAL DEV。
+> - 要真的本機跑 Tauri dev：**請 IT 把 Rust 編譯產物目錄 `src-tauri\target`（或對應簽章）放進 WDAC 允許清單**。
+> - 或在「可編譯的機器」`npm run tauri:build` 產**簽章版**，再部署到 WDAC 機器（runtime 即放行）。
 
 ## 怎麼啟動（DEV）
 ```powershell

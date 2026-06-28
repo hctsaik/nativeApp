@@ -11,9 +11,12 @@ start-dev-nowdac.bat   # = 轉導 → start-dev-tauri.bat
 # 或直接：
 start-dev-tauri.bat
 ```
-> **務必用 Tauri 啟動**：Tauri dev 直接載「預建 portal dist」(不跑 Vite/esbuild → 天生避開本機
-> WDAC 對 esbuild 的封鎖)，由 Rust 端自動 spawn 原始碼 engine。
-> **舊 Electron DEV 殼已退為備援**：`start-dev-electron.bat` / `start-dev-nowdac-electron.bat`（僅在 Tauri 真的起不來時暫用）。
+> **啟動以 Tauri 為主**：Tauri dev 載「預建 portal dist」(不跑 Vite/esbuild)，由 Rust spawn 原始碼 engine。
+> ⚠️ **WDAC 實測**：強制模式 WDAC 機器上 `tauri dev` 的 **cargo build 會被擋**（未簽章 build-script/debug exe，
+> `os error 4551`，與擋 esbuild 同類）。`start-dev-tauri.bat` 會**自動退回 `start-dev-nowdac-electron.bat`**
+> （本機唯一能跑的 LOCAL DEV）。Tauri 的 WDAC 好處在**簽章 release**（`tauri build`），不在 dev；
+> 要本機跑 Tauri dev 需 IT 放行 `src-tauri\target` 或改在可編譯機器產簽章版部署。詳見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
+> **舊 Electron DEV 殼仍為備援**：`start-dev-electron.bat` / `start-dev-nowdac-electron.bat`。
 > Tauri 殼專案在 **sibling repo `..\nativeApp_Light\5_PG_Develop`**（首次需 `npm install` + Rust toolchain/rustup）。
 > 完整啟動清單、各 .bat 處置、前置需求與 WDAC 說明見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 
