@@ -44,6 +44,7 @@ cd ..\..\nativeApp
 # 5) 啟動（一律 Tauri；start-dev.bat 會自動轉導到 start-dev-tauri.bat）
 start-dev.bat
 ```
+> 📖 **完整、可由上到下執行的全套安裝/建置步驟（含 Tauri 工具鏈）見 repo 根目錄 [`INSTALL.md`](INSTALL.md)（權威；舊的 `docs/INSTALL.md` 已過時，勿用）。**
 > 完整拓樸（submodule vs junction、約束）見 [`docs/platform/repo-topology.md`](docs/platform/repo-topology.md)。
 > 各工具的重量級相依（LV 的 torch/umap、Labeling 的 ultralytics 等）**不在上面**，
 > engine 首次啟動該工具時才依 `plugin.yaml requires:` 建隔離 per-tool venv 自動安裝。

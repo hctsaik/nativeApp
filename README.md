@@ -6,6 +6,8 @@ sidecar (Streamlit split-tools). The Labeling (X-AnyLabeling) feature is the
 benchmark "real tool"; the same scaffold → hot-reload → publish flow builds new
 tools. See `docs/platform/selfbuild-tool-shipping-evaluation.md`.
 
+> 🤖 **安裝 / 建置請讀並由上到下執行 repo 根目錄的 [`INSTALL.md`](INSTALL.md)（權威 runbook）。**
+
 ## Structure
 
 ```text
@@ -74,8 +76,8 @@ so the portal iframe loads only after the tool server is accepting connections.
 
 ## 全新電腦安裝（含 AI4BI）
 
-> 完整、經 clean-room 實測、可讓 **Claude Code 直接照做**的下載＋安裝 runbook 見
-> **[`docs/INSTALL.md`](docs/INSTALL.md)**（含三 repo clone、隔離 venv、doctor 驗證、實測結果）。
+> 完整、可讓 **AI/工程師直接照做**的安裝＋建置 runbook（含 Tauri 工具鏈）見 repo 根目錄
+> **[`INSTALL.md`](INSTALL.md)**（權威）。舊的 [`docs/INSTALL.md`](docs/INSTALL.md) 已過時（labeling 誤標為 submodule、無 Tauri 工具鏈），勿用。
 > 以下為摘要。
 
 AI4BI（📊 AI Report）以 git submodule 置於 `sidecar/python-engine/vendor/AI4BI`，

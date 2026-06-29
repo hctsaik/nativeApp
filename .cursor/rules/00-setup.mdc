@@ -1,0 +1,15 @@
+---
+description: Project setup & install — always point agents at the root INSTALL.md
+alwaysApply: true
+---
+
+To **set up / install / build** this project, read and execute the repo-root `INSTALL.md` top-to-bottom.
+It is the single authoritative, ordered runbook. Do **not** follow the older `docs/INSTALL.md` (stale).
+
+Project & collaboration rules: see `CLAUDE.md`.
+
+Must-knows:
+- Python is **`py -3.11`** (do not use bare `python` or `npm run test:python`).
+- Clone with **`--recurse-submodules`** (submodules: `vendor/AI4BI`, `vendor/LV`, `plugins/cim-modules`).
+- **Labeling (ANnoTation) is a directory junction, not a submodule.**
+- The **Tauri shell** is the sibling repo `nativeApp_Light`; build it on a machine **without WDAC enforce**.

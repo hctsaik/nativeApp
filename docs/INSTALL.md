@@ -1,3 +1,6 @@
+> ⚠️ **此檔已過時、且非權威。** 完整且最新的安裝/建置 runbook（含 Tauri 工具鏈、labeling junction 正解）見 repo 根目錄 **[`INSTALL.md`](../INSTALL.md)**。
+> 本檔僅保留 clean-room 實測紀錄作背景；**安裝請以根目錄 `INSTALL.md` 為準**（本檔把 labeling 稱為「submodule」是過時說法——它其實是 directory **junction**）。
+
 # CIM Hybrid Edge Platform — 下載與安裝（Claude Code 可直接照做）
 
 > 本文是**給 AI agent（Claude Code）或工程師照著執行**的乾淨安裝 runbook。
