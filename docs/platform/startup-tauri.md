@@ -11,23 +11,24 @@
   裝到 WDAC 機器上，簽章 runtime 直接放行。
 - **輕量**：不打包 Chromium，體積/記憶體小很多。
 
-### ⚠️ WDAC 實測結論（2026-06-28，務必看）
-> **`tauri dev` 在『強制模式 WDAC』機器上 build 不起來** —— cargo 在編譯階段會產出並執行
-> **未簽章的 build-script / debug exe**，被 WDAC 直接封鎖：
-> ```
-> error: failed to run custom build command for `cim-light`
->   could not execute process `...\src-tauri\target\debug\build\...\build-script-build`
->   應用程式控制原則已封鎖此檔案。 (os error 4551)
-> ```
-> 也就是說：**dev 期 Tauri 並沒有「天生避開 WDAC」**——它只是把問題從「esbuild.exe」換成
-> 「cargo build-script / debug exe」，**同一類（未簽章執行檔被擋）**。Tauri 的 WDAC 好處在
-> **「簽章的 release build」**，不在 dev。
+### ⚠️ WDAC 實測結論（2026-06-29 更正，務必看）
+> **關鍵區別：「本機新編譯出來的未簽章 exe」被擋，「跑既有的 exe」通常不會。**
+> - **被擋（本機新編譯）**：`cargo` 在 `tauri dev`/`tauri build` 會產出並執行**新的 build-script / debug exe**，
+>   被 WDAC 封鎖：
+>   ```
+>   error: failed to run custom build command for `cim-light`
+>     could not execute process `...\src-tauri\target\debug\build\...\build-script-build`
+>     應用程式控制原則已封鎖此檔案。 (os error 4551)
+>   ```
+> - **可跑（既有 exe）**：實測 nativeApp_Light 早先 build 的 `cim-light.exe`（Tauri 殼）
+>   **在 WDAC 下直接執行 OK**（portal + engine 都載入；疑似 ISG 檔案信譽）。
 >
-> **本機（無法自行加 WDAC 規則）的現實**：
-> - `start-dev-tauri.bat` 會「**先試 Tauri、被擋就自動轉 `start-dev-nowdac-electron.bat`**」
->   （Electron no-WDAC：靜態服務預建 dist + dev Electron，`electron.exe` 本機可放行）—— 目前唯一能跑的 LOCAL DEV。
-> - 要真的本機跑 Tauri dev：**請 IT 把 Rust 編譯產物目錄 `src-tauri\target`（或對應簽章）放進 WDAC 允許清單**。
-> - 或在「可編譯的機器」`npm run tauri:build` 產**簽章版**，再部署到 WDAC 機器（runtime 即放行）。
+> **本機現行做法（已更正）**：
+> - **主線 = 直接跑既有的 `cim-light.exe`**（`src-tauri\target\debug\cim-light.exe`，設 `CIM_ENGINE_EXE=…\engine.py`
+>   + `CIM_ENGINE_PYTHON=<py3.11>`）。`start-dev.bat` → `start-dev-tauri.bat` 就是這樣做，**絕不在本機跑 `tauri dev`/`tauri build`**。
+> - 日常 dev 改 portal dist / Python engine / 模組（runtime 載入，**不需重編 Rust 殼**）→ 本機 Tauri 完全夠用。
+> - **只有要改 Rust 殼本身**才需重編：在「沒有 WDAC 強制的機器」`npm run tauri:build`（簽章版）帶回，或請 IT 放行 `src-tauri\target`。
+> - **Electron（no-WDAC）退為最終備援**（`start-dev-nowdac-electron.bat`）：只在「沒有既有 Tauri exe 或它也跑不起來」時用。
 
 ## 怎麼啟動（DEV）
 ```powershell
@@ -37,9 +38,9 @@ start-dev-nowdac.bat   # → start-dev-tauri.bat
 # 或直接：
 start-dev-tauri.bat
 ```
-`start-dev-tauri.bat` 做的事：preflight submodule → 檢查 Tauri 專案/`node_modules`/`cargo`/預建 dist/Python3.11 →
-清殘留 engine → 設 `CIM_ENGINE_EXE=…\engine.py`、`CIM_ENGINE_PYTHON=<py3.11>` → 在
-`..\nativeApp_Light\5_PG_Develop` 跑 `npm run tauri:dev`（首次會編譯 Rust）。
+`start-dev-tauri.bat` 做的事：preflight submodule → 找**既有已 build 的** `cim-light.exe`
+（`src-tauri\target\release|debug`；找不到就轉 Electron 備援，**不在本機 cargo 重編**）→ 檢查預建 dist/Python3.11 →
+清殘留 engine → 設 `CIM_ENGINE_EXE=…\engine.py`、`CIM_ENGINE_PYTHON=<py3.11>` → **直接執行那顆 `cim-light.exe`**。
 
 ### 前置需求（首次）
 1. **`nativeApp_Light` 放在 `nativeApp` 同層**（例如都在 `C:\code\claude\` 下）。

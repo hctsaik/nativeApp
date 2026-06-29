@@ -55,25 +55,31 @@ start-dev.bat
 > 這題已反覆討論多次。以下是**最終結論**：遇到 WDAC 相關現象，**直接照此處理，不要再重新調查、
 > 重新提方案、或反覆評估**。背景與實測見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 
-**環境事實（固定）**：本開發機（`COLA\hctsa`，公司 Azure AD/MDM 託管）WDAC 為**強制模式**（含 user-mode），
-**封鎖一切未簽章執行檔**。已知被擋：`esbuild.exe`（+`@rollup\*.node`，Vite build/dev）、
-`cargo` 的 build-script/debug exe（`tauri dev`，`os error 4551`）、`xanylabeling.exe`（uv trampoline）。
-**未被擋、可正常跑**：`electron.exe`、`node`、`python`。
+**環境事實（固定）**：本開發機（`COLA\hctsa`，公司 Azure AD/MDM 託管）WDAC 為**強制模式**（含 user-mode）。
+**關鍵區別：「本機新編譯出來的未簽章 exe」被擋，「跑既有/已建立信任的 exe」通常不會。**
+- 被擋：`esbuild.exe`（+`@rollup\*.node`，Vite build/dev）、`cargo` **每次編譯新產生的** build-script/debug exe
+  （`tauri dev`/`tauri build` → `os error 4551`）、`xanylabeling.exe`（uv trampoline）。
+- 可正常跑：`electron.exe`、`node`、`python`，**以及「先前已 build 好的未簽章 exe」**——實測 nativeApp_Light 早先 build 的
+  `cim-light.exe`（Tauri 殼）**在 WDAC 下跑得起來**（疑似 ISG 檔案信譽）。
 **權限事實（固定）**：使用者**非 admin、無 ConfigCI、無法自行加 WDAC 規則**；公司 MDM 會還原本機 supplemental 政策。
 → **根治（把路徑/簽章加進允許清單）只能請 IT 做，不在 AI 可處理範圍，也不需要 AI 反覆嘗試繞過。**
 
 **現行做法 = 決議（就這樣做，別再找別的）**：
 1. **不在本機 build 被擋的東西**（esbuild / cargo）。一律用「**在允許的機器預先 build 好的產物**」：
    portal 用預建 `apps/portal-react/dist`；要更新前端就在 esbuild 允許的機器 `npm --prefix apps/portal-react run build` 後帶回。
-2. **本機 DEV 啟動 = Electron（no-WDAC）：靜態服務預建 dist + 跑 dev `electron.exe`**（electron 沒被擋）。
-   = `start-dev-nowdac-electron.bat`。直接跑 `start-dev.bat` 即可——它先試 Tauri、被擋就**自動退回這條**，結果就是這條。
-   （`start-trusted.bat`/`prepare-trusted-electron.bat`「複製 Electron 到信任路徑」**目前用不到**，因為 `electron.exe` 本來就沒被擋；僅在日後 IT 連 electron 也收緊時才需要。）
+2. **本機 DEV 啟動 = 跑既有的 Tauri exe**（不是重編！）：
+   `nativeApp_Light\5_PG_Develop\src-tauri\target\debug\cim-light.exe`，並設
+   `CIM_ENGINE_EXE=<…>\sidecar\python-engine\engine.py` + `CIM_ENGINE_PYTHON=<py3.11>` 讓它 spawn 原始碼 engine。
+   `start-dev.bat` → `start-dev-tauri.bat` 會**直接跑這顆既有 exe**（**絕不跑** `tauri dev`/`tauri build`——那會觸發 cargo 重編 → 被擋）。
+   **Electron（no-WDAC）退為最終備援**（`start-dev-nowdac-electron.bat`）：只在「連既有 Tauri exe 都跑不起來、或根本沒有 exe」時用。
+   （`start-trusted.bat`/`prepare-trusted-electron.bat` 目前用不到。）
 3. **xanylabeling**：用 `py -3.11 -c "...main()"` 啟動，**永遠不要**改回直接執行 `xanylabeling.exe`（見下方常見錯誤表）。
 
-**Tauri 與 WDAC 的定論**：Tauri 是**目標架構**，但 **`tauri dev` 在本機 build 不起來**（cargo 產未簽章 exe 被擋，與 esbuild 同類）。
-Tauri 的 WDAC 好處**只在「簽章 release」**（`tauri build` → 簽章 nsis、runtime 放行，且該簽章仍需 IT 信任）。
-**在 IT 放行 `src-tauri\target`（或信任簽章）之前，本機 Tauri dev 不可行；LOCAL DEV 一律維持上面第 2 點的 Electron-nowdac。**
-別再嘗試讓本機 `tauri dev` 跑起來、別再評估這件事。
+**Tauri 與 WDAC 的定論（已更正，2026-06-29 實測）**：Tauri 是正式主線，**且本機就能跑**——用既有的 `cim-light.exe`（已實測會起、portal+engine 都載入）。
+被擋的**只有「在本機用 cargo 重新編譯 Rust 殼」**（`tauri dev`/`tauri build` 的新 build-script → `os error 4551`）。
+但日常 dev 改的是 **portal dist / Python engine / 模組**（全部 runtime 載入，**不需重編 Rust 殼**），所以本機 Tauri 完全夠用。
+**只有要改 Rust 殼本身**時才需重編：到**沒有 WDAC 強制的機器** `tauri build`（簽章版，部署後 runtime 放行），或請 IT 放行 `src-tauri\target`。
+→ **本機主線 = 跑既有 Tauri exe；別在本機跑 `tauri dev`/`tauri build`（會被擋），也別退回 Electron 當主線。**
 
 **給 AI 的規則**：看到「Application Control policy has blocked / os error 4551 / esbuild blocked」等，
 **不需重新診斷或提新解**——成因與對策已固定如上。需要 IT 動作的事，**陳述一次、交給 User**，不要反覆討論或自行嘗試繞過。
