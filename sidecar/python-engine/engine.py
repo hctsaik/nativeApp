@@ -1825,6 +1825,17 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="CIM Python Sidecar", version="0.1.0")
 
+    # CORS:portal 在不同 origin 直接 fetch 本控制 API(Electron 127.0.0.1:5173 /
+    # 打包 file:// / Tauri tauri.localhost)。引擎僅綁 127.0.0.1、非網路暴露,放行所有
+    # 來源是安全且標準的做法,修掉 Tauri 下 /whoami /set-role 等直連被 CORS 擋的問題。
+    from fastapi.middleware.cors import CORSMiddleware  # noqa: PLC0415
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Auto-register any scaffolded non-REST connectors (core/integrations/connectors/*.py
     # exposing register()), so `scaffold connector` → drop file → restart/reload works
     # with no call-site edits. Best-effort: a broken connector never blocks startup.
