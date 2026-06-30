@@ -71,6 +71,9 @@ Set-Location C:\code\claude\nativeApp
 git submodule update --init --recursive
 ```
 
+> ℹ️ **分支注意**：本文件描述的內容（`apps/host-tauri`、三個 submodule 接線含 `cim-modules`、以及本文件最新版）目前在分支 **`feat/extract-cim-modules`**。若 GitHub 預設分支 `main` 尚未合併這些，純 `git clone`（落在 main）可能拿不到它們——請改用帶分支的 clone：
+> `git clone -b feat/extract-cim-modules --recurse-submodules https://github.com/hctsaik/nativeApp.git`
+
 ---
 
 ## 3. Tauri 殼（已併入本體；日常無需額外動作）
@@ -119,6 +122,7 @@ npm install
 
 ```powershell
 Set-Location C:\code\claude\nativeApp
+$env:PYTHONUTF8 = "1"   # ⚠️ 繁中(cp950)Windows 必設！否則 (a)/(c) 讀含非 ASCII 註解的 requirements 會 UnicodeDecodeError（見疑難排解「cp950」列）
 # (a) engine 核心（fastapi/uvicorn/streamlit/requests/pandas/numpy/scipy/Pillow/matplotlib...）
 py -3.11 -m pip install -r sidecar\python-engine\requirements.txt
 # (b) AI4BI（可編輯安裝，含 llm extras）— 非選用！
@@ -133,6 +137,8 @@ py -3.11 -m pip install pytest respx
 > - 步驟 (d) 的 `pytest`/`respx` **刻意未列在任何 `requirements*.txt`**，因此這行 `pip install` 是**必裝、不是選裝**（部分 engine 測試需要 `respx`）。
 > - **重量級 per-tool 相依走 per-tool venv 的，是「沒列在上述三層內」的工具相依**（例如 **LV 模組各自 `plugin.yaml` 的 `requires:`，如 umap**）——engine 首次啟動該工具時依宣告自動建隔離 venv 安裝（`core/tool_deps.py`），不必手動全域安裝。**注意：Labeling 的 `torch`/`ultralytics`/`torchvision`/`transformers` 不走這條，它們已在步驟 (c) 直接裝進全域 3.11。**
 > - ⚠️ 專案內的 `python` 可能指向 `.venv-xanylabeling`（沒有 pytest/fastapi）；**安裝與測試一律用 `py -3.11`**。
+> - ⚠️ **繁中(cp950)機器先設 `$env:PYTHONUTF8 = "1"`**：requirements 檔的「註解」含 UTF-8 字元（em-dash `—`、ellipsis `…`），pip（≤24）在無 BOM 時用系統 ANSI 編碼 cp950 解碼會崩。設了 UTF-8 模式即可，或改用較新版 pip。詳見疑難排解。
+> - ⚠️ **步驟 (b) 是「全域 editable」——多 clone 共用同一支 `py -3.11` 時，最後一個跑 (b) 的 clone 會獨佔機器層級的 `ai4bi` 來源**。請把 (b) 指向**穩定主 clone**（如 `C:\code\claude\nativeApp`），**勿指向臨時/備份資料夾**；該路徑被刪/搬，所有 clone 的 `import ai4bi` 會一起壞（症狀：`pip show ai4bi` 看似已裝，但 `import ai4bi` 報 `ModuleNotFoundError`，doctor FAIL）。修法：重跑 (b) 指向有效路徑。
 
 ---
 
@@ -233,6 +239,10 @@ py -3.11 -m pytest sidecar\python-engine\tests sidecar\python-engine\plugins\lab
 | `cargo` 偶發 I/O 失敗 / 路徑過長 | 防毒掃 `target`，或 MAX_PATH | `target` 加防毒排除；啟用 Windows long path（`git config --system core.longpaths true` + LongPathsEnabled）；工作目錄勿放太深 |
 | `pytest`/`fastapi` 找不到、或測試用到錯的 Python | repo 內 `python` 指向 `.venv-xanylabeling` | 一律用 **`py -3.11`**；**勿用 `npm run test:python`**（走裸 python） |
 | 跑了 `start-dev.bat` 卻開出 Electron 視窗 | 找不到可執行的 `cim-light.exe`（預建檔被刪/被防毒移除），腳本自動退回 Electron 備援 | 還原 `apps\host-tauri\prebuilt\cim-light.exe`（`git checkout -- apps/host-tauri/prebuilt/cim-light.exe`），或依步驟 8 重建後覆蓋預建檔，再跑 `start-dev.bat` |
+| 步驟 6 `pip install -r` 報 **`UnicodeDecodeError: 'cp950' codec can't decode byte 0xe2`** | `requirements*.txt` 的「註解」含 UTF-8 字元（em-dash `—`、ellipsis `…`），pip（≤24）在檔案無 BOM 時用系統 ANSI 編碼 **cp950**（繁中 Windows）解碼 → 崩。ASCII-only 的英文機器碰巧不會炸 | 裝之前先 **`$env:PYTHONUTF8 = "1"`**（步驟 6 已內建此行）；或升級 pip：`py -3.11 -m pip install -U pip`；或把兩個 requirements 檔的非 ASCII 註解改 ASCII（`-`/`...`）或存成 UTF-8 **含 BOM** |
+| `import ai4bi` 報 **`ModuleNotFoundError`**，但 `pip show ai4bi` 顯示「已裝」 | 步驟 6(b) 的 **editable 來源路徑被刪/搬**（常見：指到舊備份資料夾）。editable 只是把該路徑掛進 import 搜尋，路徑沒了 import 就失敗，`verify-setup.ps1` 連帶 FAIL | 重跑步驟 6(b) 指向**存在且穩定**的路徑：`py -3.11 -m pip install -e "C:\code\claude\nativeApp\sidecar\python-engine\vendor\AI4BI[llm]"`（多 clone 共用全域 `py -3.11` 時尤其要指穩定主 clone，勿指臨時/備份夾） |
+| `pytest` 兩個 `test_mcp_config` 失敗 / `FileNotFoundError: ...\.mcp.json` | `.mcp.json` 與整個 `.claude/` 都被 **gitignore**，fresh clone 沒有（且 `.claude/mcp.json` **連 `.example` 都沒有**）。**不影響 app 運作**，純 MCP 工具設定的 meta-test | 依「當前 repo 絕對路徑」生成兩檔：`.mcp.json`（以 `.mcp.json.example` 為底、替換 `<YOUR_PROJECT_ROOT>`）與 `.claude/mcp.json`（從可用機器複製）。根本解：repo 補 `.claude/mcp.json.example`，或讓該測試在缺檔時 skip |
+| `npm ci` 失敗 / 跑完 `npm install` 後 `package-lock.json` 大幅變動（未改動程式卻變髒） | 加入 `apps/host-tauri` 這個 workspace 後，root `package-lock.json` 未一起重生提交（lockfile 落後於目前 workspace 集合） | 在主 clone 跑一次 `npm install`，把更新後的 `package-lock.json` **commit 進 repo**；之後 fresh clone 的 `npm install` 就不再動 lockfile |
 
 ---
 
