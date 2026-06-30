@@ -1,0 +1,30 @@
+[package]
+name = "cim-light"
+version = "0.1.0"
+description = "Tauri 輕量殼 — CIM Hybrid Edge Platform"
+edition = "2021"
+rust-version = "1.77"
+
+# 同時產 lib(供整合測試 import)與 bin(實際殼)
+[lib]
+name = "cim_light"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cim-light"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
+urlencoding = "2"
+
+[profile.dev]
+# 加快迭代:殼本身小,沒必要全最佳化
+incremental = true

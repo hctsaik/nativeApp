@@ -1,7 +1,7 @@
 @echo off
 rem ============================================================================
 rem  start-dev.bat — 已轉導至新架構（Tauri）。
-rem  啟動一律改用 Tauri 殼（nativeApp_Light）；portal / engine / 模組完全共用、不變。
+rem  啟動一律改用 Tauri 殼（已併入本 repo：apps\host-tauri）；portal / engine / 模組完全共用、不變。
 rem  舊的 Electron DEV 殼仍保留為備援：start-dev-electron.bat。
 rem  說明：根目錄 CLAUDE.md「啟動方式」與 docs/platform/startup-tauri.md。
 rem ============================================================================

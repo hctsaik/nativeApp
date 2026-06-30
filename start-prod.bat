@@ -1,7 +1,7 @@
 @echo off
 title CIM Platform - PROD Mode
 echo [PROD] Starting in PROD mode (CIM_DEV_MODE=0)...
-echo [PROD] 註：新架構正式主線為 Tauri。Tauri 的 PROD 對應 = 於 ..\nativeApp_Light\5_PG_Develop 跑
+echo [PROD] 註：新架構正式主線為 Tauri。Tauri 的 PROD 對應 = 於 apps\host-tauri 跑
 echo [PROD]      "npm run tauri:build"（產簽章 nsis）。本 Electron PROD 暫為過渡備援；見 docs\platform\startup-tauri.md
 echo.
 

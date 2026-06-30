@@ -81,8 +81,8 @@ dev 模式下 engine 由 `start-dev.bat` 解析出的 Python 啟動（傳給 Ele
 ```powershell
 start-dev.bat        # 已自動轉導到 start-dev-tauri.bat（Tauri 殼）
 ```
-> 啟動一律走 **Tauri 殼**（`nativeApp_Light`）；portal / engine / 模組與 Electron 共用、不變。
-> 首次需在 `..\nativeApp_Light\5_PG_Develop` 跑 `npm install`，並安裝 Rust toolchain。
+> 啟動一律走 **Tauri 殼**（已隨 repo 內建於 `apps\host-tauri\`）；portal / engine / 模組與 Electron 共用、不變。
+> 日常啟動**不需額外設定**：直接跑既建的 `apps\host-tauri\prebuilt\cim-light.exe`（隨 clone 附帶，免 sibling clone、免 npm install、免 Rust toolchain）。
 > 舊 Electron DEV 殼為備援（`start-dev-electron.bat`）。完整說明見 [`platform/startup-tauri.md`](platform/startup-tauri.md)。
 
 ## 7. 日後更新（與 AI4BI / labeling 各自獨立）

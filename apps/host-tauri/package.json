@@ -1,0 +1,20 @@
+{
+  "name": "cim-light",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tauri 輕量殼 — CIM Hybrid Edge Platform(取代 Electron host)",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test": "vitest run",
+    "e2e": "node e2e/run-all.mjs",
+    "e2e:one": "node e2e/run-tool.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "playwright-core": "^1.61.0",
+    "vitest": "^2.1.0"
+  }
+}

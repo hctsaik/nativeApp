@@ -45,7 +45,7 @@ rustup target list --installed   # 應含 x86_64-pc-windows-msvc
 
 ## 1. 選定並建立「工作根目錄」（sibling 佈局的前提）
 
-`nativeApp`、`nativeApp_Light`、`ANnoTation` 三個 repo **必須是同層 sibling**（Tauri 的 `frontendDist` 用相對路徑 `../../../nativeApp/...` 指回平台）。本文件範例用 `C:\code\claude` 當工作根，**你可以換成自己的路徑，但之後每個指令裡的這個前綴都要一起換**。
+`nativeApp` 與 `ANnoTation` 兩個 repo **必須是同層 sibling**（Labeling 外掛 junction 用相對路徑 `..\ANnoTation`）。Tauri 殼已**併入 nativeApp 本體**（`apps\host-tauri\`），不再是外部 sibling repo。本文件範例用 `C:\code\claude` 當工作根，**你可以換成自己的路徑，但之後每個指令裡的這個前綴都要一起換**。
 
 ```powershell
 # 選一個工作根（可自訂），先建好再進去
@@ -73,17 +73,11 @@ git submodule update --init --recursive
 
 ---
 
-## 3. Clone Tauri 殼 nativeApp_Light（同層 sibling）+ 安裝其前端相依
+## 3. Tauri 殼（已併入本體；日常無需額外動作）
 
-Tauri 殼專案在 sibling repo `nativeApp_Light`，Tauri 專案根在 `5_PG_Develop`（app 名 `cim-light`）。
-
-```powershell
-Set-Location C:\code\claude        # 與 nativeApp 同一層
-git clone https://github.com/hctsaik/nativeApp_Light.git
-Set-Location C:\code\claude\nativeApp_Light\5_PG_Develop
-npm install                        # 安裝 @tauri-apps/cli ^2 等前端相依
-Set-Location C:\code\claude\nativeApp
-```
+Tauri 殼已**併入 nativeApp 本體**：Rust 原始碼在 `apps\host-tauri\src-tauri\`，npm/tauri-cli 包裝在 `apps\host-tauri\package.json`，app 名 `cim-light`。
+**預建可執行檔已隨 repo 版控**：`apps\host-tauri\prebuilt\cim-light.exe`（每次 clone 都帶，免編譯即可跑）。
+**日常使用/啟動不需任何額外步驟**——不必 clone sibling、不必為殼跑 `npm install`、也不必 Rust 工具鏈。只有**要重建 Rust 殼**（少見）才需步驟 0 的工具鏈與步驟 8。
 
 > `tauri.conf` **沒有** `beforeDevCommand` / `devUrl`，所以 Tauri **不會自己跑 Vite**；
 > portal dist 必須由我們在步驟 7 預先建好（這也是步驟 7 必須在步驟 8「Tauri 建置」之前的原因）。
@@ -160,37 +154,44 @@ npm --prefix apps\portal-react run build      # = vite build → 產出 apps\por
 
 Tauri v2；`bundle.targets = ['nsis']`；`productName = "CIM Hybrid Edge Platform"`；`identifier = com.cim.hybrid-edge-platform.light`。
 
+> 殼已隨 repo 帶**預建可執行檔** `apps\host-tauri\prebuilt\cim-light.exe`，**一般無需執行本節**——只有改了 Rust 殼本身才需重建。
+
 ```powershell
-Set-Location C:\code\claude\nativeApp_Light\5_PG_Develop
+Set-Location C:\code\claude\nativeApp\apps\host-tauri
+npm install                # 重建殼才需要：安裝 @tauri-apps/cli ^2 等
 npm run tauri:build        # = tauri build → 簽章 NSIS 安裝包 + src-tauri\target\release\cim-light.exe
 # 開發迭代（即時跑、不出安裝包）：
 # npm run tauri:dev
+# 建好後，用新產物覆蓋預建檔（讓每次 clone 都拿到最新殼）：
+# Copy-Item src-tauri\target\release\cim-light.exe prebuilt\cim-light.exe -Force
 ```
 
 > ⏱️ **時間/空間預期**：第一次 `cargo`/`tauri build` 會編譯大量 crate，**可能數分鐘到十幾分鐘**；過程看似停住屬正常，**不要當成失敗中斷**。`src-tauri\target` 可長到數 GB。
 >
-> ⚠️ **簽章憑證注意（一定要看）**：要編輯的檔是 **`C:\code\claude\nativeApp_Light\5_PG_Develop\src-tauri\tauri.conf.json`**，鍵路徑 `bundle.windows.certificateThumbprint`，目前值 `9A91F8C5D5E93B2828773F57DDF6D0EBDE18A82E` + DigiCert 時間戳（`http://timestamp.digicert.com`）。`tauri build` **會用該指紋的憑證簽章**——這張憑證必須在 **Windows 憑證存放區（cert store）**裡。機器上**沒有這張憑證**時，兩條路擇一：
+> ⚠️ **簽章憑證注意（一定要看）**：要編輯的檔是 **`C:\code\claude\nativeApp\apps\host-tauri\src-tauri\tauri.conf.json`**，鍵路徑 `bundle.windows.certificateThumbprint`，目前值 `9A91F8C5D5E93B2828773F57DDF6D0EBDE18A82E` + DigiCert 時間戳（`http://timestamp.digicert.com`）。`tauri build` **會用該指紋的憑證簽章**——這張憑證必須在 **Windows 憑證存放區（cert store）**裡。機器上**沒有這張憑證**時，兩條路擇一：
 > 1. **匯入該憑證**到目前使用者的 cert store（`certmgr.msc` / `Import-PfxCertificate`），再 `tauri build`；或
 > 2. **建非簽章版**：把上述 `tauri.conf.json` 的 `bundle.windows.certificateThumbprint` 改成空字串 `""`（或移除該鍵），讓 build 不簽章。
->    （只想本機跑、不發佈時最省事；非簽章 exe 在 no-WDAC 機器可直接跑。改檔會弄髒 `nativeApp_Light` 的 git 樹，build 後可 `git stash`/`git checkout -- src-tauri/tauri.conf.json` 還原。）
+>    （只想本機跑、不發佈時最省事；非簽章 exe 在 no-WDAC 機器可直接跑。改檔會弄髒 `nativeApp` 的 git 樹，build 後可 `git stash`/`git checkout -- apps/host-tauri/src-tauri/tauri.conf.json` 還原。）
 
 ---
 
 ## 9. 啟動 (Run)
 
 ```powershell
-# 方式 A（主線）：跑「已建好的」cim-light.exe
+# 方式 A（主線）：跑隨 repo 帶的預建 cim-light.exe（免編譯）
 Set-Location C:\code\claude\nativeApp
-start-dev.bat            # → 轉導 start-dev-tauri.bat → 跑 nativeApp_Light\...\target\(release|debug)\cim-light.exe
+start-dev.bat            # → 轉導 start-dev-tauri.bat → 跑 apps\host-tauri\prebuilt\cim-light.exe
+                         #   （fallback 順序：prebuilt → 本機 target build → 舊 sibling）
                          #   並 spawn 原始碼 engine（sidecar\python-engine\engine.py，以 py -3.11）
 
 # 方式 B（開發迭代殼本身）：no-WDAC 機器可直接 dev
-Set-Location C:\code\claude\nativeApp_Light\5_PG_Develop
+Set-Location C:\code\claude\nativeApp\apps\host-tauri
+npm install              # 首次 dev 殼才需要
 npm run tauri:dev
 ```
 
-> ⚠️ **方式 A 的前置檢查**：`start-dev-tauri.bat` 會自檢 (1) submodule、(2) `nativeApp_Light` sibling + `src-tauri\tauri.conf.json`、(3) **既有的 `cim-light.exe`**、(4) portal dist 的 `index.html`、(5) 能 import `fastapi`+`uvicorn` 的 Python 3.11。
-> **若找不到已建好的 `cim-light.exe`，它會「自動退回 Electron 備援」（`start-dev-nowdac-electron.bat`）而不是報錯**——這時你看到的是 Electron 視窗，**別誤以為 Tauri 跑起來了**。要跑 Tauri，請先完成步驟 8 產出 `cim-light.exe`。其餘前置缺漏（portal dist / engine 相依）會中止並印出修補指令。
+> ⚠️ **方式 A 的前置檢查**：`start-dev-tauri.bat` 會自檢 (1) submodule、(2) `apps\host-tauri\src-tauri\tauri.conf.json`、(3) **可執行的 `cim-light.exe`**（優先預建 `apps\host-tauri\prebuilt\cim-light.exe`）、(4) portal dist 的 `index.html`、(5) 能 import `fastapi`+`uvicorn` 的 Python 3.11。
+> 預建 exe 已隨 repo 版控，所以一般**直接就有** `cim-light.exe`。萬一連預建檔都找不到（被刪/被防毒移除），它會「自動退回 Electron 備援」（`start-dev-nowdac-electron.bat`）而不是報錯——這時你看到的是 Electron 視窗，**別誤以為 Tauri 跑起來了**；還原預建檔或依步驟 8 重建即可。其餘前置缺漏（portal dist / engine 相依）會中止並印出修補指令。
 > 殼以外一切共用：engine、portal dist、cim-modules、Labeling 都是 runtime 載入。日常只改 portal dist / Python engine / 模組時**不需重編 Rust 殼**；只有改 Rust 殼本身才需回到步驟 8。
 
 ---
@@ -209,7 +210,7 @@ npm test
 py -3.11 -m pytest sidecar\python-engine\tests sidecar\python-engine\plugins\labeling\tests
 ```
 
-> ⚠️ **doctor「通過」≠ Tauri 已建好**：`verify-setup.ps1` **只驗平台側**（git/node/npm、Python 3.11、AI4BI submodule + pip 層、`node_modules`、labeling junction）。它**不檢查** Rust/rustup、MSVC `link.exe`、WebView2、`nativeApp_Light` 是否存在或其 `npm install`、portal dist、簽章憑證，也**不檢查** `cim-light.exe`。所以 doctor 過了是「**必要但不充分**」——Tauri 那一段請另行確認 **`C:\code\claude\nativeApp_Light\5_PG_Develop\src-tauri\target\release\cim-light.exe` 是否存在**。doctor 對 torch/ultralytics 印 **WARN 屬正常、不是失敗**。
+> ⚠️ **doctor「通過」≠ Tauri 已建好**：`verify-setup.ps1` **只驗平台側**（git/node/npm、Python 3.11、AI4BI submodule + pip 層、`node_modules`、labeling junction）。它**不檢查** Rust/rustup、MSVC `link.exe`、WebView2、portal dist、簽章憑證，也**不檢查** `cim-light.exe`。所以 doctor 過了是「**必要但不充分**」。一般情況下 Tauri 殼的 **`apps\host-tauri\prebuilt\cim-light.exe` 已隨 repo 帶**，clone 後即存在；若你自行重建過殼，請確認該預建檔（或 `apps\host-tauri\src-tauri\target\release\cim-light.exe`）存在。doctor 對 torch/ultralytics 印 **WARN 屬正常、不是失敗**。
 > ⚠️ **不要用 `npm run test:python`**：它走裸 `python`（可能是 `.venv-xanylabeling`，無 pytest），會以混淆的錯誤失敗。Python 測試一律用上面的 `py -3.11 -m pytest ...`。
 
 啟動 app 後，portal 的 catalog 應正確列出 `app-lv` + `sheet-annotation` + `labeling` 等模組，代表 submodule、junction、engine 三者都到位。
@@ -223,15 +224,15 @@ py -3.11 -m pytest sidecar\python-engine\tests sidecar\python-engine\plugins\lab
 | `cargo build` / `tauri build` 報 **`link.exe not found`** / `error: linker 'link.exe' not found` | 缺 MSVC C++ Build Tools（沒裝「Desktop development with C++」workload），或裝 Rust 在前、Build Tools 在後 | 先裝 Visual Studio **Build Tools 2022** 並勾該 workload（步驟 0），開新終端再重試。`where.exe link.exe` 在一般 shell 找不到屬正常，不代表沒裝 |
 | `winget is not recognized` | 機器無 winget（精簡/舊映像） | Microsoft Store 安裝「App Installer」，或用步驟 0 表格的直接下載連結逐一安裝 |
 | `cim-light.exe` 啟動白屏 / WebView2 相關錯誤 | 缺 WebView2 Runtime（多見於舊 Win10） | 安裝 Microsoft **WebView2 Evergreen Bootstrapper**（Win11 通常已內建） |
-| `tauri build` 因**簽章憑證**失敗（找不到 thumbprint `9A91F8C5...`） | cert store 沒有該憑證 | **匯入該憑證**後重建；或**建非簽章版**：把 `nativeApp_Light\5_PG_Develop\src-tauri\tauri.conf.json` 的 `bundle.windows.certificateThumbprint` 設為 `""` |
+| `tauri build` 因**簽章憑證**失敗（找不到 thumbprint `9A91F8C5...`） | cert store 沒有該憑證 | **匯入該憑證**後重建；或**建非簽章版**：把 `apps\host-tauri\src-tauri\tauri.conf.json` 的 `bundle.windows.certificateThumbprint` 設為 `""` |
 | `verify-setup.ps1` 報 **FAIL：缺 ai4bi/duckdb/plotly** | 跳過了步驟 6(b) `pip install -e vendor\AI4BI[llm]` | 補跑步驟 6(b)；AI4BI 是 doctor 通過的硬性前置，非選用 |
 | 模組目錄空 / `vendor/LV`、`AI4BI`、`cim-modules` 沒內容 | clone 時沒帶 `--recurse-submodules` | `git submodule update --init --recursive` |
 | `link-labeling.bat` 報「Labeling source not found」/ portal 看不到影像標註 | `..\ANnoTation` 缺 `plugin.manifest.yaml`（clone 不完整），或重 clone 後沒重掛 junction | 完整重新 `git clone ANnoTation` 到同層，再跑 `scripts\win\link-labeling.bat` |
-| `tauri dev`/`build` 抱怨找不到 `frontendDist` / portal 內容 | portal dist 還沒建，或 `nativeApp` 不在 `nativeApp_Light` 同層 | 先跑步驟 7 `npm --prefix apps\portal-react run build`；確認兩 repo 同層 sibling |
+| `tauri dev`/`build` 抱怨找不到 `frontendDist` / portal 內容 | portal dist 還沒建 | 先跑步驟 7 `npm --prefix apps\portal-react run build`（殼已在本體 `apps\host-tauri`，`frontendDist` 指回同 repo 的 portal dist） |
 | 第一次 `cargo build` 很久像當掉 | 正常——大量 crate 首編 | 耐心等（數分鐘～十幾分鐘）；把 `src-tauri\target` 加入防毒排除可加速 |
 | `cargo` 偶發 I/O 失敗 / 路徑過長 | 防毒掃 `target`，或 MAX_PATH | `target` 加防毒排除；啟用 Windows long path（`git config --system core.longpaths true` + LongPathsEnabled）；工作目錄勿放太深 |
 | `pytest`/`fastapi` 找不到、或測試用到錯的 Python | repo 內 `python` 指向 `.venv-xanylabeling` | 一律用 **`py -3.11`**；**勿用 `npm run test:python`**（走裸 python） |
-| 跑了 `start-dev.bat` 卻開出 Electron 視窗 | 沒有已建好的 `cim-light.exe`，腳本自動退回 Electron 備援 | 先完成步驟 8 產出 `cim-light.exe`，再跑 `start-dev.bat` |
+| 跑了 `start-dev.bat` 卻開出 Electron 視窗 | 找不到可執行的 `cim-light.exe`（預建檔被刪/被防毒移除），腳本自動退回 Electron 備援 | 還原 `apps\host-tauri\prebuilt\cim-light.exe`（`git checkout -- apps/host-tauri/prebuilt/cim-light.exe`），或依步驟 8 重建後覆蓋預建檔，再跑 `start-dev.bat` |
 
 ---
 

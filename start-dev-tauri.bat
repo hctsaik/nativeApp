@@ -17,27 +17,26 @@ rem -- submodule preflight ----------------------------------------------------
 call "%~dp0scripts\win\preflight-submodules.bat"
 if errorlevel 1 exit /b 1
 
-rem -- Tauri 專案位置（nativeApp_Light 為 nativeApp 的 sibling repo）----------------
-set "LIGHT=%~dp0..\nativeApp_Light\5_PG_Develop"
-if not exist "%LIGHT%\src-tauri\tauri.conf.json" (
-  echo [DEV-TAURI][ERROR] 找不到 Tauri 專案：%LIGHT%（請確認 nativeApp_Light 與 nativeApp 同層）。
-  exit /b 1
-)
-
-rem -- 找「既有已 build」的 Tauri exe（release 優先，否則 debug）。不在本機重編。-----------
-set "TAURI_EXE=%LIGHT%\src-tauri\target\release\cim-light.exe"
-if not exist "%TAURI_EXE%" set "TAURI_EXE=%LIGHT%\src-tauri\target\debug\cim-light.exe"
+rem -- Tauri 殼位置（已併入本 repo：apps\host-tauri；舊 sibling nativeApp_Light 僅作 fallback）--
+set "TAURI_DIR=%~dp0apps\host-tauri\src-tauri"
+rem -- 找可跑的 exe：repo 內預建 prebuilt 優先 → 本機 release/debug build → 舊 sibling。不在本機重編。
+set "TAURI_EXE=%~dp0apps\host-tauri\prebuilt\cim-light.exe"
+if not exist "%TAURI_EXE%" set "TAURI_EXE=%TAURI_DIR%\target\release\cim-light.exe"
+if not exist "%TAURI_EXE%" set "TAURI_EXE=%TAURI_DIR%\target\debug\cim-light.exe"
+set "SIB=%~dp0..\nativeApp_Light\5_PG_Develop\src-tauri"
+if not exist "%TAURI_EXE%" if exist "%SIB%\target\debug\cim-light.exe" set "TAURI_DIR=%SIB%"
+if not exist "%TAURI_EXE%" if exist "%SIB%\target\debug\cim-light.exe" set "TAURI_EXE=%SIB%\target\debug\cim-light.exe"
 if not exist "%TAURI_EXE%" (
   echo.
-  echo [DEV-TAURI][ERROR] 找不到已 build 的 Tauri exe（cim-light.exe）。
-  echo   本機 WDAC 擋 cargo 重編，無法在此 build；請在「沒有 WDAC 強制的機器」
-  echo   `npm run tauri:build`（或 tauri:dev）產生 exe 後帶回，或請 IT 放行 src-tauri\target。
-  echo   詳見 docs\platform\startup-tauri.md。本機暫時轉用 Electron（no-WDAC）備援 ...
+  echo [DEV-TAURI][ERROR] 找不到可跑的 Tauri exe（cim-light.exe）。
+  echo   應位於 apps\host-tauri\prebuilt\cim-light.exe。本機 WDAC 擋 cargo 重編，無法在此 build；
+  echo   要更新殼請在「沒有 WDAC 強制的機器」build 後置換該檔。詳見 docs\platform\startup-tauri.md。
+  echo   本機暫時轉用 Electron（no-WDAC）備援 ...
   echo.
   call "%~dp0start-dev-nowdac-electron.bat"
   exit /b 0
 )
-echo [DEV-TAURI] 既有 Tauri exe：%TAURI_EXE%
+echo [DEV-TAURI] Tauri exe：%TAURI_EXE%
 
 rem -- 預建 portal dist 必須存在（Tauri 載靜態 dist）-------------------------------
 if not exist "%~dp0apps\portal-react\dist\index.html" (
@@ -69,8 +68,8 @@ echo [DEV-TAURI] Using Python: %PYTHON%
 rem -- 清理殘留 engine --------------------------------------------------------
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*engine.py*--control-port*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 
-rem -- 啟動既有 Tauri exe（cwd=src-tauri：對映 cargo run 的 cwd，log 落 src-tauri\logs）-------
+rem -- 啟動 Tauri exe（cwd=TAURI_DIR：log 落 src-tauri\logs）-------
 rem    engine 用原始碼 engine.py（CIM_ENGINE_EXE 為 .py → 以 CIM_ENGINE_PYTHON 執行）。
 set "ENGINE_PY=%~dp0sidecar\python-engine\engine.py"
 echo [DEV-TAURI] 啟動 Tauri 視窗（cim-light.exe）…
-start "CIM Tauri DEV" cmd /k "cd /d %LIGHT%\src-tauri && set CIM_ENGINE_EXE=%ENGINE_PY%&& set CIM_ENGINE_PYTHON=%PYTHON%&& set PYTHONUTF8=1&& %TAURI_EXE%"
+start "CIM Tauri DEV" cmd /k "cd /d %TAURI_DIR% && set CIM_ENGINE_EXE=%ENGINE_PY%&& set CIM_ENGINE_PYTHON=%PYTHON%&& set PYTHONUTF8=1&& %TAURI_EXE%"

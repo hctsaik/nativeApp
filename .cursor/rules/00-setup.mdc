@@ -12,4 +12,4 @@ Must-knows:
 - Python is **`py -3.11`** (do not use bare `python` or `npm run test:python`).
 - Clone with **`--recurse-submodules`** (submodules: `vendor/AI4BI`, `vendor/LV`, `plugins/cim-modules`).
 - **Labeling (ANnoTation) is a directory junction, not a submodule.**
-- The **Tauri shell** is the sibling repo `nativeApp_Light`; build it on a machine **without WDAC enforce**.
+- The **Tauri shell** now lives in-repo at `apps/host-tauri/` and ships a prebuilt runnable binary (`apps/host-tauri/prebuilt/cim-light.exe`) — daily use needs no sibling clone, no npm install, no Rust toolchain. To **rebuild** the Rust shell (rare), run `npm install` + `npm run tauri:build` in `apps/host-tauri/` on a machine **without WDAC enforce**, then replace `apps/host-tauri/prebuilt/cim-light.exe`.

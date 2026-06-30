@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CIM Hybrid Edge Platform",
+  "version": "0.1.0",
+  "identifier": "com.cim.hybrid-edge-platform.light",
+  "build": {
+    "frontendDist": "../../portal-react/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "certificateThumbprint": "9A91F8C5D5E93B2828773F57DDF6D0EBDE18A82E"
+    }
+  }
+}
