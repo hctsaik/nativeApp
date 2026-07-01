@@ -59,7 +59,7 @@ pip install -r sidecar/python-engine/requirements.txt
 ```
 
 > **新架構（啟動一律用 Tauri）**：殼已從 Electron 換成 **Tauri**，且已收進本 repo
-> （`apps/host-tauri/`，預建可執行檔 `apps/host-tauri/prebuilt/cim-light.exe` 隨 clone 附帶），
+> （`apps/host-tauri/`；可執行檔 `apps/host-tauri/prebuilt/cim-light.exe` **不進 git**，在非 WDAC 機器用 `scripts/win/build-shell.bat` 產生後複製就位），
 > portal / engine / 模組完全共用、不變。請用根目錄 `start-dev.bat`（已自動轉導到 `start-dev-tauri.bat`）
 > 或直接 `start-dev-tauri.bat`。完整說明見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 > 以下 `npm run dev`（Electron 殼）已退為**備援**（對應 `start-dev-electron.bat`）。

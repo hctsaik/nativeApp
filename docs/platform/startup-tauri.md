@@ -20,15 +20,15 @@
 >     could not execute process `...\src-tauri\target\debug\build\...\build-script-build`
 >     應用程式控制原則已封鎖此檔案。 (os error 4551)
 >   ```
-> - **可跑（既有 exe）**：實測**隨 repo 附帶的預建** `cim-light.exe`（Tauri 殼，`apps/host-tauri/prebuilt/cim-light.exe`）
+> - **可跑（既有 exe）**：實測 `cim-light.exe`（Tauri 殼，`apps/host-tauri/prebuilt/cim-light.exe`；**不進 git**，在別台 build 好複製進來）
 >   **在 WDAC 下直接執行 OK**（portal + engine 都載入；疑似 ISG 檔案信譽）。
 >
 > **本機現行做法（已更正）**：
-> - **主線 = 直接跑隨 repo 附帶的預建 `cim-light.exe`**（`apps\host-tauri\prebuilt\cim-light.exe`，設 `CIM_ENGINE_EXE=…\engine.py`
+> - **主線 = 直接跑 `prebuilt\cim-light.exe`**（`apps\host-tauri\prebuilt\cim-light.exe`；**exe 不進 git**，先在非 WDAC 機器產生後複製就位，設 `CIM_ENGINE_EXE=…\engine.py`
 >   + `CIM_ENGINE_PYTHON=<py3.11>`）。`start-dev.bat` → `start-dev-tauri.bat` 就是這樣做，**絕不在本機跑 `tauri dev`/`tauri build`**。
 > - 日常 dev 改 portal dist / Python engine / 模組（runtime 載入，**不需重編 Rust 殼**）→ 本機 Tauri 完全夠用。
-> - **只有要改 Rust 殼本身**才需重編：在「沒有 WDAC 強制的機器」`cd apps\host-tauri && npm install && npm run tauri:build`（簽章版），
->   再把產物**覆蓋回 `apps\host-tauri\prebuilt\cim-light.exe`**；或請 IT 放行 `apps\host-tauri\src-tauri\target`。
+> - **只有要改 Rust 殼本身**才需重編：在「沒有 WDAC 強制的機器」跑 `scripts\win\build-shell.bat`（= `cargo build --release` → 複製進 `prebuilt\`；要簽章 NSIS 版改 `cd apps\host-tauri && npm install && npm run tauri:build`），
+>   再把產物 `cim-light.exe`**複製到 `apps\host-tauri\prebuilt\`**；或請 IT 放行 `apps\host-tauri\src-tauri\target`。
 > - **Electron（no-WDAC）退為最終備援**（`start-dev-nowdac-electron.bat`）：只在「沒有既有 Tauri exe 或它也跑不起來」時用。
 
 ## 怎麼啟動（DEV）
@@ -45,12 +45,14 @@ start-dev-tauri.bat
 清殘留 engine → 設 `CIM_ENGINE_EXE=…\engine.py`、`CIM_ENGINE_PYTHON=<py3.11>` → **直接執行那顆 `cim-light.exe`**。
 
 ### 前置需求（首次）
-> **日常啟動不需要任何額外設定**：Tauri 殼已併入本 repo（`apps/host-tauri/`），預建 exe
-> `apps/host-tauri/prebuilt/cim-light.exe` **隨 clone 附帶、開箱即跑**——不必 clone sibling、不必為殼 `npm install`、不需 Rust toolchain。
+> Tauri 殼已併入本 repo（`apps/host-tauri/`），但可執行 exe
+> `apps/host-tauri/prebuilt/cim-light.exe` **不進 git**：先在非 WDAC 機器用 `scripts/win/build-shell.bat` 產生、複製到目標機 `prebuilt/`。
+> **exe 就位後日常啟動不需任何額外設定**——不必 clone sibling、不必為殼 `npm install`、不需 Rust toolchain。
 1. **預建 portal dist**：`apps/portal-react/dist` 要存在（在可用 esbuild 的機器 `npm --prefix apps/portal-react run build`）。
 2. Python 3.11（給原始碼 engine）。
-3. **只有要重編 Rust 殼時**才需要：在「沒有 WDAC 強制的機器」`cd apps\host-tauri && npm install`（Tauri 前端相依）
-   + **Rust toolchain（rustup）** + Tauri 系統需求（Windows: WebView2 Runtime，通常已內建），`npm run tauri:build` 後把產物覆蓋回 `apps/host-tauri/prebuilt/cim-light.exe`。
+3. **要產生/重編 Rust 殼 exe 時**：在「沒有 WDAC 強制的機器」跑 `scripts\win\build-shell.bat`
+   （需 **Rust toolchain（rustup）** + Tauri 系統需求：Windows WebView2 Runtime，通常已內建；= `cargo build --release` → 複製進 `prebuilt\`），
+   再把 `cim-light.exe` 複製到目標機的 `apps/host-tauri/prebuilt/`。要簽章 NSIS 安裝包則改 `cd apps\host-tauri && npm install && npm run tauri:build`。
 
 ### engine 解析（sidecar.rs）
 - `CIM_ENGINE_EXE` 副檔名 `.py` → 用 `CIM_ENGINE_PYTHON` 跑**原始碼 engine**（DEV）。

@@ -29,8 +29,10 @@ if not exist "%TAURI_EXE%" if exist "%SIB%\target\debug\cim-light.exe" set "TAUR
 if not exist "%TAURI_EXE%" (
   echo.
   echo [DEV-TAURI][ERROR] 找不到可跑的 Tauri exe（cim-light.exe）。
-  echo   應位於 apps\host-tauri\prebuilt\cim-light.exe。本機 WDAC 擋 cargo 重編，無法在此 build；
-  echo   要更新殼請在「沒有 WDAC 強制的機器」build 後置換該檔。詳見 docs\platform\startup-tauri.md。
+  echo   exe 不進 git（見 apps\host-tauri\.gitignore）。取得方式：
+  echo     - 非 WDAC 機器：scripts\win\build-shell.bat（cargo build → 放進 prebuilt\）。
+  echo     - 本機（WDAC 擋 cargo，無法在此 build）：在別台跑上面那支，再把
+  echo       cim-light.exe 複製到 apps\host-tauri\prebuilt\。詳見 prebuilt\README.md。
   echo   本機暫時轉用 Electron（no-WDAC）備援 ...
   echo.
   call "%~dp0start-dev-nowdac-electron.bat"

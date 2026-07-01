@@ -79,8 +79,8 @@ git submodule update --init --recursive
 ## 3. Tauri 殼（已併入本體；日常無需額外動作）
 
 Tauri 殼已**併入 nativeApp 本體**：Rust 原始碼在 `apps\host-tauri\src-tauri\`，npm/tauri-cli 包裝在 `apps\host-tauri\package.json`，app 名 `cim-light`。
-**預建可執行檔已隨 repo 版控**：`apps\host-tauri\prebuilt\cim-light.exe`（每次 clone 都帶，免編譯即可跑）。
-**日常使用/啟動不需任何額外步驟**——不必 clone sibling、不必為殼跑 `npm install`、也不必 Rust 工具鏈。只有**要重建 Rust 殼**（少見）才需步驟 0 的工具鏈與步驟 8。
+**可執行檔 `apps\host-tauri\prebuilt\cim-light.exe` 不進 git**（17MB binary 不放版控）：在**非 WDAC 機器**用 `scripts\win\build-shell.bat`（`cargo build --release` → 複製進 `prebuilt\`）產生，再把 exe 複製到目標機的 `prebuilt\`（既有/複製進來的未簽章 exe 在 WDAC 下跑得起來）。取得方式見 `apps\host-tauri\prebuilt\README.md`。
+**exe 就位後，日常使用/啟動不需任何額外步驟**——不必 clone sibling、不必為殼跑 `npm install`、也不必 Rust 工具鏈。只有**要重建 Rust 殼**（少見）才需步驟 0 的工具鏈與步驟 8。
 
 > `tauri.conf` **沒有** `beforeDevCommand` / `devUrl`，所以 Tauri **不會自己跑 Vite**；
 > portal dist 必須由我們在步驟 7 預先建好（這也是步驟 7 必須在步驟 8「Tauri 建置」之前的原因）。
@@ -160,7 +160,7 @@ npm --prefix apps\portal-react run build      # = vite build → 產出 apps\por
 
 Tauri v2；`bundle.targets = ['nsis']`；`productName = "CIM Hybrid Edge Platform"`；`identifier = com.cim.hybrid-edge-platform.light`。
 
-> 殼已隨 repo 帶**預建可執行檔** `apps\host-tauri\prebuilt\cim-light.exe`，**一般無需執行本節**——只有改了 Rust 殼本身才需重建。
+> 可執行檔 `apps\host-tauri\prebuilt\cim-light.exe` **不進 git**，需在**非 WDAC 機器**產生（最省事用 `scripts\win\build-shell.bat`；細節見下）。exe 已就位、且沒改 Rust 殼時，**一般無需執行本節**。
 
 ```powershell
 Set-Location C:\code\claude\nativeApp\apps\host-tauri
@@ -168,8 +168,9 @@ npm install                # 重建殼才需要：安裝 @tauri-apps/cli ^2 等
 npm run tauri:build        # = tauri build → 簽章 NSIS 安裝包 + src-tauri\target\release\cim-light.exe
 # 開發迭代（即時跑、不出安裝包）：
 # npm run tauri:dev
-# 建好後，用新產物覆蓋預建檔（讓每次 clone 都拿到最新殼）：
+# 建好後，把產物放進 prebuilt\（exe 不進 git，需自行放置 / 複製到目標機）：
 # Copy-Item src-tauri\target\release\cim-light.exe prebuilt\cim-light.exe -Force
+# 懶人版（cargo build + 自動複製到 prebuilt\，非 WDAC 機器）：..\..\scripts\win\build-shell.bat
 ```
 
 > ⏱️ **時間/空間預期**：第一次 `cargo`/`tauri build` 會編譯大量 crate，**可能數分鐘到十幾分鐘**；過程看似停住屬正常，**不要當成失敗中斷**。`src-tauri\target` 可長到數 GB。
@@ -184,7 +185,7 @@ npm run tauri:build        # = tauri build → 簽章 NSIS 安裝包 + src-tauri
 ## 9. 啟動 (Run)
 
 ```powershell
-# 方式 A（主線）：跑隨 repo 帶的預建 cim-light.exe（免編譯）
+# 方式 A（主線）：跑 prebuilt\cim-light.exe（不進 git，需先就位；見步驟 8 / build-shell.bat）
 Set-Location C:\code\claude\nativeApp
 start-dev.bat            # → 轉導 start-dev-tauri.bat → 跑 apps\host-tauri\prebuilt\cim-light.exe
                          #   （fallback 順序：prebuilt → 本機 target build → 舊 sibling）
@@ -197,7 +198,7 @@ npm run tauri:dev
 ```
 
 > ⚠️ **方式 A 的前置檢查**：`start-dev-tauri.bat` 會自檢 (1) submodule、(2) `apps\host-tauri\src-tauri\tauri.conf.json`、(3) **可執行的 `cim-light.exe`**（優先預建 `apps\host-tauri\prebuilt\cim-light.exe`）、(4) portal dist 的 `index.html`、(5) 能 import `fastapi`+`uvicorn` 的 Python 3.11。
-> 預建 exe 已隨 repo 版控，所以一般**直接就有** `cim-light.exe`。萬一連預建檔都找不到（被刪/被防毒移除），它會「自動退回 Electron 備援」（`start-dev-nowdac-electron.bat`）而不是報錯——這時你看到的是 Electron 視窗，**別誤以為 Tauri 跑起來了**；還原預建檔或依步驟 8 重建即可。其餘前置缺漏（portal dist / engine 相依）會中止並印出修補指令。
+> exe **不進 git**；本機一旦放好 `prebuilt\cim-light.exe`（見步驟 8 / build-shell.bat）就會在。萬一找不到該檔（沒放過/被刪/被防毒移除），它會「自動退回 Electron 備援」（`start-dev-nowdac-electron.bat`）而不是報錯——這時你看到的是 Electron 視窗，**別誤以為 Tauri 跑起來了**；在非 WDAC 機器跑 `scripts\win\build-shell.bat` 產生後複製回來即可。其餘前置缺漏（portal dist / engine 相依）會中止並印出修補指令。
 > 殼以外一切共用：engine、portal dist、cim-modules、Labeling 都是 runtime 載入。日常只改 portal dist / Python engine / 模組時**不需重編 Rust 殼**；只有改 Rust 殼本身才需回到步驟 8。
 
 ---
@@ -238,7 +239,7 @@ py -3.11 -m pytest sidecar\python-engine\tests sidecar\python-engine\plugins\lab
 | 第一次 `cargo build` 很久像當掉 | 正常——大量 crate 首編 | 耐心等（數分鐘～十幾分鐘）；把 `src-tauri\target` 加入防毒排除可加速 |
 | `cargo` 偶發 I/O 失敗 / 路徑過長 | 防毒掃 `target`，或 MAX_PATH | `target` 加防毒排除；啟用 Windows long path（`git config --system core.longpaths true` + LongPathsEnabled）；工作目錄勿放太深 |
 | `pytest`/`fastapi` 找不到、或測試用到錯的 Python | repo 內 `python` 指向 `.venv-xanylabeling` | 一律用 **`py -3.11`**；**勿用 `npm run test:python`**（走裸 python） |
-| 跑了 `start-dev.bat` 卻開出 Electron 視窗 | 找不到可執行的 `cim-light.exe`（預建檔被刪/被防毒移除），腳本自動退回 Electron 備援 | 還原 `apps\host-tauri\prebuilt\cim-light.exe`（`git checkout -- apps/host-tauri/prebuilt/cim-light.exe`），或依步驟 8 重建後覆蓋預建檔，再跑 `start-dev.bat` |
+| 跑了 `start-dev.bat` 卻開出 Electron 視窗 | 找不到可執行的 `cim-light.exe`（沒放過/被刪/被防毒移除；exe **不進 git**），腳本自動退回 Electron 備援 | 在非 WDAC 機器跑 `scripts\win\build-shell.bat`（或步驟 8）產生 exe，複製到 `apps\host-tauri\prebuilt\cim-light.exe`，再跑 `start-dev.bat`（本機 WDAC 擋 cargo，無法就地重建） |
 | 步驟 6 `pip install -r` 報 **`UnicodeDecodeError: 'cp950' codec can't decode byte 0xe2`** | `requirements*.txt` 的「註解」含 UTF-8 字元（em-dash `—`、ellipsis `…`），pip（≤24）在檔案無 BOM 時用系統 ANSI 編碼 **cp950**（繁中 Windows）解碼 → 崩。ASCII-only 的英文機器碰巧不會炸 | 裝之前先 **`$env:PYTHONUTF8 = "1"`**（步驟 6 已內建此行）；或升級 pip：`py -3.11 -m pip install -U pip`；或把兩個 requirements 檔的非 ASCII 註解改 ASCII（`-`/`...`）或存成 UTF-8 **含 BOM** |
 | `import ai4bi` 報 **`ModuleNotFoundError`**，但 `pip show ai4bi` 顯示「已裝」 | 步驟 6(b) 的 **editable 來源路徑被刪/搬**（常見：指到舊備份資料夾）。editable 只是把該路徑掛進 import 搜尋，路徑沒了 import 就失敗，`verify-setup.ps1` 連帶 FAIL | 重跑步驟 6(b) 指向**存在且穩定**的路徑：`py -3.11 -m pip install -e "C:\code\claude\nativeApp\sidecar\python-engine\vendor\AI4BI[llm]"`（多 clone 共用全域 `py -3.11` 時尤其要指穩定主 clone，勿指臨時/備份夾） |
 | `pytest` 兩個 `test_mcp_config` 失敗 / `FileNotFoundError: ...\.mcp.json` | `.mcp.json` 與整個 `.claude/` 都被 **gitignore**，fresh clone 沒有（且 `.claude/mcp.json` **連 `.example` 都沒有**）。**不影響 app 運作**，純 MCP 工具設定的 meta-test | 依「當前 repo 絕對路徑」生成兩檔：`.mcp.json`（以 `.mcp.json.example` 為底、替換 `<YOUR_PROJECT_ROOT>`）與 `.claude/mcp.json`（從可用機器複製）。根本解：repo 補 `.claude/mcp.json.example`，或讓該測試在缺檔時 skip |

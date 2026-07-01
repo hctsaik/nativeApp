@@ -17,7 +17,7 @@ start-dev-tauri.bat
 > （本機唯一能跑的 LOCAL DEV）。Tauri 的 WDAC 好處在**簽章 release**（`tauri build`），不在 dev；
 > 要本機跑 Tauri dev 需 IT 放行 `src-tauri\target` 或改在可編譯機器產簽章版部署。詳見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 > **舊 Electron DEV 殼仍為備援**：`start-dev-electron.bat` / `start-dev-nowdac-electron.bat`。
-> Tauri 殼**已併入本 repo**：原始碼在 `apps\host-tauri\src-tauri`，可跑的預建 exe 在 `apps\host-tauri\prebuilt\cim-light.exe`（隨 clone 自帶，日常啟動**不需另外 clone / npm install / Rust toolchain**）。只有要**重編殼本身**才需 `npm install` + Rust toolchain，且須在非 WDAC 機器 build（見下方 WDAC 段）。
+> Tauri 殼**已併入本 repo**：原始碼在 `apps\host-tauri\src-tauri`。可跑的 exe `apps\host-tauri\prebuilt\cim-light.exe`**不進 git**（17MB binary 不放版控）：在**非 WDAC 機器**用 `scripts\win\build-shell.bat`（`cargo build --release` → 複製進 `prebuilt\`）產生，再把 exe 複製到本機 `prebuilt\`（既有/複製進來的未簽章 exe 在 WDAC 下跑得起來）。本機日常啟動只要 `prebuilt\` 裡有那顆 exe 即可，**不需** npm install / Rust toolchain。取得方式見 [`apps/host-tauri/prebuilt/README.md`](apps/host-tauri/prebuilt/README.md)。
 > 完整啟動清單、各 .bat 處置、前置需求與 WDAC 說明見 [`docs/platform/startup-tauri.md`](docs/platform/startup-tauri.md)。
 
 ### 首次設定（解壓 source zip 或全新 clone 後）
@@ -35,9 +35,10 @@ npm install
 pip install -r sidecar/python-engine/requirements.txt                       # engine 核心（lean）
 py -3.11 -m pip install -r sidecar/python-engine/plugins/labeling/requirements-labeling.txt  # Labeling 專屬
 
-# 4) Tauri 殼已併入本 repo（apps\host-tauri），預建 exe 隨 clone 自帶 →
-#    日常啟動「不需」任何額外步驟（無 sibling clone、無 npm install、無 Rust toolchain）。
-#    只有要「重編殼本身」才需 `npm install`（在 apps\host-tauri）+ Rust toolchain，且須在非 WDAC 機器 build。
+# 4) Tauri 殼原始碼已併入本 repo（apps\host-tauri）；但可執行 exe「不進 git」。
+#    非 WDAC 機器：scripts\win\build-shell.bat（cargo build → 放進 prebuilt\）。
+#    本機（WDAC 擋 cargo）：在別台跑上面那支，再把 cim-light.exe 複製到
+#    apps\host-tauri\prebuilt\（複製進來的既有 exe 在 WDAC 下能跑）。見 prebuilt\README.md。
 
 # 5) 啟動（一律 Tauri；start-dev.bat 會自動轉導到 start-dev-tauri.bat）
 start-dev.bat
@@ -58,8 +59,9 @@ start-dev.bat
 **關鍵區別：「本機新編譯出來的未簽章 exe」被擋，「跑既有/已建立信任的 exe」通常不會。**
 - 被擋：`esbuild.exe`（+`@rollup\*.node`，Vite build/dev）、`cargo` **每次編譯新產生的** build-script/debug exe
   （`tauri dev`/`tauri build` → `os error 4551`）、`xanylabeling.exe`（uv trampoline）。
-- 可正常跑：`electron.exe`、`node`、`python`，**以及「先前已 build 好的未簽章 exe」**——實測預建的
-  `cim-light.exe`（Tauri 殼，現已隨 repo 放在 `apps\host-tauri\prebuilt\`）**在 WDAC 下跑得起來**（疑似 ISG 檔案信譽）。
+- 可正常跑：`electron.exe`、`node`、`python`，**以及「先前已 build 好的未簽章 exe」**——實測
+  `cim-light.exe`（Tauri 殼）放在 `apps\host-tauri\prebuilt\`（**不進 git**，在別台 build 好複製進來）
+  **在 WDAC 下跑得起來**（疑似 ISG 檔案信譽）。
 **權限事實（固定）**：使用者**非 admin、無 ConfigCI、無法自行加 WDAC 規則**；公司 MDM 會還原本機 supplemental 政策。
 → **根治（把路徑/簽章加進允許清單）只能請 IT 做，不在 AI 可處理範圍，也不需要 AI 反覆嘗試繞過。**
 
@@ -67,7 +69,7 @@ start-dev.bat
 1. **不在本機 build 被擋的東西**（esbuild / cargo）。一律用「**在允許的機器預先 build 好的產物**」：
    portal 用預建 `apps/portal-react/dist`；要更新前端就在 esbuild 允許的機器 `npm --prefix apps/portal-react run build` 後帶回。
 2. **本機 DEV 啟動 = 跑既有的 Tauri exe**（不是重編！）：
-   `apps\host-tauri\prebuilt\cim-light.exe`（已併入 repo；舊 sibling `..\nativeApp_Light\…` 僅留 fallback），並設
+   `apps\host-tauri\prebuilt\cim-light.exe`（**exe 不進 git**；在非 WDAC 機器 `scripts\win\build-shell.bat` 產生後複製進來；舊 sibling `..\nativeApp_Light\…` 僅留 fallback），並設
    `CIM_ENGINE_EXE=<…>\sidecar\python-engine\engine.py` + `CIM_ENGINE_PYTHON=<py3.11>` 讓它 spawn 原始碼 engine。
    `start-dev.bat` → `start-dev-tauri.bat` 會**直接跑這顆既有 exe**（**絕不跑** `tauri dev`/`tauri build`——那會觸發 cargo 重編 → 被擋）。
    **Electron（no-WDAC）退為最終備援**（`start-dev-nowdac-electron.bat`）：只在「連既有 Tauri exe 都跑不起來、或根本沒有 exe」時用。

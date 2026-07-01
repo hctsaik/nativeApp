@@ -12,6 +12,10 @@ e2e/reports/
 e2e/rwd-runs/
 e2e-screenshot*.png
 
-# NOTE: prebuilt/cim-light.exe IS committed on purpose.
-# WDAC (enforced) blocks a local cargo rebuild, so the runnable shell binary
-# ships with the repo. Rebuild it only on a non-WDAC machine, then replace this file.
+# The runnable shell binary is NOT committed (a 17MB blob doesn't belong in git).
+# Produce it on a NON-WDAC machine with scripts\win\build-shell.bat
+# (cargo build --release → copy into prebuilt\), then copy the exe to this box.
+# WDAC (enforced) blocks a local cargo rebuild here, but running an existing/
+# copied-in unsigned exe works — so keep a prebuilt copy on disk, just not in git.
+# See prebuilt\README.md.
+prebuilt/*.exe
